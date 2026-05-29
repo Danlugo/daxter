@@ -28,4 +28,21 @@ public class XmlaConnectionStringTests
     {
         Assert.Throws<ArgumentException>(() => XmlaConnectionString.Build(workspace!));
     }
+
+    [Fact]
+    public void Build_appends_roles_and_effective_user_for_rls()
+    {
+        var conn = XmlaConnectionString.Build("WS", "Model", roles: "Manager", effectiveUserName: "u@x.com");
+        Assert.Contains("Initial Catalog=Model;", conn);
+        Assert.Contains("Roles=Manager;", conn);
+        Assert.Contains("EffectiveUserName=u@x.com;", conn);
+    }
+
+    [Fact]
+    public void Build_omits_impersonation_when_not_supplied()
+    {
+        var conn = XmlaConnectionString.Build("WS", "Model");
+        Assert.DoesNotContain("Roles=", conn);
+        Assert.DoesNotContain("EffectiveUserName=", conn);
+    }
 }

@@ -15,7 +15,11 @@ public static class XmlaConnectionString
     /// a value already starting with a scheme (e.g. <c>powerbi://</c> or
     /// <c>asazure://</c>) is used verbatim.
     /// </summary>
-    public static string Build(string workspace, string? dataset = null)
+    public static string Build(
+        string workspace,
+        string? dataset = null,
+        string? roles = null,
+        string? effectiveUserName = null)
     {
         if (string.IsNullOrWhiteSpace(workspace))
         {
@@ -32,6 +36,17 @@ public static class XmlaConnectionString
         if (!string.IsNullOrWhiteSpace(dataset))
         {
             connection += $"Initial Catalog={dataset.Trim()};";
+        }
+
+        // RLS testing: connect under a role and/or impersonate a user.
+        if (!string.IsNullOrWhiteSpace(roles))
+        {
+            connection += $"Roles={roles.Trim()};";
+        }
+
+        if (!string.IsNullOrWhiteSpace(effectiveUserName))
+        {
+            connection += $"EffectiveUserName={effectiveUserName.Trim()};";
         }
 
         return connection;

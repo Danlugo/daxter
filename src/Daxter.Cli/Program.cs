@@ -88,12 +88,13 @@ internal static class Program
         var refreshCommand = BuildRefreshCommand(connectionOptions, outputOption);
         var cacheCommand = BuildCacheCommand(connectionOptions);
         var wsCommand = BuildWorkspaceCommand(connectionOptions, outputOption);
+        var testRlsCommand = BuildTestRlsCommand(connectionOptions, outputOption);
 
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -406,6 +407,61 @@ internal static class Program
 
     private static string RowSummary(QueryResult result)
         => $"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})";
+
+    // ---- Test RLS (XMLA impersonation) ----
+
+    private static Command BuildTestRlsCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
+    {
+        var roleOption = new Option<string?>("--role") { Description = "RLS role to assume." };
+        var userOption = new Option<string?>("--user") { Description = "User to impersonate (EffectiveUserName)." };
+        var queryOption = new Option<string?>("--query", "-q")
+        {
+            Description = "DAX to run under the identity (default: show the effective identity).",
+        };
+
+        var command = new Command("test-rls", "Run a query under an RLS role / impersonated user.")
+        {
+            roleOption, userOption, queryOption, outputOption,
+        };
+        connectionOptions.AddTo(command);
+        command.SetAction((pr, ct) => RunTestRlsAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
+            pr.GetValue(roleOption), pr.GetValue(userOption), pr.GetValue(queryOption), ct));
+        return command;
+    }
+
+    private static async Task<int> RunTestRlsAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory,
+        string? role, string? user, string? query, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            if (string.IsNullOrWhiteSpace(role) && string.IsNullOrWhiteSpace(user))
+            {
+                throw new DaxterException("Provide --role and/or --user to test RLS.");
+            }
+
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            var factory = new AdomdXmlaSessionFactory(config, BuildTokenProvider(config), role, user);
+
+            using var session = await factory.CreateAsync(ct);
+            var dax = string.IsNullOrWhiteSpace(query)
+                ? "EVALUATE ROW(\"EffectiveUser\", USERPRINCIPALNAME(), \"UserName\", USERNAME())"
+                : query;
+
+            var result = session.Execute(dax);
+            Console.Error.WriteLine($"Under role='{role ?? "-"}' user='{user ?? "-"}':");
+            Console.Out.Write(formatter.Format(result));
+            Console.Error.WriteLine(RowSummary(result));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
 
     // ---- Workspace inventory (REST) ----
 

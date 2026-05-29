@@ -13,16 +13,25 @@ public sealed class AdomdXmlaSessionFactory : IXmlaSessionFactory
 {
     private readonly DaxterConfig _config;
     private readonly ITokenProvider _tokenProvider;
+    private readonly string? _roles;
+    private readonly string? _effectiveUserName;
 
-    public AdomdXmlaSessionFactory(DaxterConfig config, ITokenProvider tokenProvider)
+    public AdomdXmlaSessionFactory(
+        DaxterConfig config,
+        ITokenProvider tokenProvider,
+        string? roles = null,
+        string? effectiveUserName = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
+        _roles = roles;
+        _effectiveUserName = effectiveUserName;
     }
 
     public async Task<IXmlaSession> CreateAsync(CancellationToken cancellationToken = default)
     {
-        var connectionString = XmlaConnectionString.Build(_config.Workspace, _config.Dataset);
+        var connectionString = XmlaConnectionString.Build(
+            _config.Workspace, _config.Dataset, _roles, _effectiveUserName);
         var token = await _tokenProvider.GetTokenAsync(cancellationToken);
 
         var connection = new AdomdConnection(connectionString)

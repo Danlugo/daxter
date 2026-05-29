@@ -21,6 +21,9 @@ Targeting **v1.0.0** (first public release). Implemented so far:
 - **Workspace module** (REST) — `ws ls` (workspaces + group ids), `ws datasets`,
   `ws reports`, `ws lineage` (report → dataset), `ws permissions` (workspace or
   `--dataset`), `ws gateways`, `ws datasources`.
+- **Test module** — `test-rls --role <r> --user <upn> [-q DAX]` runs a query under an
+  RLS role / impersonated identity (XMLA `Roles` + `EffectiveUserName`). Requires the
+  connecting identity to be a workspace/model admin.
 - **Foundations** — environment profiles (`--env` / `DAXTER_ENV` →
   `DAXTER_WORKSPACE_<ENV>`), `env ls`; service-principal and device-code auth via MSAL
   with a persisted token cache.
