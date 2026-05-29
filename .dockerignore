@@ -1,0 +1,16 @@
+# Build outputs
+**/bin/
+**/obj/
+# VCS & IDE
+.git/
+.gitignore
+.vs/
+.vscode/
+*.user
+# Local secrets / env
+.env
+*.env
+!.env.example
+# Docs & scratch (not needed in the image)
+*.md
+artifacts/

@@ -1,0 +1,19 @@
+# .NET build outputs (scoped so the top-level bin/daxter wrapper stays tracked)
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
+artifacts/
+*.tar.gz
+
+# Secrets — never commit
+.env
+*.env
+!.env.example
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store

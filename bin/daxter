@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# DAXter wrapper — runs the Docker image with sensible defaults:
+#   * persists the MSAL token cache in a named volume (sign in once)
+#   * mounts the current directory at /work so `-f query.dax` resolves
+#   * loads ./.env when present and passes through any DAXTER_* env vars
+#   * attaches a TTY when interactive (needed for `daxter login`)
+#
+# Usage:  ./bin/daxter <command> [args]
+#   ./bin/daxter login
+#   ./bin/daxter query 'EVALUATE TOPN(10, Sales)' -o csv
+#   ./bin/daxter query -f report.dax
+#   ./bin/daxter ls
+set -euo pipefail
+
+IMAGE="${DAXTER_IMAGE:-daxter:latest}"
+CACHE_VOLUME="${DAXTER_CACHE_VOLUME:-daxter-tokens}"
+
+run_args=(--rm)
+
+# Interactive TTY only when attached to a terminal (device-code login).
+if [ -t 0 ] && [ -t 1 ]; then
+  run_args+=(-it)
+fi
+
+# Persist tokens across runs; mount cwd for query files.
+run_args+=(-v "${CACHE_VOLUME}:/home/daxter/.daxter")
+run_args+=(-v "${PWD}:/work" -w /work)
+
+# Load ./.env if present.
+if [ -f .env ]; then
+  run_args+=(--env-file .env)
+fi
+
+# Pass through any DAXTER_* variables already exported in the shell.
+while IFS='=' read -r name _; do
+  case "${name}" in
+    DAXTER_*) run_args+=(-e "${name}") ;;
+  esac
+done < <(env)
+
+exec docker run "${run_args[@]}" "${IMAGE}" "$@"
