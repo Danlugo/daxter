@@ -4,9 +4,10 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-05-29
 
-Targeting **v1.0.0** (first public release). Implemented so far:
+First public release — a cross-platform Power BI Service CLI covering query, model
+metadata, maintenance, inventory, RLS testing, and deployment pipelines.
 
 ### Added
 - **Query module** — `query` (DAX/MDX), `dmv` ($SYSTEM), `ls` (tables); output as
@@ -24,6 +25,8 @@ Targeting **v1.0.0** (first public release). Implemented so far:
 - **Test module** — `test-rls --role <r> --user <upn> [-q DAX]` runs a query under an
   RLS role / impersonated identity (XMLA `Roles` + `EffectiveUserName`). Requires the
   connecting identity to be a workspace/model admin.
+- **Pipeline module** (REST) — `pipeline ls` / `stages` (env → workspace mapping) /
+  `operations` (deployment history).
 - **Foundations** — environment profiles (`--env` / `DAXTER_ENV` →
   `DAXTER_WORKSPACE_<ENV>`), `env ls`; service-principal and device-code auth via MSAL
   with a persisted token cache.
@@ -35,10 +38,9 @@ Targeting **v1.0.0** (first public release). Implemented so far:
 - OAuth token injection (no passwords in connection strings); secrets via `.env`
   (gitignored), never in the image; non-root container.
 
-## Planned
+## Planned (post-1.0)
 
-- **v1.1 — Ops:** `refresh` (model/table/partitions newest-first), `cache clear`,
-  refresh history (with `--dry-run` / `--yes`).
-- **v1.2 — Workspace:** REST inventory, lineage, permissions, gateways.
-- **v1.3 — Export & diff:** model `.bim`/TMDL export, model diff (TOM).
-- **Later:** test-RLS, deployment-pipeline rules, tenant audit, model editing.
+- TMDL folder export (in addition to `.bim`).
+- Deployment-pipeline parameter/datasource *rules* detail (beyond stages).
+- Tenant-wide inventory & audit (Scanner/Admin API) — needs a Fabric admin identity.
+- Model editing (create/alter/delete measures, tables, roles) — write, opt-in.

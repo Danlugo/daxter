@@ -89,12 +89,13 @@ internal static class Program
         var cacheCommand = BuildCacheCommand(connectionOptions);
         var wsCommand = BuildWorkspaceCommand(connectionOptions, outputOption);
         var testRlsCommand = BuildTestRlsCommand(connectionOptions, outputOption);
+        var pipelineCommand = BuildPipelineCommand(connectionOptions, outputOption);
 
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand, testRlsCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -407,6 +408,41 @@ internal static class Program
 
     private static string RowSummary(QueryResult result)
         => $"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})";
+
+    // ---- Deployment pipelines (REST) ----
+
+    private static Command BuildPipelineCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
+    {
+        var pipelineOption = new Option<string?>("--pipeline") { Description = "Deployment pipeline id." };
+
+        var ls = new Command("ls", "List deployment pipelines.") { outputOption };
+        connectionOptions.AddTo(ls);
+        ls.SetAction((pr, ct) => RunRestQueryAsync(() => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption), (rest, _, c) => rest.PipelinesAsync(c), ct));
+
+        var stages = new Command("stages", "List a pipeline's stages (dev/test/prod → workspace).")
+        {
+            pipelineOption, outputOption,
+        };
+        connectionOptions.AddTo(stages);
+        stages.SetAction((pr, ct) => RunRestQueryAsync(() => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption),
+            (rest, _, c) => rest.PipelineStagesAsync(RequireOption(pr, pipelineOption, "--pipeline"), c), ct));
+
+        var operations = new Command("operations", "List a pipeline's deployment history.")
+        {
+            pipelineOption, outputOption,
+        };
+        connectionOptions.AddTo(operations);
+        operations.SetAction((pr, ct) => RunRestQueryAsync(() => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption),
+            (rest, _, c) => rest.PipelineOperationsAsync(RequireOption(pr, pipelineOption, "--pipeline"), c), ct));
+
+        return new Command("pipeline", "Deployment pipelines: stages (env→workspace mapping) and history.")
+        {
+            ls, stages, operations,
+        };
+    }
 
     // ---- Test RLS (XMLA impersonation) ----
 

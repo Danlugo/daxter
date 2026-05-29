@@ -95,6 +95,18 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
         => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
 
+    // ---- deployment pipelines (the dev/qa/prod stages and their workspaces) ----
+
+    public async Task<QueryResult> PipelinesAsync(CancellationToken ct = default)
+        => ToTable(await GetAsync("pipelines", ct), "id", "displayName");
+
+    public async Task<QueryResult> PipelineStagesAsync(string pipelineId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"pipelines/{pipelineId}/stages", ct), "order", "workspaceId", "workspaceName");
+
+    public async Task<QueryResult> PipelineOperationsAsync(string pipelineId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"pipelines/{pipelineId}/operations", ct),
+            "id", "type", "status", "executionStartTime");
+
     public async Task<QueryResult> DatasourcesAsync(string groupId, string datasetId, CancellationToken ct = default)
         => ToTable(await GetAsync($"groups/{groupId}/datasets/{datasetId}/datasources", ct),
             "datasourceType", "datasourceId", "gatewayId");

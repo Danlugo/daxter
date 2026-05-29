@@ -20,7 +20,11 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 | Module | Commands |
 |--------|----------|
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
-| **Model** | `model measures`, `measure`, `mcode`, `parameters`, `partitions`, `rls` |
+| **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
+| **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
+| **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
+| **Test** | `test-rls --role/--user` (XMLA impersonation) |
+| **Pipeline** | `pipeline ls/stages/operations` (deployment pipelines) |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
@@ -103,6 +107,47 @@ $ ./bin/daxter env ls                              # configured profiles (* = ac
   qa
   prod
 $ ./bin/daxter model measures --env qa             # same command, QA workspace
+```
+
+### Maintenance / Ops (`refresh`, `cache`)
+
+```console
+$ ./bin/daxter refresh history --top 5                # recent refreshes (REST)
+$ ./bin/daxter refresh model --dry-run                # preview the TMSL, run nothing
+$ ./bin/daxter refresh partitions --table Sales --order newest-first --yes
+$ ./bin/daxter refresh trigger --yes                  # REST refresh (no XMLA write needed)
+$ ./bin/daxter cache clear --yes                      # XMLA ClearCache
+```
+
+Mutating ops require `--yes`, support `--dry-run`, and refuse PROD-looking targets
+without `--force`.
+
+### Workspace inventory (`ws` — REST)
+
+```console
+$ ./bin/daxter ws ls                                  # workspaces + group ids
+$ ./bin/daxter ws datasets                            # datasets in the workspace
+$ ./bin/daxter ws reports                             # reports
+$ ./bin/daxter ws lineage                             # report → dataset
+$ ./bin/daxter ws permissions --dataset 'Sales'       # who has access (or workspace-wide)
+$ ./bin/daxter ws datasources --dataset 'Sales'       # data sources
+$ ./bin/daxter ws gateways                             # gateways
+```
+
+### Export, diff & RLS testing
+
+```console
+$ ./bin/daxter model export --out model.bim           # save-as .bim (TOM)
+$ ./bin/daxter model diff 'Sales (Prod)'              # measure differences vs another model
+$ ./bin/daxter test-rls --role 'Manager' --user u@x.com   # query under an identity
+```
+
+### Deployment pipelines (`pipeline`)
+
+```console
+$ ./bin/daxter pipeline ls                             # deployment pipelines
+$ ./bin/daxter pipeline stages --pipeline <id>         # dev/test/prod → workspace
+$ ./bin/daxter pipeline operations --pipeline <id>     # deployment history
 ```
 
 ### Output formats & piping
@@ -255,8 +300,14 @@ Set `DAXTER_WORKSPACE` to the workspace name (e.g. `Sales Analytics`) and
 
 ## Limitations
 
-- Read-oriented querying (DAX/MDX/DMV). Model edits (TOM) are out of scope for v1.
-- The workspace must expose an XMLA endpoint (Premium/PPU/Fabric). Pro datasets do not.
+- Query, metadata, maintenance (refresh/cache), and inventory are supported. **Model
+  editing** (create/alter/delete measures, tables, roles) is intentionally out of scope.
+- The workspace must expose an XMLA endpoint (Premium/PPU/Fabric). Pro datasets do not
+  (REST commands like `ws`/`refresh history` still work on Pro).
+- TMSL refresh / `cache clear` need the XMLA endpoint set to **Read/Write**; `refresh
+  trigger` (REST) works with read-only XMLA.
+- `test-rls` impersonation requires the connecting identity to be a workspace/model admin.
+- Tenant-wide audit (Scanner/Admin API) requires a Fabric admin identity — not included.
 - Interactive `login` needs a TTY (`docker run -it`); the wrapper handles this.
 
 ## Project layout
