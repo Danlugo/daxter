@@ -75,7 +75,7 @@ daxter admin inventory | scan | activity | orphans  # 20 (optional)
 - **Phase 1 — Model metadata (read, XMLA):** ✅ DONE — measures+expr (#6), M code (#7), parameters (#8), RLS settings (#9), partitions/last-refresh (#10 XMLA half). Validated live against a Premium workspace.
 - **Phase 2 — Maintenance:** ✅ DONE — refresh model/table (#11), partition newest-first (#12), clear cache (#13), refresh trigger + history via REST (#10 REST half). `--dry-run`/`--yes`/`--force` rails. Validated live (history + dry-run).
 - **Phase 3 — REST inventory:** ✅ DONE — `ws ls/datasets/reports/lineage/permissions/gateways/datasources`. Validated live (lineage + reports). Resolves group id #3 (REST half).
-- **Phase 4 — Export & diff (TOM):** save-as .bim (#14), model diff (#15). New AMO package.
+- **Phase 4 — Export & diff:** ✅ DONE — `model export` (.bim via TOM, validated live on Linux), `model diff` (measure differences via DMV). Added Microsoft.AnalysisServices (AMO/TOM).
 - **Phase 5 — Test RLS (#16).** Validate SP impersonation rights first.
 - **Phase 6 — Optional:** pipeline rules (#19), Admin/Scanner inventory & audit (#20).
 - **Deferred — Model editing (#21).**

@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AnalysisServices.AdomdClient" Version="19.114.0" />
+    <PackageReference Include="Microsoft.AnalysisServices" Version="19.114.0" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.84.1" />
     <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.84.1" />
     <PackageReference Include="Spectre.Console" Version="0.55.2" />

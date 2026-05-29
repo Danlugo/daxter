@@ -195,10 +195,90 @@ internal static class Program
             () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
             pr.GetValue(roleOption), ct));
 
-        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions).")
+        var outFileOption = new Option<string?>("--out") { Description = "Write to this file instead of stdout." };
+        var export = new Command("export", "Export the model definition as .bim (TOM).") { outFileOption };
+        connectionOptions.AddTo(export);
+        export.SetAction((pr, ct) => RunExportAsync(
+            () => connectionOptions.Resolve(pr), pr.GetValue(outFileOption), ct));
+
+        var otherArg = new Argument<string?>("other")
         {
-            measures, measure, mcode, parameters, partitions, rls,
+            Description = "The other dataset to compare against (same workspace).",
+            Arity = ArgumentArity.ZeroOrOne,
         };
+        var diff = new Command("diff", "Compare measures between this model and another.") { otherArg, outputOption };
+        connectionOptions.AddTo(diff);
+        diff.SetAction((pr, ct) => RunDiffAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
+            RequireArg(pr, otherArg, "other dataset"), ct));
+
+        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions, export, diff).")
+        {
+            measures, measure, mcode, parameters, partitions, rls, export, diff,
+        };
+    }
+
+    private static async Task<int> RunExportAsync(
+        Func<DaxterConfig> configFactory, string? outFile, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var token = await BuildTokenProvider(config).GetTokenAsync(ct);
+            var bim = new Daxter.Core.Export.ModelExportService(config, token).ExportBim();
+
+            if (string.IsNullOrWhiteSpace(outFile))
+            {
+                Console.Out.WriteLine(bim);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(outFile, bim, ct);
+                Console.Error.WriteLine($"Wrote {bim.Length:N0} bytes to {outFile}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunDiffAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory, string other, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+
+            var otherConfig = new DaxterConfig
+            {
+                Workspace = config.Workspace,
+                Dataset = other,
+                TenantId = config.TenantId,
+                ClientId = config.ClientId,
+                ClientSecret = config.ClientSecret,
+                AuthMode = config.AuthMode,
+                Environment = config.Environment,
+            };
+
+            using var left = await BuildSessionFactory(config).CreateAsync(ct);
+            using var right = await BuildSessionFactory(otherConfig).CreateAsync(ct);
+            var diff = ModelDiffService.DiffMeasures(left, right);
+
+            Console.Error.WriteLine($"Comparing measures: '{config.Dataset}' (left) vs '{other}' (right)");
+            Console.Out.Write(formatter.Format(diff));
+            Console.Error.WriteLine(RowSummary(diff));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
     }
 
     private static Command BuildEnvCommand()

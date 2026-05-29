@@ -12,7 +12,8 @@ Targeting **v1.0.0** (first public release). Implemented so far:
 - **Query module** — `query` (DAX/MDX), `dmv` ($SYSTEM), `ls` (tables); output as
   table, CSV, or JSON; query text inline or from a file.
 - **Model module** — `model measures` / `measure` / `mcode` / `parameters` /
-  `partitions` (with last-refresh times) / `rls` (roles, filters, members).
+  `partitions` (with last-refresh times) / `rls` (roles, filters, members) /
+  `export` (.bim via TOM) / `diff` (measure differences between two models).
 - **Ops module** — `refresh model` / `table` / `partitions` (newest-first, TMSL),
   `refresh trigger` (REST), `refresh history` (REST), `cache clear` (XMLA). Mutating
   ops require `--yes`, support `--dry-run`, and refuse PROD-looking targets without
