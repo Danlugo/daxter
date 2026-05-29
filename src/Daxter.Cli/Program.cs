@@ -4,8 +4,10 @@ using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
 using Daxter.Core.Formatting;
+using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
+using Daxter.Core.Rest;
 
 namespace Daxter.Cli;
 
@@ -83,11 +85,14 @@ internal static class Program
 
         var modelCommand = BuildModelCommand(connectionOptions, outputOption);
         var envCommand = BuildEnvCommand();
+        var refreshCommand = BuildRefreshCommand(connectionOptions, outputOption);
+        var cacheCommand = BuildCacheCommand(connectionOptions);
 
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, and maintenance over XMLA.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
+            refreshCommand, cacheCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -321,11 +326,189 @@ internal static class Program
     private static string RowSummary(QueryResult result)
         => $"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})";
 
+    private static ITokenProvider BuildTokenProvider(DaxterConfig config)
+        => new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
+
     private static IXmlaSessionFactory BuildSessionFactory(DaxterConfig config)
+        => new AdomdXmlaSessionFactory(config, BuildTokenProvider(config));
+
+    // ---- Ops: refresh / cache ----
+
+    private static Command BuildRefreshCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
     {
-        var provider = new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
-        return new AdomdXmlaSessionFactory(config, provider);
+        var tableOption = new Option<string?>("--table", "-t") { Description = "Table name." };
+        var typeOption = new Option<string?>("--type") { Description = "Refresh type: full|automatic|calculate|dataOnly|clearValues." };
+        var orderOption = new Option<string?>("--order") { Description = "Partition order: newest-first (default) | oldest-first." };
+        var dryRun = new Option<bool>("--dry-run") { Description = "Print the command without executing." };
+        var yes = new Option<bool>("--yes") { Description = "Execute the operation (required for mutations)." };
+        var force = new Option<bool>("--force") { Description = "Allow execution against a PROD-looking target." };
+        var topOption = new Option<int>("--top") { Description = "Rows of refresh history.", DefaultValueFactory = _ => 10 };
+
+        var model = new Command("model", "Refresh the whole model (TMSL).") { typeOption, dryRun, yes, force };
+        connectionOptions.AddTo(model);
+        model.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+            svc => svc.BuildModelRefresh(MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var table = new Command("table", "Refresh one table (TMSL).") { tableOption, typeOption, dryRun, yes, force };
+        connectionOptions.AddTo(table);
+        table.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+            svc => svc.BuildTableRefresh(RequireOption(pr, tableOption, "--table"),
+                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var partitions = new Command("partitions", "Refresh a table's partitions, newest-first (TMSL).")
+        {
+            tableOption, orderOption, typeOption, dryRun, yes, force,
+        };
+        connectionOptions.AddTo(partitions);
+        partitions.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+            svc => svc.BuildPartitionsRefresh(RequireOption(pr, tableOption, "--table"),
+                ParseOrder(pr.GetValue(orderOption)),
+                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force };
+        connectionOptions.AddTo(trigger);
+        trigger.SetAction((pr, ct) => RunRefreshTriggerAsync(() => connectionOptions.Resolve(pr),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var history = new Command("history", "Show recent refresh history (REST).") { topOption, outputOption };
+        connectionOptions.AddTo(history);
+        history.SetAction((pr, ct) => RunRefreshHistoryAsync(() => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption), pr.GetValue(topOption), ct));
+
+        return new Command("refresh", "Refresh models / tables / partitions; view history.")
+        {
+            model, table, partitions, trigger, history,
+        };
     }
+
+    private static Command BuildCacheCommand(ConnectionOptions connectionOptions)
+    {
+        var dryRun = new Option<bool>("--dry-run") { Description = "Print the command without executing." };
+        var yes = new Option<bool>("--yes") { Description = "Execute (required)." };
+        var force = new Option<bool>("--force") { Description = "Allow execution against a PROD-looking target." };
+
+        var clear = new Command("clear", "Clear the model's data cache (XMLA ClearCache).") { dryRun, yes, force };
+        connectionOptions.AddTo(clear);
+        clear.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+            svc => svc.BuildClearCache(),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        return new Command("cache", "Cache operations.") { clear };
+    }
+
+    private static async Task<int> RunTmslAsync(
+        Func<DaxterConfig> configFactory,
+        Func<MaintenanceService, string> build,
+        bool dryRun, bool yes, bool force, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var factory = BuildSessionFactory(config);
+
+            using var session = await factory.CreateAsync(ct);
+            var service = new MaintenanceService(session, config.Dataset!);
+            var command = build(service);
+
+            return ApplySafety(config, command, dryRun, yes, force, () => service.Execute(command));
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunRefreshTriggerAsync(
+        Func<DaxterConfig> configFactory, bool dryRun, bool yes, bool force, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            var description = $"POST groups/{groupId}/datasets/{datasetId}/refreshes (full, REST)";
+
+            return ApplySafety(config, description, dryRun, yes, force,
+                () => rest.TriggerRefreshAsync(groupId, datasetId, ct).GetAwaiter().GetResult(),
+                successMessage: "Refresh triggered (async). Check `daxter refresh history`.");
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunRefreshHistoryAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory, int top, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            var history = await rest.RefreshHistoryAsync(groupId, datasetId, top, ct);
+
+            Console.Out.Write(formatter.Format(history));
+            Console.Error.WriteLine(RowSummary(history));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static int ApplySafety(
+        DaxterConfig config, string command, bool dryRun, bool yes, bool force,
+        Action execute, string successMessage = "Done.")
+    {
+        if (dryRun)
+        {
+            Console.Error.WriteLine("-- dry run; not executed --");
+            Console.Out.WriteLine(command);
+            return 0;
+        }
+
+        if (!yes)
+        {
+            Console.Out.WriteLine(command);
+            Console.Error.WriteLine("Refusing to execute without --yes. Re-run with --yes (or --dry-run to preview).");
+            return 0;
+        }
+
+        if (LooksLikeProd(config) && !force)
+        {
+            Console.Error.WriteLine(
+                $"daxter: target looks like PRODUCTION ('{config.Workspace}'). Re-run with --force to proceed.");
+            return 1;
+        }
+
+        execute();
+        Console.Error.WriteLine(successMessage);
+        return 0;
+    }
+
+    private static bool LooksLikeProd(DaxterConfig config)
+        => string.Equals(config.Environment, "prod", StringComparison.OrdinalIgnoreCase)
+           || config.Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase);
+
+    private static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "newest-first" or "newest" => PartitionOrder.NewestFirst,
+        "oldest-first" or "oldest" => PartitionOrder.OldestFirst,
+        _ => throw new DaxterException($"Unknown --order '{value}'. Use newest-first or oldest-first."),
+    };
 
     private static string QueryTextFrom(
         ParseResult parseResult,

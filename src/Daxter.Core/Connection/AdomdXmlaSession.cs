@@ -50,5 +50,23 @@ public sealed class AdomdXmlaSession : IXmlaSession
         }
     }
 
+    public void ExecuteCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            throw new DaxterException("Command text is empty.");
+        }
+
+        try
+        {
+            using var cmd = new AdomdCommand(command, _connection);
+            cmd.ExecuteNonQuery();
+        }
+        catch (AdomdException ex)
+        {
+            throw new DaxterException($"Command failed: {ex.Message}", ex);
+        }
+    }
+
     public void Dispose() => _connection.Dispose();
 }

@@ -73,7 +73,7 @@ daxter admin inventory | scan | activity | orphans  # 20 (optional)
 
 - **Phase 0 — Foundations:** ✅ DONE — environment profiles (#1), workspace switch (#2), dataset-id resolution (#3 XMLA half).
 - **Phase 1 — Model metadata (read, XMLA):** ✅ DONE — measures+expr (#6), M code (#7), parameters (#8), RLS settings (#9), partitions/last-refresh (#10 XMLA half). Validated live against a Premium workspace.
-- **Phase 2 — Maintenance (NEXT):** refresh model/table (#11), partition newest-first (#12), clear cache (#13), refresh history (#10 REST half). Write-safety rails required.
+- **Phase 2 — Maintenance:** ✅ DONE — refresh model/table (#11), partition newest-first (#12), clear cache (#13), refresh trigger + history via REST (#10 REST half). `--dry-run`/`--yes`/`--force` rails. Validated live (history + dry-run).
 - **Phase 3 — REST inventory:** `ws` group (#2 list, lineage), permissions (#17), gateways (#18). New REST client.
 - **Phase 4 — Export & diff (TOM):** save-as .bim (#14), model diff (#15). New AMO package.
 - **Phase 5 — Test RLS (#16).** Validate SP impersonation rights first.

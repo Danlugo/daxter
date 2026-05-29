@@ -15,11 +15,15 @@ public class ModelMetadataServiceTests
 
         public FakeXmlaSession(Func<string, QueryResult> handler) => _handler = handler;
 
+        public List<string> Commands { get; } = [];
+
         public QueryResult Execute(string query)
         {
             Queries.Add(query);
             return _handler(query);
         }
+
+        public void ExecuteCommand(string command) => Commands.Add(command);
 
         public void Dispose() { }
     }

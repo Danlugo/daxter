@@ -7,4 +7,10 @@ public interface IXmlaSession : IDisposable
 {
     /// <summary>Executes a DAX, MDX, or DMV query and materializes the result.</summary>
     QueryResult Execute(string query);
+
+    /// <summary>
+    /// Executes a command that returns no rows (TMSL refresh, XMLA ClearCache, etc.)
+    /// via <c>ExecuteNonQuery</c>.
+    /// </summary>
+    void ExecuteCommand(string command);
 }
