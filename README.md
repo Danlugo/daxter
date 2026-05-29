@@ -26,6 +26,40 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
+## Demo
+
+```console
+$ ./bin/daxter login
+To sign in, open https://microsoft.com/devicelogin and enter code F7X2K9Q20.
+Signed in. Token valid until 2026-05-29 23:10:00Z.
+
+$ ./bin/daxter ls
+╭───────────────╮
+│ Table         │
+├───────────────┤
+│ Date          │
+│ Product       │
+│ Sales         │
+╰───────────────╯
+(3 rows)
+
+$ ./bin/daxter query "EVALUATE TOPN(3, Product)" -o csv
+ProductId,ProductName
+1,Widget
+2,Gadget
+3,Gizmo
+(3 rows)
+
+$ ./bin/daxter model partitions --table Sales
+╭──────────┬───────┬──────┬─────────────────────╮
+│ Name     │ State │ Mode │ RefreshedTime       │
+├──────────┼───────┼──────┼─────────────────────┤
+│ 2026Q1   │ 3     │ 0    │ 2026-05-29 17:57:59 │
+│ 2026Q2   │ 1     │ 0    │ 2026-05-29 17:42:50 │
+╰──────────┴───────┴──────┴─────────────────────╯
+(2 rows)
+```
+
 ## Why a container
 
 ADOMD.NET's built-in interactive login and TCP connectivity are Windows-only. DAXter
