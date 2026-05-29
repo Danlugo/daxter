@@ -1,0 +1,100 @@
+using System.ComponentModel;
+using ModelContextProtocol.Server;
+
+namespace Daxter.Cli.Mcp;
+
+/// <summary>
+/// Read-only MCP tools over the Power BI Service. Every tool accepts optional
+/// <c>workspace</c>/<c>dataset</c> arguments that override the server's env config.
+/// Mutating operations (refresh/cache) are intentionally not exposed in v1.
+/// </summary>
+[McpServerToolType]
+public static class DaxterTools
+{
+    [McpServerTool(Name = "daxter_query"), Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON.")]
+    public static Task<string> Query(
+        [Description("The DAX or MDX query, e.g. EVALUATE TOPN(10, Sales)")] string query,
+        [Description("Workspace name (optional; defaults to server config)")] string? workspace = null,
+        [Description("Dataset / model name (optional; defaults to server config)")] string? dataset = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.XmlaAsync(workspace, dataset, s => s.Execute(query), ct);
+
+    [McpServerTool(Name = "daxter_dmv"), Description("Run a DMV ($SYSTEM) query, e.g. SELECT * FROM $SYSTEM.TMSCHEMA_TABLES.")]
+    public static Task<string> Dmv(
+        [Description("A DMV SELECT statement.")] string statement,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.XmlaAsync(workspace, dataset, s => s.Execute(statement), ct);
+
+    [McpServerTool(Name = "daxter_list_tables"), Description("List the tables in a semantic model.")]
+    public static Task<string> ListTables(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.XmlaAsync(workspace, dataset,
+            s => s.Execute("SELECT [Name] AS [Table] FROM $SYSTEM.TMSCHEMA_TABLES ORDER BY [Name]"), ct);
+
+    [McpServerTool(Name = "daxter_measures"), Description("List measures in a model. Set withExpression=true to include the DAX.")]
+    public static Task<string> Measures(
+        [Description("Include each measure's DAX expression.")] bool withExpression = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Measures(withExpression), ct);
+
+    [McpServerTool(Name = "daxter_measure"), Description("Show one measure's full definition (name, type, folder, format, DAX).")]
+    public static Task<string> Measure(
+        [Description("Measure name.")] string name,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Measure(name), ct);
+
+    [McpServerTool(Name = "daxter_mcode"), Description("Show the Power Query (M) code for a table's partitions.")]
+    public static Task<string> MCode(
+        [Description("Table name.")] string table,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.MCode(table), ct);
+
+    [McpServerTool(Name = "daxter_parameters"), Description("List the model's shared M expressions / parameters.")]
+    public static Task<string> Parameters(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Parameters(), ct);
+
+    [McpServerTool(Name = "daxter_partitions"), Description("List partitions and last-refresh times, optionally for one table.")]
+    public static Task<string> Partitions(
+        [Description("Table name (optional; all partitions if omitted).")] string? table = null,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Partitions(table), ct);
+
+    [McpServerTool(Name = "daxter_rls"), Description("List RLS roles in a model.")]
+    public static Task<string> Rls(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Roles(), ct);
+
+    [McpServerTool(Name = "daxter_diff_measures"), Description("Compare measures between the configured model and another model in the same workspace.")]
+    public static Task<string> DiffMeasures(
+        [Description("The other dataset/model name to compare against.")] string other,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.DiffMeasuresAsync(workspace, dataset, other, ct);
+
+    [McpServerTool(Name = "daxter_refresh_history"), Description("Show recent refresh history (status, start/end) for a model via REST.")]
+    public static Task<string> RefreshHistory(
+        [Description("Number of recent refreshes (default 10).")] int top = 10,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, cfg.Dataset!, c);
+            return await rest.RefreshHistoryAsync(groupId, datasetId, top, c);
+        }, ct);
+
+    [McpServerTool(Name = "daxter_workspaces"), Description("List Power BI workspaces (with their group ids) the identity can see.")]
+    public static Task<string> Workspaces(CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.GroupsAsync(c), ct);
+
+    [McpServerTool(Name = "daxter_datasets"), Description("List datasets in a workspace.")]
+    public static Task<string> Datasets(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.DatasetsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
+    [McpServerTool(Name = "daxter_reports"), Description("List reports in a workspace.")]
+    public static Task<string> Reports(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.ReportsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
+    [McpServerTool(Name = "daxter_lineage"), Description("Report → dataset lineage for a workspace.")]
+    public static Task<string> Lineage(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+}

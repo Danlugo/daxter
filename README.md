@@ -272,6 +272,32 @@ make load           # docker load < daxter-image.tar.gz
 
 Or push to a registry: `docker tag daxter:latest <registry>/daxter:1.0 && docker push …`.
 
+## MCP server
+
+The same image doubles as a **Model Context Protocol** server (stdio) via the `mcp`
+subcommand — so Claude Desktop, Cursor, or Claude Code can query and inspect your
+models directly. Add to `claude_desktop_config.json`:
+
+```jsonc
+"mcpServers": {
+  "daxter": {
+    "command": "/usr/local/bin/docker",
+    "args": ["run", "-i", "--rm",
+             "--env-file", "/path/to/Daxter/.env",
+             "-v", "daxter-tokens:/home/daxter/.daxter",
+             "daxter:latest", "mcp"]
+  }
+}
+```
+
+Requires Docker running and a service-principal `.env` (interactive auth isn't viable in
+a headless server). Exposes **read-only** tools (`daxter_query`, `daxter_dmv`,
+`daxter_list_tables`, `daxter_measures`, `daxter_measure`, `daxter_mcode`,
+`daxter_parameters`, `daxter_partitions`, `daxter_rls`, `daxter_diff_measures`,
+`daxter_refresh_history`, `daxter_workspaces`, `daxter_datasets`, `daxter_reports`,
+`daxter_lineage`) — each accepting optional `workspace`/`dataset` arguments. Results are
+JSON, capped to 1,000 rows. Mutating operations are intentionally excluded.
+
 ## How it works
 
 | Layer | Choice |

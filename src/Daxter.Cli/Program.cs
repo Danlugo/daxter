@@ -91,11 +91,14 @@ internal static class Program
         var testRlsCommand = BuildTestRlsCommand(connectionOptions, outputOption);
         var pipelineCommand = BuildPipelineCommand(connectionOptions, outputOption);
 
+        var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
+        mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
+
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, mcpCommand,
         };
 
         return await root.Parse(args).InvokeAsync();

@@ -4,6 +4,17 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-29
+
+### Added
+- **MCP server** — the image doubles as a Model Context Protocol server (`daxter mcp`,
+  stdio). 15 read-only tools (`daxter_query`, `daxter_dmv`, `daxter_list_tables`,
+  `daxter_measures`, `daxter_measure`, `daxter_mcode`, `daxter_parameters`,
+  `daxter_partitions`, `daxter_rls`, `daxter_diff_measures`, `daxter_refresh_history`,
+  `daxter_workspaces`, `daxter_datasets`, `daxter_reports`, `daxter_lineage`) with
+  optional `workspace`/`dataset` args, JSON output capped to 1,000 rows. Reuses 100% of
+  `Daxter.Core`. Logging routed to stderr to keep stdout a clean JSON-RPC channel.
+
 ## [1.0.0] - 2026-05-29
 
 First public release — a cross-platform Power BI Service CLI covering query, model
