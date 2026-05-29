@@ -4,6 +4,15 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-05-29
+
+### Added
+- **Gated MCP write tools** — `daxter_refresh` (model/table/partitions) and
+  `daxter_clear_cache`, **dry-run by default**. They execute only when `execute=true`
+  **and** the server sets `DAXTER_MCP_ALLOW_WRITES=true`; PROD-looking targets are always
+  refused. Safe for autonomous use by default.
+- MCP tool-registration tests (reflection over `DaxterTools`).
+
 ## [1.1.0] - 2026-05-29
 
 ### Added

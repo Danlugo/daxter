@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using Daxter.Core;
+using Daxter.Core.Maintenance;
 using ModelContextProtocol.Server;
 
 namespace Daxter.Cli.Mcp;
@@ -97,4 +99,35 @@ public static class DaxterTools
     public static Task<string> Lineage(string? workspace = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
+    // ---- Gated write tools (DRY-RUN by default; disabled unless DAXTER_MCP_ALLOW_WRITES=true) ----
+
+    [McpServerTool(Name = "daxter_refresh"), Description(
+        "Refresh a model/table/partitions. DRY-RUN by default (returns the TMSL without running). " +
+        "To execute, set execute=true AND the server env DAXTER_MCP_ALLOW_WRITES=true; PROD-looking targets are always blocked.")]
+    public static Task<string> Refresh(
+        [Description("Scope: model | table | partitions")] string scope = "model",
+        [Description("Table name (required for table/partitions).")] string? table = null,
+        [Description("Refresh type: full|automatic|calculate|dataOnly|clearValues")] string? type = null,
+        [Description("Partition order for scope=partitions: newest-first | oldest-first")] string? order = null,
+        [Description("Actually execute (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => scope.Trim().ToLowerInvariant() switch
+        {
+            "model" => svc.BuildModelRefresh(MaintenanceService.ParseRefreshType(type)),
+            "table" => svc.BuildTableRefresh(
+                table ?? throw new DaxterException("table is required for scope=table."),
+                MaintenanceService.ParseRefreshType(type)),
+            "partitions" => svc.BuildPartitionsRefresh(
+                table ?? throw new DaxterException("table is required for scope=partitions."),
+                DaxterToolRuntime.ParseOrder(order), MaintenanceService.ParseRefreshType(type)),
+            _ => throw new DaxterException($"Unknown scope '{scope}'. Use model | table | partitions."),
+        }, execute, ct);
+
+    [McpServerTool(Name = "daxter_clear_cache"), Description(
+        "Clear the model's data cache. DRY-RUN by default; requires execute=true AND DAXTER_MCP_ALLOW_WRITES=true.")]
+    public static Task<string> ClearCache(
+        [Description("Actually execute (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => svc.BuildClearCache(), execute, ct);
 }

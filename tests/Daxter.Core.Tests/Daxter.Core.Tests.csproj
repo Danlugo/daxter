@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Daxter.Core\Daxter.Core.csproj" />
+    <ProjectReference Include="..\..\src\Daxter.Cli\Daxter.Cli.csproj" />
   </ItemGroup>
 
 </Project>

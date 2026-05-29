@@ -296,7 +296,12 @@ a headless server). Exposes **read-only** tools (`daxter_query`, `daxter_dmv`,
 `daxter_parameters`, `daxter_partitions`, `daxter_rls`, `daxter_diff_measures`,
 `daxter_refresh_history`, `daxter_workspaces`, `daxter_datasets`, `daxter_reports`,
 `daxter_lineage`) — each accepting optional `workspace`/`dataset` arguments. Results are
-JSON, capped to 1,000 rows. Mutating operations are intentionally excluded.
+JSON, capped to 1,000 rows.
+
+Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
+default** — they only execute when `execute=true` **and** the server sets
+`DAXTER_MCP_ALLOW_WRITES=true`, and PROD-looking targets are always blocked. So the server
+is safe for autonomous use out of the box.
 
 ## How it works
 

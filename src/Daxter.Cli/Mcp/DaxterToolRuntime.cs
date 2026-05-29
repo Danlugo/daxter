@@ -1,7 +1,9 @@
+using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
 using Daxter.Core.Formatting;
+using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
@@ -52,6 +54,59 @@ internal static class DaxterToolRuntime
         using var rightSession = await right.CreateAsync(ct);
         return Format(ModelDiffService.DiffMeasures(leftSession, rightSession));
     }
+
+    /// <summary>
+    /// Gated maintenance: builds the command, returns it as a dry-run unless
+    /// <paramref name="execute"/> is set AND the server allows writes
+    /// (<c>DAXTER_MCP_ALLOW_WRITES=true</c>) AND the target is not PROD-looking.
+    /// </summary>
+    public static async Task<string> MaintenanceAsync(
+        string? workspace, string? dataset, Func<MaintenanceService, string> build, bool execute, CancellationToken ct)
+    {
+        var config = Config(workspace, dataset);
+        if (string.IsNullOrWhiteSpace(config.Dataset))
+        {
+            throw new DaxterException("A dataset is required for maintenance operations.");
+        }
+
+        var factory = new AdomdXmlaSessionFactory(config, Provider(config));
+        using var session = await factory.CreateAsync(ct);
+        var service = new MaintenanceService(session, config.Dataset!);
+        var command = build(service);
+
+        if (!execute)
+        {
+            return "DRY RUN — not executed:\n" + command;
+        }
+
+        if (!WritesAllowed())
+        {
+            return "REFUSED — writes are disabled on this MCP server. " +
+                   "Set DAXTER_MCP_ALLOW_WRITES=true to enable.\n" + command;
+        }
+
+        if (LooksLikeProd(config))
+        {
+            return $"REFUSED — '{config.Workspace}' looks like PRODUCTION; writes are blocked over MCP.\n" + command;
+        }
+
+        service.Execute(command);
+        return "EXECUTED:\n" + command;
+    }
+
+    public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "newest-first" or "newest" => PartitionOrder.NewestFirst,
+        "oldest-first" or "oldest" => PartitionOrder.OldestFirst,
+        _ => throw new DaxterException($"Unknown order '{value}'. Use newest-first or oldest-first."),
+    };
+
+    private static bool WritesAllowed()
+        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeProd(DaxterConfig config)
+        => string.Equals(config.Environment, "prod", StringComparison.OrdinalIgnoreCase)
+           || config.Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase);
 
     private static DaxterConfig Config(string? workspace, string? dataset)
         => DaxterConfig.FromEnvironment(workspace: workspace, dataset: dataset);
