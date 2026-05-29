@@ -26,30 +26,65 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
-## Demo
+## Demo — every feature
+
+All commands accept connection options (`--workspace`, `--dataset`, `--env`, `--auth`,
+`--tenant`, `--client-id`) or read them from `.env`. Results print to **stdout**; status
+and prompts go to **stderr**, so output pipes cleanly.
+
+### Authenticate
 
 ```console
+# Interactive (device code) — token is cached, so you sign in once:
 $ ./bin/daxter login
 To sign in, open https://microsoft.com/devicelogin and enter code F7X2K9Q20.
 Signed in. Token valid until 2026-05-29 23:10:00Z.
 
-$ ./bin/daxter ls
-╭───────────────╮
-│ Table         │
-├───────────────┤
-│ Date          │
-│ Product       │
-│ Sales         │
-╰───────────────╯
+# Or non-interactive (service principal) via .env:
+#   DAXTER_AUTH_MODE=service-principal
+#   DAXTER_TENANT_ID / DAXTER_CLIENT_ID / DAXTER_CLIENT_SECRET
+```
+
+### Query — DAX / MDX (`query`)
+
+```console
+$ ./bin/daxter query "EVALUATE TOPN(3, Product)"          # table (default)
+╭───────────┬─────────────╮
+│ ProductId │ ProductName │
+├───────────┼─────────────┤
+│ 1         │ Widget      │
+│ 2         │ Gadget      │
+│ 3         │ Gizmo       │
+╰───────────┴─────────────╯
 (3 rows)
 
-$ ./bin/daxter query "EVALUATE TOPN(3, Product)" -o csv
-ProductId,ProductName
-1,Widget
-2,Gadget
-3,Gizmo
-(3 rows)
+$ ./bin/daxter query "EVALUATE Product" -o csv > products.csv   # CSV to a file
+$ ./bin/daxter query "EVALUATE Product" -o json                 # JSON
+$ ./bin/daxter query -f monthly_sales.dax                       # query from a file
+```
 
+### DMV & schema (`dmv`, `ls`)
+
+```console
+$ ./bin/daxter ls                                  # tables in the model
+$ ./bin/daxter dmv 'SELECT [CATALOG_NAME] FROM $SYSTEM.DBSCHEMA_CATALOGS'   # datasets in workspace
+$ ./bin/daxter dmv 'SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLES'          # VertiPaq storage
+```
+
+### Model metadata (`model …`)
+
+```console
+$ ./bin/daxter model measures                      # all measures (name, type, folder)
+$ ./bin/daxter model measures --with-expr -o csv   # include the DAX expression
+$ ./bin/daxter model measure "Total Sales"         # one measure, full definition
+$ ./bin/daxter model mcode --table Sales           # Power Query (M) per partition
+$ ./bin/daxter model parameters                    # shared M expressions / parameters
+$ ./bin/daxter model partitions --table Sales      # partitions + last-refresh times
+$ ./bin/daxter model rls                            # RLS roles
+$ ./bin/daxter model rls --role "Regional Manager" # a role's table filters + members
+```
+
+```console
 $ ./bin/daxter model partitions --table Sales
 ╭──────────┬───────┬──────┬─────────────────────╮
 │ Name     │ State │ Mode │ RefreshedTime       │
@@ -59,6 +94,26 @@ $ ./bin/daxter model partitions --table Sales
 ╰──────────┴───────┴──────┴─────────────────────╯
 (2 rows)
 ```
+
+### Environments (`env`, `--env`)
+
+```console
+$ ./bin/daxter env ls                              # configured profiles (* = active)
+* dev
+  qa
+  prod
+$ ./bin/daxter model measures --env qa             # same command, QA workspace
+```
+
+### Output formats & piping
+
+```console
+$ ./bin/daxter query "EVALUATE Product" -o json | jq '.[].ProductName'
+$ ./bin/daxter model measures --with-expr -o csv > measures.csv
+```
+
+`-o` / `--output` accepts `table` (default), `csv`, or `json` on every query/metadata
+command.
 
 ## Why a container
 
