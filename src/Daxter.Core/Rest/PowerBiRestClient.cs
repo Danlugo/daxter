@@ -55,6 +55,50 @@ public sealed class PowerBiRestClient : IDisposable
         throw new DaxterException($"Dataset not found in workspace: {datasetName}");
     }
 
+    public async Task<QueryResult> ReportsAsync(string groupId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"groups/{groupId}/reports", ct), "id", "name", "datasetId");
+
+    /// <summary>Report → dataset lineage (dataset ids resolved to names).</summary>
+    public async Task<QueryResult> LineageAsync(string groupId, CancellationToken ct = default)
+    {
+        var datasets = await GetAsync($"groups/{groupId}/datasets", ct);
+        var idToName = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var d in Value(datasets).EnumerateArray())
+        {
+            if (d.TryGetProperty("id", out var id) && id.GetString() is { } key)
+            {
+                idToName[key] = d.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            }
+        }
+
+        var reports = await GetAsync($"groups/{groupId}/reports", ct);
+        var rows = new List<object?[]>();
+        foreach (var r in Value(reports).EnumerateArray())
+        {
+            var reportName = r.TryGetProperty("name", out var n) ? n.GetString() : null;
+            var datasetId = r.TryGetProperty("datasetId", out var d) ? d.GetString() : null;
+            var datasetName = datasetId is not null && idToName.TryGetValue(datasetId, out var nm) ? nm : datasetId;
+            rows.Add([reportName, datasetName]);
+        }
+
+        return new QueryResult(["Report", "Dataset"], rows);
+    }
+
+    public async Task<QueryResult> WorkspaceUsersAsync(string groupId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"groups/{groupId}/users", ct),
+            "displayName", "emailAddress", "groupUserAccessRight", "principalType");
+
+    public async Task<QueryResult> DatasetUsersAsync(string groupId, string datasetId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"groups/{groupId}/datasets/{datasetId}/users", ct),
+            "identifier", "principalType", "datasetUserAccessRight");
+
+    public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
+        => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
+
+    public async Task<QueryResult> DatasourcesAsync(string groupId, string datasetId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"groups/{groupId}/datasets/{datasetId}/datasources", ct),
+            "datasourceType", "datasourceId", "gatewayId");
+
     // ---- refresh ----
 
     public async Task<QueryResult> RefreshHistoryAsync(string groupId, string datasetId, int top = 10, CancellationToken ct = default)

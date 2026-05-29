@@ -17,6 +17,9 @@ Targeting **v1.0.0** (first public release). Implemented so far:
   `refresh trigger` (REST), `refresh history` (REST), `cache clear` (XMLA). Mutating
   ops require `--yes`, support `--dry-run`, and refuse PROD-looking targets without
   `--force`.
+- **Workspace module** (REST) — `ws ls` (workspaces + group ids), `ws datasets`,
+  `ws reports`, `ws lineage` (report → dataset), `ws permissions` (workspace or
+  `--dataset`), `ws gateways`, `ws datasources`.
 - **Foundations** — environment profiles (`--env` / `DAXTER_ENV` →
   `DAXTER_WORKSPACE_<ENV>`), `env ls`; service-principal and device-code auth via MSAL
   with a persisted token cache.

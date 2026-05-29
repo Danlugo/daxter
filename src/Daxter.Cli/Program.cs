@@ -87,12 +87,13 @@ internal static class Program
         var envCommand = BuildEnvCommand();
         var refreshCommand = BuildRefreshCommand(connectionOptions, outputOption);
         var cacheCommand = BuildCacheCommand(connectionOptions);
+        var wsCommand = BuildWorkspaceCommand(connectionOptions, outputOption);
 
         var root = new RootCommand(
-            "DAXter — Power BI Service CLI: query, model metadata, and maintenance over XMLA.")
+            "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand,
+            refreshCommand, cacheCommand, wsCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -325,6 +326,78 @@ internal static class Program
 
     private static string RowSummary(QueryResult result)
         => $"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})";
+
+    // ---- Workspace inventory (REST) ----
+
+    private static Command BuildWorkspaceCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
+    {
+        Command Sub(string name, string desc,
+            Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op)
+        {
+            var cmd = new Command(name, desc) { outputOption };
+            connectionOptions.AddTo(cmd);
+            cmd.SetAction((pr, ct) => RunRestQueryAsync(
+                () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption), op, ct));
+            return cmd;
+        }
+
+        var ls = Sub("ls", "List workspaces (group ids).", (rest, _, ct) => rest.GroupsAsync(ct));
+        var datasets = Sub("datasets", "List datasets in the workspace.", async (rest, cfg, ct) =>
+            await rest.DatasetsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
+        var reports = Sub("reports", "List reports in the workspace.", async (rest, cfg, ct) =>
+            await rest.ReportsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
+        var lineage = Sub("lineage", "Report → dataset lineage.", async (rest, cfg, ct) =>
+            await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
+        var gateways = Sub("gateways", "List gateways (needs gateway admin).", (rest, _, ct) => rest.GatewaysAsync(ct));
+        var permissions = Sub("permissions", "Who has access (workspace, or a model via --dataset).",
+            async (rest, cfg, ct) =>
+            {
+                var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, ct);
+                if (string.IsNullOrWhiteSpace(cfg.Dataset))
+                {
+                    return await rest.WorkspaceUsersAsync(groupId, ct);
+                }
+
+                var datasetId = await rest.ResolveDatasetIdAsync(groupId, cfg.Dataset!, ct);
+                return await rest.DatasetUsersAsync(groupId, datasetId, ct);
+            });
+        var datasources = Sub("datasources", "Data sources for a model (requires --dataset).",
+            async (rest, cfg, ct) =>
+            {
+                RequireDataset(cfg);
+                var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, ct);
+                var datasetId = await rest.ResolveDatasetIdAsync(groupId, cfg.Dataset!, ct);
+                return await rest.DatasourcesAsync(groupId, datasetId, ct);
+            });
+
+        return new Command("ws", "Workspace inventory (REST): datasets, reports, lineage, permissions, gateways.")
+        {
+            ls, datasets, reports, lineage, gateways, permissions, datasources,
+        };
+    }
+
+    private static async Task<int> RunRestQueryAsync(
+        Func<DaxterConfig> configFactory,
+        Func<string?> outputFactory,
+        Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op,
+        CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+            var result = await op(rest, config, ct);
+
+            Console.Out.Write(formatter.Format(result));
+            Console.Error.WriteLine(RowSummary(result));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
 
     private static ITokenProvider BuildTokenProvider(DaxterConfig config)
         => new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
