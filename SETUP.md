@@ -204,15 +204,13 @@ icon → Quit** (Windows) — **closing the window is not enough**. Claude reads
 and launches the env-file'd container only at startup, so this same full restart is required
 **every time you change `daxter.env`**. Docker must be running.
 
-## 5. Sign in to Power BI — easiest: the web console
+## 5. Sign in to Power BI
 
-The simplest sign-in is the **web console**: a local page where you just click **Sign in**. It
-uses the **same `daxter-tokens` volume** as the MCP server, so signing in here signs you in for
-Claude Desktop too — **you only do this once.** *(Service principal? You're already authenticated
-— skip this whole step.)*
+Sign-in has two parts — **Claude starts the sign-in page; you finish it in the browser.**
+*(Service principal? You're already authenticated — skip this step.)*
 
-**1. Start the console.** The agent can run this for you (it's a separate, long-running
-container — the MCP setup above does **not** start it):
+**Claude does this:** starts the **web console** — a local sign-in page (a separate,
+long-running container; the MCP setup above does **not** start it):
 
 ```bash
 # macOS / Linux:
@@ -221,23 +219,17 @@ docker run -d -p 8080:8080 --restart unless-stopped --env-file "$HOME/daxter.env
 # Windows (PowerShell): swap the env path → --env-file "C:\Users\<you>\daxter.env"
 ```
 
-**2. Open the console and click Sign in.** Go to **<http://localhost:8080>** → **Status** →
-**Sign in**. A Microsoft sign-in page opens with a **clickable link and a one-click-copy code** —
-click, enter the code, sign in with your account. The page updates itself when you're done.
+**You do this** (Claude can't click for you): open **<http://localhost:8080>** → **Status** →
+**Sign in**. A Microsoft page opens with a **clickable link and a copyable code** — click the
+link, paste the code, and sign in with your account. The page updates itself when you're done.
 
-**3. That's it — you're signed in.** Claude Desktop's `daxter` server now reuses this sign-in
-automatically (same volume). In a chat, type **"List my workspaces"** and name one as your
-default (or just mention a workspace per request, e.g. `Sales - QA`). Try it:
-**"List the tables in the `<your model>` model"**.
+That's it. Your sign-in is cached on the shared `daxter-tokens` volume, so **Claude Desktop's
+`daxter` server reuses it automatically** and you only sign in once. In a chat, type
+**"List my workspaces"** and name one as your default (or just mention a workspace per request,
+e.g. `Sales - QA`). Try it: **"List the tables in the `<your model>` model"**.
 
-> **Prefer to stay in chat (no localhost)?** You can instead sign in straight from a Claude
-> Desktop chat: type **"Sign in to Power BI"** and Claude replies with a clickable
-> `microsoft.com/devicelogin` link + a short code — click it, enter the code, sign in. Same
-> shared token; no web console needed.
-
-Your sign-in is cached on the `daxter-tokens` volume, so **you stay signed in across sessions**.
-If a tool ever says *"Not signed in,"* just open the console (or type **sign in**) again. See
-[`examples/mcp.md`](examples/mcp.md) for a prompt per tool.
+If a tool ever says *"Not signed in,"* just reopen **<http://localhost:8080> → Status → Sign in**.
+See [`examples/mcp.md`](examples/mcp.md) for a prompt per tool.
 
 ## Multiple clients / environments
 
@@ -256,7 +248,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 
 | Symptom | Fix |
 |---------|-----|
-| Tool says **"Not signed in to Power BI"** | No cached token yet — sign in via the web console (**http://localhost:8080 → Status → Sign in**), or say **"sign in"** in chat so Claude calls `daxter_login`, then complete the browser sign-in. |
+| Tool says **"Not signed in to Power BI"** | No cached token yet — open the web console (**http://localhost:8080 → Status → Sign in**) and finish the browser sign-in. If the console isn't running, have Claude start it (`docker run -d -p 8080:8080 … web`). |
 | `The authority ... must be in a well-formed URI format` | `DAXTER_TENANT_ID` is still a placeholder, empty, or malformed — **or** you edited `daxter.env` without fully restarting Claude Desktop. Verify the values are real GUIDs/strings (no `<>`, quotes, or spaces) and **fully quit & reopen** the app. |
 | Edited the env file but nothing changed | The container reads `--env-file` only at startup. Fully quit & reopen Claude Desktop (closing the window isn't enough). |
 | `can't be saved — path is outside the session folder` | You're editing `daxter.env` in Claude Desktop's built-in editor. Use a normal editor (Notepad, VS Code, `nano`). |
@@ -274,7 +266,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
       edited in a normal editor
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
 - [ ] Claude Desktop **fully** quit & reopened (image auto-pulls from public GHCR on first run)
-- [ ] **Web console started** (`docker run -d -p 8080:8080 … web`) and the user pointed to
-      **http://localhost:8080 → Status → Sign in** to click through sign-in (easiest path;
-      shares the token volume). *Or* in-chat **"Sign in to Power BI"** device-code as the fallback.
+- [ ] **Web console started by Claude** (`docker run -d -p 8080:8080 … web`), then the user
+      pointed to **http://localhost:8080 → Status → Sign in** to click the link + paste the code
+      (Claude starts the container; the user finishes the browser sign-in; shares the token volume)
 - [ ] **"List my workspaces"** returns results
