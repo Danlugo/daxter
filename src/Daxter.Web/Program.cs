@@ -16,6 +16,7 @@ builder.Services.AddHttpClient("github", c =>
 });
 builder.Services.AddSingleton<VersionService>();
 builder.Services.AddSingleton<UsageStore>();
+builder.Services.AddSingleton<QueryHistoryStore>();
 
 // Capture app logs into an in-memory buffer the Logs page reads (in addition to the console).
 var logSink = new LogSink();

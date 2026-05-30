@@ -7,6 +7,11 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.4] - 2026-05-29
 
 ### Added
+- **DAX query history.** Successful queries are remembered and listed as **Recent queries**
+  under the query box on the Explore → DAX query tab. Click one to **re-run it** (re-applies
+  its workspace/dataset + DAX); each row shows a single-line preview, its dataset, and how many
+  times you've run it. Remove individual entries (×) or **clear all**. Persisted to
+  `~/.daxter/query-history.json` on the mounted volume (de-duped, newest-first, last 100).
 - **"Frequent" sidebar.** A left rail across the console lists your **most-used workspaces,
   datasets, and tables** (by open count) so you don't have to search for the same ones every
   time. Click one to jump straight into Explore at that level (deep-linked via the query

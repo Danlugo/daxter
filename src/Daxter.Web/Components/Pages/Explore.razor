@@ -1,6 +1,7 @@
 @page "/explore"
 @inject DaxterUi Ui
 @inject UsageStore Usage
+@inject QueryHistoryStore History
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -42,6 +43,29 @@
         <textarea @bind="dax" rows="4" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
         <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
     </div>
+
+    @if (history.Count > 0)
+    {
+        <div class="history">
+            <div class="hist-head">
+                <span class="side-h">Recent queries</span>
+                <button class="link" @onclick="ClearHistory">clear all</button>
+            </div>
+            <ul class="hist-list">
+                @foreach (var h in history)
+                {
+                    <li class="hist-item">
+                        <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
+                            <span class="hist-dax">@Preview(h.Dax)</span>
+                            <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
+                        </button>
+                        <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+
     @if (busy) { <p class="muted">Running…</p> }
     <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
 }
@@ -157,6 +181,7 @@ else
     private QueryResult? result;
     private string? error;
     private bool busy;
+    private IReadOnlyList<QueryEntry> history = Array.Empty<QueryEntry>();
 
     private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
 
@@ -178,6 +203,8 @@ else
             defaultDataset = cfg.Dataset;
         }
         catch { /* no default configured */ }
+
+        history = History.Recent(10);
     }
 
     protected override async Task OnParametersSetAsync()
@@ -297,8 +324,41 @@ else
     private async Task RunQuery()
     {
         await Show(() => Ui.QueryAsync(workspace, dataset, dax));
-        if (error is null && !string.IsNullOrEmpty(dataset))
-            Usage.Record(UsageStore.Dataset, dataset, workspace); // dataset proven valid by a successful query
+        if (error is null)
+        {
+            if (!string.IsNullOrEmpty(dataset))
+                Usage.Record(UsageStore.Dataset, dataset, workspace); // dataset proven valid by a successful query
+            History.Record(dax, workspace, dataset);                  // remember the query for one-click re-run
+            history = History.Recent(10);
+        }
+    }
+
+    private async Task RunHistory(QueryEntry h)
+    {
+        tab = Tab.Query;
+        workspace = h.Workspace;
+        dataset = h.Dataset ?? "";
+        dax = h.Dax;
+        await RunQuery();
+    }
+
+    private void RemoveHistory(QueryEntry h)
+    {
+        History.Remove(h.Dax, h.Workspace, h.Dataset);
+        history = History.Recent(10);
+    }
+
+    private void ClearHistory()
+    {
+        History.Clear();
+        history = Array.Empty<QueryEntry>();
+    }
+
+    private static string Preview(string dax)
+    {
+        var oneLine = string.Join(' ', dax.Split('\n', '\r', '\t')
+            .Select(s => s.Trim()).Where(s => s.Length > 0));
+        return oneLine.Length > 80 ? oneLine[..80] + "…" : oneLine;
     }
 
     private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }

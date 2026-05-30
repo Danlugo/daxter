@@ -49,6 +49,17 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .side-item .side-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .side-count { flex:0 0 auto; font-size:.68rem; color:#656d76; background:#eef1f4; border-radius:10px; padding:0 .42rem; line-height:1.5; }
 @media (max-width: 768px) { .sidebar { display:none; } }
+.history { margin:.4rem 0 1rem; max-width:760px; }
+.hist-head { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.3rem; }
+.hist-list { list-style:none; padding:0; margin:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.hist-list li + li { border-top:1px solid var(--line); }
+.hist-item { display:flex; align-items:stretch; }
+.hist-run { flex:1; min-width:0; display:flex; justify-content:space-between; align-items:center; gap:1rem; background:#fff; border:0; padding:.45rem .7rem; cursor:pointer; font:inherit; text-align:left; }
+.hist-run:hover { background:#f6f8fa; }
+.hist-dax { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; }
+.hist-ctx { flex:0 0 auto; color:#8c959f; font-size:.75rem; }
+.hist-del { flex:0 0 auto; background:#fff; border:0; border-left:1px solid var(--line); color:#8c959f; cursor:pointer; padding:0 .7rem; font-size:1rem; }
+.hist-del:hover { background:#fff5f5; color:var(--bad); }
 h1 { font-size:1.5rem; } h3 { margin-top:1.5rem; }
 .muted { color:#656d76; }
 .bad-text { color:var(--bad); }
