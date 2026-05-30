@@ -6,6 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddSingleton<ConfigState>();
 builder.Services.AddScoped<DaxterUi>();
+builder.Services.AddScoped<ExploreActions>();
 
 // Update check (GitHub releases) — GitHub requires a User-Agent.
 builder.Services.AddHttpClient("github", c =>

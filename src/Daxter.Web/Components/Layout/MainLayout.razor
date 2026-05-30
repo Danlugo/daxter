@@ -4,6 +4,8 @@
 @inject UsageStore Usage
 @inject JobService Jobs
 @inject NavigationManager Nav
+@inject QueryHistoryStore Hist
+@inject ExploreActions Actions
 
 <header class="topbar">
     <span class="brand">DAXter <small>Console @Version.Current</small></span>
@@ -70,6 +72,23 @@
                 }
             </div>
         }
+
+        @if (context == UsageStore.ExploreContext && recent.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Recent queries <button class="link" @onclick="ClearQueries">clear</button></div>
+                @foreach (var h in recent)
+                {
+                    <div class="side-recent">
+                        <button class="side-qrun" @onclick="() => RunQuery(h)" title="@h.Dax — click to run">
+                            <span class="nm">@QPreview(h.Dax)</span>
+                            <small class="side-sub">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</small>
+                        </button>
+                        <button class="side-qdel" @onclick="() => RemoveQuery(h)" title="Remove">×</button>
+                    </div>
+                }
+            </div>
+        }
     </aside>
 
     <main class="content">
@@ -89,14 +108,26 @@
     private IReadOnlyList<UsageItem> wsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> dsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> tblTop = Array.Empty<UsageItem>();
+    private IReadOnlyList<QueryEntry> recent = Array.Empty<QueryEntry>();
     private string? context;
 
     protected override void OnInitialized()
     {
         Usage.Changed += OnUsageChanged;
         Jobs.Changed += OnUsageChanged;          // refresh the Jobs nav count
+        Hist.Changed += OnUsageChanged;          // refresh Recent queries
         Nav.LocationChanged += OnLocationChanged; // sidebar is per-page
         Reload();
+    }
+
+    private Task RunQuery(QueryEntry h) => Actions.Run(h);
+    private void RemoveQuery(QueryEntry h) { Hist.Remove(h.Dax, h.Workspace, h.Dataset); recent = Hist.Recent(8); }
+    private void ClearQueries() { Hist.Clear(); recent = Hist.Recent(8); }
+
+    private static string QPreview(string dax)
+    {
+        var oneLine = string.Join(' ', dax.Split('\n', '\r', '\t').Select(s => s.Trim()).Where(s => s.Length > 0));
+        return oneLine.Length > 42 ? oneLine[..42] + "…" : oneLine;
     }
 
     // The Frequent list is page-scoped: Explore and Refresh each keep their own.
@@ -122,6 +153,7 @@
         wsTop = Usage.Top(UsageStore.Workspace, 6, context);
         dsTop = Usage.Top(UsageStore.Dataset, 6, context);
         tblTop = Usage.Top(UsageStore.Table, 6, context);
+        recent = context == UsageStore.ExploreContext ? Hist.Recent(8) : Array.Empty<QueryEntry>();
     }
 
     private void OnUsageChanged() => InvokeAsync(() => { Reload(); StateHasChanged(); });
@@ -149,6 +181,7 @@
     {
         Usage.Changed -= OnUsageChanged;
         Jobs.Changed -= OnUsageChanged;
+        Hist.Changed -= OnUsageChanged;
         Nav.LocationChanged -= OnLocationChanged;
     }
 }

@@ -3,6 +3,8 @@
 @inject UsageStore Usage
 @inject QueryHistoryStore History
 @inject IJSRuntime JS
+@inject ExploreActions Actions
+@implements IDisposable
 @using System.Text
 
 <PageTitle>DAXter — Explore</PageTitle>
@@ -108,12 +110,11 @@
                 @if (!showFields) { <button class="btn-sm" @onclick="() => showFields = true" title="Show fields">▸ Fields</button> }
                 <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">▶ Run DAX</button>
                 <button class="btn-sm" @onclick="FormatQuery" disabled="@(string.IsNullOrWhiteSpace(dax))" title="Pretty-print the DAX">⌗ Format</button>
-                <span class="muted dax-hint">Tip: click a field on the left to insert it.</span>
-                @if (!showRecent) { <button class="btn-sm" @onclick="() => showRecent = true" title="Show recent queries">Recent ◂</button> }
+                <span class="muted dax-hint">Tip: click a field on the left to insert it · recent queries are in the sidebar.</span>
             </div>
             <div class="dax-edit">
                 <pre class="dax-hl" aria-hidden="true"><code class="dax-hl-code"></code></pre>
-                <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7" @ref="editorRef"
+                <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="14" @ref="editorRef"
                           placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
             </div>
             @if (DaxIssues() is { Count: > 0 } issues)
@@ -125,36 +126,6 @@
             @if (busy) { <p class="muted">Running…</p> }
             <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
         </div>
-
-        @if (showRecent)
-        {
-            <aside class="dax-recent">
-                <div class="pane-head">
-                    <span class="side-title">Recent queries</span>
-                    <button class="pane-x" @onclick="() => showRecent = false" title="Hide recent">×</button>
-                </div>
-                @if (history.Count == 0)
-                {
-                    <p class="side-empty">Queries you run show up here.</p>
-                }
-                else
-                {
-                    <button class="link" @onclick="ClearHistory">clear all</button>
-                    <ul class="hist-list">
-                        @foreach (var h in history)
-                        {
-                            <li class="hist-item">
-                                <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
-                                    <span class="hist-dax">@Preview(h.Dax)</span>
-                                    <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
-                                </button>
-                                <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
-                            </li>
-                        }
-                    </ul>
-                }
-            </aside>
-        }
     </div>
 }
 else
@@ -305,7 +276,6 @@ else
     private QueryResult? result;
     private string? error;
     private bool busy;
-    private IReadOnlyList<QueryEntry> history = Array.Empty<QueryEntry>();
 
     // DAX-tab fields explorer
     private ModelTree? objects;
@@ -315,7 +285,6 @@ else
     private readonly HashSet<string> expandedTables = new();
     private string objSearch = "";
     private bool showFields = true;
-    private bool showRecent = true;
     private ElementReference editorRef;
     private bool acAttached;
     private bool acDirty;
@@ -353,11 +322,22 @@ else
         }
         catch { /* no default configured */ }
 
-        history = History.Recent(10);
+        Actions.RunRequested += OnRunRequested; // sidebar "Recent queries" → run here
 
         // Browse is the default tab — load the workspace list up front.
         if (workspaces.Count == 0) await LoadWorkspaces();
     }
+
+    private async Task OnRunRequested(QueryEntry e)
+    {
+        tab = Tab.Query;
+        workspace = e.Workspace;
+        dataset = e.Dataset ?? "";
+        dax = e.Dax;
+        await RunQuery();
+    }
+
+    public void Dispose() => Actions.RunRequested -= OnRunRequested;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -816,37 +796,8 @@ else
         {
             if (!string.IsNullOrEmpty(dataset))
                 Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext); // dataset proven valid by a successful query
-            History.Record(dax, workspace, dataset);                  // remember the query for one-click re-run
-            history = History.Recent(10);
+            History.Record(dax, workspace, dataset); // remember for one-click re-run (shown in the sidebar)
         }
-    }
-
-    private async Task RunHistory(QueryEntry h)
-    {
-        tab = Tab.Query;
-        workspace = h.Workspace;
-        dataset = h.Dataset ?? "";
-        dax = h.Dax;
-        await RunQuery();
-    }
-
-    private void RemoveHistory(QueryEntry h)
-    {
-        History.Remove(h.Dax, h.Workspace, h.Dataset);
-        history = History.Recent(10);
-    }
-
-    private void ClearHistory()
-    {
-        History.Clear();
-        history = Array.Empty<QueryEntry>();
-    }
-
-    private static string Preview(string dax)
-    {
-        var oneLine = string.Join(' ', dax.Split('\n', '\r', '\t')
-            .Select(s => s.Trim()).Where(s => s.Length > 0));
-        return oneLine.Length > 80 ? oneLine[..80] + "…" : oneLine;
     }
 
     private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }

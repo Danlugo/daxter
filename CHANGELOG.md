@@ -20,6 +20,9 @@ All notable changes to DAXter are documented here. The format follows
   no external editor/CDN dependency (a small `dax-complete.js` over the textarea).
 - The **Fields tree loads automatically** when you open the DAX tab / pick a dataset — no more
   "Load fields" button.
+- **Taller DAX editor**, and **Recent queries moved to the left sidebar** (under
+  *Frequent · Explore*) — freeing the workbench width. Clicking a recent query still runs it on
+  the DAX tab (via a small `ExploreActions` bus); remove/clear are in the sidebar.
 - **DAX syntax highlighting.** The query editor now color-codes **functions**, **keywords**,
   **strings**, **'table'** and **[column/measure]** references, **numbers**, and **comments** — via
   a highlighted overlay behind a transparent textarea, painted client-side as you type (no server
