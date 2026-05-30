@@ -51,6 +51,25 @@ public sealed class ModelMetadataService
             $"WHERE [TableID] = {tableId} ORDER BY [Name]");
     }
 
+    /// <summary>
+    /// Lists columns (name, data type, hidden flag), optionally for one table. The internal
+    /// RowNumber column is excluded. Without a table, the table id is included for grouping.
+    /// </summary>
+    public QueryResult Columns(string? table)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+        {
+            return _session.Execute(
+                "SELECT [TableID], [ExplicitName] AS [Column], [IsHidden] " +
+                "FROM $SYSTEM.TMSCHEMA_COLUMNS WHERE [Type] <> 3 ORDER BY [TableID]");
+        }
+
+        var tableId = TableId(table);
+        return _session.Execute(
+            "SELECT [ExplicitName] AS [Column], [IsHidden] " +
+            $"FROM $SYSTEM.TMSCHEMA_COLUMNS WHERE [TableID] = {tableId} AND [Type] <> 3 ORDER BY [ExplicitName]");
+    }
+
     /// <summary>The M (Power Query) source for each partition of a table.</summary>
     public QueryResult MCode(string table)
     {

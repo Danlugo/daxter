@@ -4,6 +4,19 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-05-30
+
+### Added
+- **MCP parity with the web Refresh page + Fields tree.**
+  - `daxter_refresh` now supports **`scope=partition`** (refresh one named partition) and a
+    **`partitions`** argument (comma-separated subset) for `scope=partitions`; all partition
+    refreshes are wrapped in a TMSL `Sequence` with `maxParallelism: 1` so they process **in
+    order** (a plain multi-partition refresh runs in parallel). `type` already covered
+    full/automatic/**calculate**/dataOnly/clearValues.
+  - New **`daxter_columns`** tool — list a model's columns (name, hidden), optionally for one
+    table (excludes the internal RowNumber column). Backed by `ModelMetadataService.Columns`.
+  - **27 MCP tools** total (`daxter_login` + 24 read + 2 gated write).
+
 ## [1.6.5] - 2026-05-30
 
 ### Added

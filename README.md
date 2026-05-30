@@ -78,7 +78,7 @@ they persist across restarts and upgrades.
 ## Examples
 
 - **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
-- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 25 tools (query, metadata, inventory, gateways, datasources, pipelines, RLS testing, refresh, …).
+- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 27 tools (query, metadata, columns, inventory, gateways, datasources, pipelines, RLS testing, refresh, …).
 
 ## Requirements
 
@@ -210,7 +210,7 @@ By default you **sign in as yourself**: ask Claude to "sign in to Power BI" and 
 workspaces and pick one. (A service principal is the alternative for automation.)
 [`SETUP.md`](SETUP.md) walks through it on a new machine. The MCP tools are at **full parity
 with the CLI** — the query, metadata, ops, and inventory operations from the feature matrix
-above, as **26 tools** (`daxter_login` + 23 read + 2 gated write). Each accepts optional
+above, as **27 tools** (`daxter_login` + 24 read + 2 gated write). Each accepts optional
 `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
 **See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
 the gateways", datasources, pipelines, RLS testing).

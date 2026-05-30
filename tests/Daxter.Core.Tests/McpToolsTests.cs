@@ -23,6 +23,7 @@ public class McpToolsTests
             "daxter_login",
             "daxter_query", "daxter_dmv", "daxter_list_tables", "daxter_measures",
             "daxter_measure", "daxter_mcode", "daxter_parameters", "daxter_partitions",
+            "daxter_columns",
             "daxter_rls", "daxter_diff_measures", "daxter_refresh_history",
             "daxter_workspaces", "daxter_datasets", "daxter_reports", "daxter_lineage",
             "daxter_export", "daxter_permissions", "daxter_gateways", "daxter_datasources",
