@@ -6,6 +6,10 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [1.6.2] - 2026-05-29
 
+### Added
+- Result grid now has **pagination** (50 rows/page, First/Prev/Next/Last) and an
+  **Export CSV** button.
+
 ### Fixed
 - Explore page always showed "error" and never rendered results — the `ResultGrid`'s string
   `Error` parameter was bound as a literal (`Error="error"`) instead of the field

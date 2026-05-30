@@ -63,3 +63,5 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 .grid th, .grid td { border-bottom:1px solid var(--line); padding:.45rem .7rem; text-align:left; white-space:nowrap; }
 .grid th { background:#f6f8fa; position:sticky; top:0; }
 .grid.kv td:first-child { font-weight:600; width:180px; }
+.grid-toolbar { display:flex; align-items:center; gap:.8rem; margin:.6rem 0; flex-wrap:wrap; }
+.pager { display:flex; align-items:center; gap:.4rem; margin-left:auto; }

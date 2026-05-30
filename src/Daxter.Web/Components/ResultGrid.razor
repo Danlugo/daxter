@@ -1,3 +1,5 @@
+@inject IJSRuntime JS
+
 @if (Error is not null)
 {
     <p class="bad-text">@Error</p>
@@ -12,24 +14,65 @@ else if (Result.RowCount == 0)
 }
 else
 {
+    <div class="grid-toolbar">
+        <span class="muted">@Result.RowCount row@(Result.RowCount == 1 ? "" : "s")</span>
+        <button class="btn-sm" @onclick="ExportCsv">Export CSV</button>
+        @if (TotalPages > 1)
+        {
+            <span class="pager">
+                <button class="btn-sm" @onclick="First" disabled="@(page == 0)">« First</button>
+                <button class="btn-sm" @onclick="Prev" disabled="@(page == 0)">‹ Prev</button>
+                <span class="muted">Page @(page + 1) of @TotalPages</span>
+                <button class="btn-sm" @onclick="Next" disabled="@(page >= TotalPages - 1)">Next ›</button>
+                <button class="btn-sm" @onclick="Last" disabled="@(page >= TotalPages - 1)">Last »</button>
+            </span>
+        }
+    </div>
     <div class="grid-wrap">
         <table class="grid">
             <thead>
                 <tr>@foreach (var col in Result.Columns) { <th>@col</th> }</tr>
             </thead>
             <tbody>
-                @foreach (var row in Result.Rows)
+                @foreach (var row in PageRows)
                 {
                     <tr>@foreach (var cell in row) { <td>@(cell?.ToString())</td> }</tr>
                 }
             </tbody>
         </table>
     </div>
-    <p class="muted">@Result.RowCount row@(Result.RowCount == 1 ? "" : "s")</p>
 }
 
 @code {
     [Parameter] public QueryResult? Result { get; set; }
     [Parameter] public string? Error { get; set; }
     [Parameter] public string? Empty { get; set; }
+    [Parameter] public int PageSize { get; set; } = 50;
+
+    private int page;
+    private QueryResult? lastResult;
+
+    private int TotalPages => Result is null ? 0 : (Result.RowCount + PageSize - 1) / PageSize;
+    private IEnumerable<object?[]> PageRows => Result!.Rows.Skip(page * PageSize).Take(PageSize);
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(lastResult, Result))
+        {
+            lastResult = Result;
+            page = 0; // reset paging when a new result arrives
+        }
+    }
+
+    private void First() => page = 0;
+    private void Prev() { if (page > 0) page--; }
+    private void Next() { if (page < TotalPages - 1) page++; }
+    private void Last() => page = Math.Max(0, TotalPages - 1);
+
+    private async Task ExportCsv()
+    {
+        if (Result is null) return;
+        var csv = new Daxter.Core.Formatting.CsvResultFormatter().Format(Result);
+        await JS.InvokeVoidAsync("daxterDownload", "daxter-export.csv", csv);
+    }
 }
