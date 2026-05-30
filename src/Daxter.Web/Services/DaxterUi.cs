@@ -11,6 +11,13 @@ namespace Daxter.Web.Services;
 
 public sealed record HealthCheck(string Name, bool Ok, string Detail);
 
+/// <summary>A column or measure in the model fields tree.</summary>
+public sealed record ModelObject(string Name, bool IsMeasure);
+/// <summary>A table with its columns + measures.</summary>
+public sealed record ModelTableNode(string Table, IReadOnlyList<ModelObject> Items);
+/// <summary>The model's fields tree for the DAX explorer.</summary>
+public sealed record ModelTree(IReadOnlyList<ModelTableNode> Tables);
+
 /// <summary>Bridges the Blazor pages to the Daxter.Core engine (same logic as the CLI/MCP).</summary>
 public sealed class DaxterUi
 {
@@ -190,6 +197,51 @@ public sealed class DaxterUi
             var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
             return await rest.DatasetUsersAsync(groupId, datasetId, ct);
         });
+
+    /// <summary>Loads the model's fields tree (tables → their columns + measures) for the DAX explorer.</summary>
+    public async Task<ModelTree> ModelTreeAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        var cfg = _state.ToConfig(ws, ds);
+        var factory = new AdomdXmlaSessionFactory(cfg, Provider(cfg));
+        using var session = await factory.CreateAsync(ct);
+
+        var tables = session.Execute("SELECT [ID], [Name], [IsHidden] FROM $SYSTEM.TMSCHEMA_TABLES ORDER BY [Name]");
+        var columns = session.Execute("SELECT [TableID], [ExplicitName], [IsHidden] FROM $SYSTEM.TMSCHEMA_COLUMNS");
+        var measures = session.Execute("SELECT [TableID], [Name] FROM $SYSTEM.TMSCHEMA_MEASURES");
+
+        // TableID -> objects
+        var byTable = new Dictionary<long, List<ModelObject>>();
+        void Add(long tid, string name, bool isMeasure)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            if (!byTable.TryGetValue(tid, out var list)) byTable[tid] = list = new();
+            list.Add(new ModelObject(name, isMeasure));
+        }
+
+        foreach (var r in columns.Rows)
+        {
+            var hidden = r.Length > 2 && r[2] is bool b && b;
+            var name = r[1]?.ToString();
+            if (!hidden && !string.IsNullOrEmpty(name) && !name!.StartsWith("RowNumber-", StringComparison.Ordinal))
+                Add(Convert.ToInt64(r[0]), name, isMeasure: false);
+        }
+        foreach (var r in measures.Rows)
+            Add(Convert.ToInt64(r[0]), r[1]?.ToString() ?? "", isMeasure: true);
+
+        var nodes = new List<ModelTableNode>();
+        foreach (var t in tables.Rows)
+        {
+            if (t.Length > 2 && t[2] is bool hidden && hidden) continue; // skip hidden tables
+            var id = Convert.ToInt64(t[0]);
+            var name = t[1]?.ToString() ?? "";
+            var items = byTable.TryGetValue(id, out var list)
+                ? list.OrderByDescending(o => o.IsMeasure).ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                : new List<ModelObject>();
+            nodes.Add(new ModelTableNode(name, items));
+        }
+
+        return new ModelTree(nodes);
+    }
 
     private Task<QueryResult> XmlaAsync(string op, string ws, string ds, Func<IXmlaSession, QueryResult> body, CancellationToken ct)
         => Track(op, $"{ws}/{ds}", async () =>

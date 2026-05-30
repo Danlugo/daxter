@@ -7,6 +7,11 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.5] - 2026-05-30
 
 ### Added
+- **DAX tab is now a Power BI Desktop-style workbench.** Three panes: a **Fields** tree on the
+  **left** (every non-hidden table → its columns and measures, searchable; click a field to
+  **insert its reference** — `'Table'[Column]` or `[Measure]` — into the query), the **query +
+  results** in the center, and **Recent queries** on the **right**. The fields load when you open
+  the DAX tab (or pick a dataset). Backed by a new `DaxterUi.ModelTreeAsync` (TMSCHEMA DMVs).
 - **One-click "run it" actions in Explore.** Drill into a **table** → **Top 10 rows →** /
   **Top 100 rows →** buttons jump to the DAX tab pre-filled with `EVALUATE TOPN(n, 'Table')`
   and run it. **Measures** are now a **clickable list** that drills into a **measure detail**

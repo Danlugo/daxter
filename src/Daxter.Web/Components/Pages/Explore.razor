@@ -25,7 +25,7 @@
     <div>
         <label>Dataset <span class="muted">(@datasets.Count)</span></label>
         <div class="combo-wrap">
-            <input class="combo" list="ds-list" @bind="dataset" placeholder="type to search…"
+            <input class="combo" list="ds-list" @bind="dataset" @bind:after="OnDatasetPicked" placeholder="type to search…"
                    autocomplete="off" onfocus="this.select()" />
             @if (!string.IsNullOrEmpty(dataset))
             {
@@ -47,40 +47,91 @@
 
 <div class="tabs">
     <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="EnterBrowse">Browse</button>
-    <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="@(() => tab = Tab.Query)">DAX query</button>
+    <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="ShowQueryTab">DAX query</button>
 </div>
 
 @if (tab == Tab.Query)
 {
-    <div class="query">
-        <textarea @bind="dax" rows="4" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
-        <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
-    </div>
+    <div class="dax-layout">
+        <aside class="dax-objects">
+            <div class="side-title">Fields</div>
+            @if (string.IsNullOrEmpty(dataset))
+            {
+                <p class="side-empty">Pick a dataset to browse its tables, columns and measures.</p>
+            }
+            else if (objError is not null)
+            {
+                <p class="bad-text">@objError</p>
+                <button class="btn-sm" @onclick="LoadObjects">Retry</button>
+            }
+            else if (objLoading)
+            {
+                <p class="muted">Loading fields…</p>
+            }
+            else if (objects is null)
+            {
+                <button class="btn-sm" @onclick="LoadObjects">Load fields</button>
+            }
+            else
+            {
+                <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter fields…" autocomplete="off" />
+                <div class="obj-tree">
+                    @foreach (var t in FilteredTables())
+                    {
+                        <div class="obj-table">
+                            <button class="obj-tname" @onclick="() => ToggleTable(t.Table)" title="@t.Table — click to insert">
+                                <span class="chev">@(IsExpanded(t.Table) ? "▾" : "▸")</span>
+                                <span @onclick:stopPropagation="true" @onclick="() => InsertTable(t.Table)">@t.Table</span>
+                            </button>
+                            @if (IsExpanded(t.Table))
+                            {
+                                @foreach (var o in FilteredItems(t))
+                                {
+                                    <button class="obj-item @(o.IsMeasure ? "measure" : "column")"
+                                            @onclick="() => InsertRef(t.Table, o)" title="Insert reference">
+                                        <span class="obj-icon">@(o.IsMeasure ? "ƒ" : "▦")</span>@o.Name
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </aside>
 
-    @if (history.Count > 0)
-    {
-        <div class="history">
-            <div class="hist-head">
-                <span class="side-h">Recent queries</span>
-                <button class="link" @onclick="ClearHistory">clear all</button>
+        <div class="dax-main">
+            <div class="query">
+                <textarea @bind="dax" rows="6" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
+                <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
             </div>
-            <ul class="hist-list">
-                @foreach (var h in history)
-                {
-                    <li class="hist-item">
-                        <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
-                            <span class="hist-dax">@Preview(h.Dax)</span>
-                            <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
-                        </button>
-                        <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
-                    </li>
-                }
-            </ul>
+            @if (busy) { <p class="muted">Running…</p> }
+            <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
         </div>
-    }
 
-    @if (busy) { <p class="muted">Running…</p> }
-    <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
+        <aside class="dax-recent">
+            <div class="side-title">Recent queries</div>
+            @if (history.Count == 0)
+            {
+                <p class="side-empty">Queries you run show up here.</p>
+            }
+            else
+            {
+                <button class="link" @onclick="ClearHistory">clear all</button>
+                <ul class="hist-list">
+                    @foreach (var h in history)
+                    {
+                        <li class="hist-item">
+                            <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
+                                <span class="hist-dax">@Preview(h.Dax)</span>
+                                <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
+                            </button>
+                            <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </aside>
+    </div>
 }
 else
 {
@@ -232,6 +283,14 @@ else
     private bool busy;
     private IReadOnlyList<QueryEntry> history = Array.Empty<QueryEntry>();
 
+    // DAX-tab fields explorer
+    private ModelTree? objects;
+    private string? objectsFor;
+    private bool objLoading;
+    private string? objError;
+    private readonly HashSet<string> expandedTables = new();
+    private string objSearch = "";
+
     // Browse navigation history (browser-style Back).
     private readonly Stack<BrowseState> back = new();
     private bool CanGoBack => back.Count > 0;
@@ -335,7 +394,68 @@ else
         await ShowMcode();   // show M code by default
     }
 
-    private void GoToQuery() => tab = Tab.Query;
+    private Task GoToQuery() => ShowQueryTab();
+
+    // ---- DAX-tab fields explorer ----
+
+    private async Task ShowQueryTab()
+    {
+        tab = Tab.Query;
+        if (!string.IsNullOrEmpty(dataset) && objectsFor != dataset) await LoadObjects();
+    }
+
+    private async Task OnDatasetPicked()
+    {
+        objects = null; objectsFor = null; expandedTables.Clear();
+        if (tab == Tab.Query && !string.IsNullOrEmpty(dataset)) await LoadObjects();
+    }
+
+    private async Task LoadObjects()
+    {
+        if (string.IsNullOrEmpty(dataset)) return;
+        objLoading = true; objError = null; objects = null; StateHasChanged();
+        try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; }
+        catch (Exception ex) { objError = ex.Message; }
+        finally { objLoading = false; }
+    }
+
+    private bool IsExpanded(string table) => !string.IsNullOrEmpty(objSearch) || expandedTables.Contains(table);
+    private void ToggleTable(string table) { if (!expandedTables.Remove(table)) expandedTables.Add(table); }
+
+    private IEnumerable<ModelTableNode> FilteredTables()
+    {
+        if (objects is null) yield break;
+        var q = objSearch?.Trim();
+        foreach (var t in objects.Tables)
+        {
+            if (string.IsNullOrEmpty(q)
+                || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || t.Items.Any(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                yield return t;
+        }
+    }
+
+    private IEnumerable<ModelObject> FilteredItems(ModelTableNode t)
+    {
+        var q = objSearch?.Trim();
+        if (string.IsNullOrEmpty(q) || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase))
+            return t.Items;
+        return t.Items.Where(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void InsertTable(string table) => Append("'" + table.Replace("'", "''") + "'");
+
+    private void InsertRef(string table, ModelObject o)
+    {
+        var name = o.Name.Replace("]", "]]");
+        Append(o.IsMeasure ? "[" + name + "]" : "'" + table.Replace("'", "''") + "'[" + name + "]");
+    }
+
+    private void Append(string reference)
+    {
+        var sep = string.IsNullOrEmpty(dax) || dax.EndsWith(" ") || dax.EndsWith("\n") ? "" : " ";
+        dax = dax + sep + reference;
+    }
 
     private async Task LoadDefault()
     {
