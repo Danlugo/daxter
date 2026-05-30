@@ -74,6 +74,12 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .dax-sig { position:fixed; z-index:1001; transform:translateY(-100%); background:#1f2328; color:#e6edf3; border-radius:6px; padding:.3rem .6rem; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.8rem; box-shadow:0 4px 14px rgba(0,0,0,.2); max-width:560px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dax-sig .sig-fn { color:#d2a8ff; font-weight:700; }
 .dax-sig b { color:#7ee787; font-weight:700; }
+.dax-sig .sig-line { display:flex; align-items:center; gap:.6rem; }
+.dax-sig .sig-desc { margin-top:.2rem; color:#9da7b1; font-family:-apple-system,Segoe UI,Roboto,sans-serif; white-space:normal; }
+.dax-sig .sig-docs { color:#79c0ff; text-decoration:none; font-size:.72rem; flex:0 0 auto; }
+.dax-ac-item .ac-label { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; }
+.dax-ac-item .ac-docs { color:#0969da; text-decoration:none; font-size:.78rem; padding-left:.5rem; }
+.dax-ac-item .ac-docs:hover { text-decoration:underline; }
 .obj-search { width:100%; min-width:0; box-sizing:border-box; margin-bottom:.5rem; }
 .obj-tree { font-size:.84rem; }
 .obj-table { margin-bottom:.05rem; }

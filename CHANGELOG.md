@@ -14,8 +14,12 @@ All notable changes to DAXter are documented here. The format follows
   Inside a function call, a **signature hint** shows its arguments with the **current argument
   highlighted** (e.g. `CALCULATE(Expression, **Filter1**, Filter2, …)`), and field suggestions
   are **biased to what that argument expects** (a `Table` arg surfaces tables first, a `Column`
-  arg surfaces columns, an `Expression`/`Value` arg surfaces measures + columns). Self-contained —
+  arg surfaces columns, an `Expression`/`Value` arg surfaces measures + columns). The signature
+  hint also shows a **one-line description** of the function and a **↗ docs** link to Microsoft
+  Learn (and each function suggestion in the dropdown has its own ↗ docs link). Self-contained —
   no external editor/CDN dependency (a small `dax-complete.js` over the textarea).
+- The **Fields tree loads automatically** when you open the DAX tab / pick a dataset — no more
+  "Load fields" button.
 
 ### Fixed
 - **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse

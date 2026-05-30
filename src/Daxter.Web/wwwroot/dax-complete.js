@@ -36,6 +36,34 @@ window.daxComplete = (function () {
         LOOKUPVALUE:["ResultColumn","SearchColumn1","SearchValue1","…"], CONTAINS:["Table","Column1","Value1","…"],
     };
 
+    // Short one-line descriptions (shown under the signature).
+    const DESC = {
+        CALCULATE:"Evaluate an expression in a modified filter context.", CALCULATETABLE:"Evaluate a table expression in a modified filter context.",
+        FILTER:"Return a table filtered by a boolean expression.", ALL:"Remove filters from a table or columns.",
+        ALLEXCEPT:"Remove all filters from a table except the given columns.", ALLSELECTED:"Outer filter context, keeping explicit selections.",
+        REMOVEFILTERS:"Clear filters from the given table or columns.", KEEPFILTERS:"Add filters without overwriting existing ones.",
+        VALUES:"Distinct values of a column (or table rows) in context.", DISTINCT:"Distinct values of a column.",
+        RELATED:"Fetch a related value across a relationship (many-to-one).", RELATEDTABLE:"Related rows across a relationship (one-to-many).",
+        SELECTEDVALUE:"The single value of a column, or a fallback.", HASONEVALUE:"TRUE if a column has exactly one value in context.",
+        SUM:"Sum a column.", SUMX:"Sum an expression evaluated per row of a table.", AVERAGE:"Average a column.", AVERAGEX:"Average an expression per row.",
+        MIN:"Minimum of a column or two values.", MINX:"Minimum of an expression per row.", MAX:"Maximum of a column or two values.", MAXX:"Maximum of an expression per row.",
+        COUNT:"Count non-blank numeric/date values.", COUNTROWS:"Count rows of a table.", COUNTA:"Count non-blank values.", DISTINCTCOUNT:"Count distinct values of a column.",
+        DIVIDE:"Safe division (blank/alternate on divide-by-zero).", IF:"Return one value if true, another if false.", IFERROR:"A value, or an alternate if it errors.",
+        SWITCH:"Match an expression against values and return the match.", COALESCE:"First non-blank argument.",
+        CONCATENATEX:"Concatenate an expression over a table with a delimiter.", FORMAT:"Format a value as text using a format string.",
+        DATEDIFF:"Difference between two dates in the given interval.", DATEADD:"Shift dates by an interval (time intelligence).",
+        TOTALYTD:"Year-to-date total of an expression.", SAMEPERIODLASTYEAR:"Shift dates back one year.",
+        DATESINPERIOD:"Dates in a period relative to a start date.", DATESBETWEEN:"Dates between a start and end date.",
+        RANKX:"Rank rows of a table by an expression.", TOPN:"Top N rows ordered by an expression.",
+        SUMMARIZECOLUMNS:"Group by columns with filters + measures (query table).", ADDCOLUMNS:"Add calculated columns to a table.",
+        SELECTCOLUMNS:"Project / rename columns of a table.", TREATAS:"Apply a table's values as filters on columns.",
+        USERELATIONSHIP:"Activate an inactive relationship inside CALCULATE.", LOOKUPVALUE:"Return a value by matching search columns.",
+    };
+
+    function docsUrl(name) {
+        return "https://learn.microsoft.com/en-us/dax/" + name.toLowerCase().replace(/\./g, "-") + "-function-dax";
+    }
+
     function attach(el) {
         if (!el || states.get(el)) return;
         const box = document.createElement('div'); box.className = 'dax-ac'; box.style.display = 'none';
@@ -126,7 +154,7 @@ window.daxComplete = (function () {
         return n;
     }
 
-    function icon(k) { return k === 'function' ? 'ƒ' : k === 'measure' ? '∑' : k === 'column' ? '▦' : '⊞'; }
+    function icon(k) { return k === 'function' ? 'ƒ' : k === 'keyword' ? '▪' : k === 'measure' ? '∑' : k === 'column' ? '▦' : '⊞'; }
 
     function render(s) {
         s.box.innerHTML = '';
@@ -134,7 +162,16 @@ window.daxComplete = (function () {
             const div = document.createElement('div');
             div.className = 'dax-ac-item' + (i === s.sel ? ' sel' : '');
             const ic = document.createElement('span'); ic.className = 'ac-kind ac-' + m.kind; ic.textContent = icon(m.kind);
-            div.appendChild(ic); div.appendChild(document.createTextNode(m.label));
+            div.appendChild(ic);
+            const lab = document.createElement('span'); lab.className = 'ac-label'; lab.textContent = m.label;
+            div.appendChild(lab);
+            if (m.kind === 'function') {
+                const a = document.createElement('a');
+                a.className = 'ac-docs'; a.textContent = '↗'; a.title = 'Open on Microsoft Learn';
+                a.href = docsUrl(m.label); a.target = '_blank'; a.rel = 'noopener noreferrer';
+                a.addEventListener('mousedown', (e) => e.stopPropagation()); // don't insert
+                div.appendChild(a);
+            }
             div.addEventListener('mousedown', (e) => { e.preventDefault(); accept(s, m); });
             s.box.appendChild(div);
         });
@@ -153,7 +190,10 @@ window.daxComplete = (function () {
         let active = call.arg;
         if (active > params.length - 1) active = params.includes('…') ? params.indexOf('…') : params.length - 1;
         const parts = params.map((p, i) => i === active ? '<b>' + p + '</b>' : p);
-        s.sig.innerHTML = '<span class="sig-fn">' + call.name + '</span>(' + parts.join(', ') + ')';
+        let html = '<div class="sig-line"><span class="sig-fn">' + call.name + '</span>(' + parts.join(', ') + ')'
+            + '<a class="sig-docs" href="' + docsUrl(call.name) + '" target="_blank" rel="noopener noreferrer" title="Microsoft Learn">↗ docs</a></div>';
+        if (DESC[call.name]) html += '<div class="sig-desc">' + DESC[call.name] + '</div>';
+        s.sig.innerHTML = html;
         const c = caretCoords(s.el, pos);
         const r = s.el.getBoundingClientRect();
         s.sig.style.left = Math.round(r.left + c.left) + 'px';

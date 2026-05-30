@@ -70,13 +70,9 @@
                     <p class="bad-text">@objError</p>
                     <button class="btn-sm" @onclick="LoadObjects">Retry</button>
                 }
-                else if (objLoading)
+                else if (objLoading || objects is null)
                 {
                     <p class="muted">Loading fields…</p>
-                }
-                else if (objects is null)
-                {
-                    <button class="btn-sm" @onclick="LoadObjects">Load fields</button>
                 }
                 else
                 {
@@ -447,6 +443,12 @@ else
     {
         if (tab != Tab.Query) { acAttached = false; return; } // re-attach when the editor re-appears
 
+        // Auto-load the Fields tree for the current dataset (no button).
+        if (!string.IsNullOrEmpty(dataset) && objects is null && !objLoading && objError is null && objectsFor != dataset)
+        {
+            await LoadObjects();
+        }
+
         if (!acAttached)
         {
             try { await JS.InvokeVoidAsync("daxComplete.attach", editorRef); acAttached = true; acDirty = true; }
@@ -484,7 +486,7 @@ else
     {
         var list = new List<AcItem>();
         foreach (var f in DaxFunctions) list.Add(new AcItem(f, f + "(", "function"));
-        foreach (var k in DaxKeywords) list.Add(new AcItem(k, k.EndsWith(")") ? k : k + " ", "function"));
+        foreach (var k in DaxKeywords) list.Add(new AcItem(k, k.EndsWith(")") ? k : k + " ", "keyword"));
 
         if (objects is not null)
         {
