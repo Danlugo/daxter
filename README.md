@@ -30,6 +30,10 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
+> **Setting up on a new machine or in Claude Desktop?** Follow **[`SETUP.md`](SETUP.md)** —
+> it's written so a Claude agent can configure the MCP server for you end to end. Just point
+> Claude at it: *"Set up DAXter for Claude Desktop using SETUP.md."*
+
 ## Examples
 
 - **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
