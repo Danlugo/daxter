@@ -141,7 +141,7 @@ else
                             <td>@j.Title</td>
                             <td class="nowrap">@Fmt(j.Duration)</td>
                             <td>@if (j.CanCancel) { <button class="btn-sm" @onclick="() => Jobs.Cancel(j.Id)">Cancel</button> }</td>
-                            <td class="msg">@(j.Error ?? (j.Status == JobStatus.Queued ? "waiting…" : ""))</td>
+                            <td class="msg">@(j.Error ?? j.Step ?? "")</td>
                         </tr>
                     }
                 </tbody>

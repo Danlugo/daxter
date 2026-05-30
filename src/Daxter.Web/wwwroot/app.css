@@ -96,6 +96,16 @@ label.inline input, label.inline select { min-width:auto; }
 .card.confirm { border-color:var(--accent); background:#fbf7fb; }
 .spin { display:inline-block; animation:spin 1.2s linear infinite; }
 @keyframes spin { from { transform:rotate(0); } to { transform:rotate(360deg); } }
+.job-row { cursor:pointer; }
+.job-row:hover td { background:#f6f8fa; }
+.progress-row td { padding:0 .7rem .4rem; border-bottom:1px solid var(--line); }
+.pbar { height:5px; background:#eaeef2; border-radius:3px; overflow:hidden; }
+.pbar-fill { height:100%; background:#0969da; transition:width .6s linear; }
+.detail-row td { background:#fbfcfd; }
+.job-detail { padding:.3rem 0 .6rem; }
+.timeline { list-style:none; margin:.3rem 0; padding:0; font-size:.83rem; }
+.timeline li { padding:.12rem 0; }
+.timeline .t { color:#8c959f; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; margin-right:.6rem; }
 .refresh-btn { border-color:#d4a72c; color:#9a6700; }
 .refresh-btn:hover { background:#fff8e6; }
 .nav-badge { display:inline-block; min-width:1.1rem; text-align:center; background:#cf222e; color:#fff; border-radius:10px; font-size:.65rem; font-weight:700; padding:0 .35rem; margin-left:.25rem; line-height:1.4; }

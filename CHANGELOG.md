@@ -23,9 +23,15 @@ All notable changes to DAXter are documented here. The format follows
   **↻ Refresh…**).
 - **Refreshes run as background jobs.** A single-worker `JobService` runs them **one at a time
   in launch order** (so partitions process in sequence), reusing Core's `MaintenanceService`
-  (TMSL). New **Jobs** page with a nav active-count badge. Gated exactly like the MCP/CLI:
-  only with **Allow writes** on, and **always refused for PROD** targets. **Cancellation**
-  skips queued jobs and aborts a running refresh (closes its connection).
+  (TMSL). Gated exactly like the MCP/CLI: only with **Allow writes** on, and **always refused
+  for PROD** targets. **Cancellation** skips queued jobs and aborts a running refresh (closes
+  its connection).
+- **Jobs page shows progress, an activity log, and an ETA.** Each job has a live **Step**
+  (Queued → Started → Connecting → Processing → Completed/Failed), a click-to-expand
+  **activity-log timeline**, and — once a similar refresh has run before — an **estimated
+  duration** from history (`~Ns est.`) with a progress bar (elapsed vs estimate, updated every
+  second). Durations are remembered per kind+dataset+table in a persisted `JobHistoryStore`
+  (`~/.daxter/job-history.json`). The **nav shows `Jobs (N)`** while N are active.
 - **Browse is now the default Explore tab** (and listed first); the workspace list loads on
   arrival so you land straight in the explorer.
 - **Back button in Browse.** The drill-down explorer now has a **← Back** that returns to the

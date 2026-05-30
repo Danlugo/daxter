@@ -4,10 +4,10 @@
 
 <PageTitle>DAXter — Jobs</PageTitle>
 
-<h1>Jobs</h1>
+<h1>Jobs@(Svc.ActiveCount > 0 ? $" ({Svc.ActiveCount} running)" : "")</h1>
 <p class="muted">
     Refresh operations run here as background jobs — one at a time, in the order you launch them.
-    Launch them from Explore → Browse → a dataset or table (with <strong>Allow writes</strong> on).
+    Click a row for its activity log. Launch refreshes from the <a href="refresh">Refresh</a> page.
 </p>
 
 <div class="cmd-group">
@@ -25,20 +25,39 @@ else
     <div class="grid-wrap">
         <table class="grid">
             <thead>
-                <tr><th>#</th><th>Status</th><th>Job</th><th>Target</th><th>Duration</th><th></th><th>Detail</th></tr>
+                <tr><th></th><th>#</th><th>Status</th><th>Job</th><th>Step</th><th>Time / est.</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var j in jobs)
                 {
-                    <tr class="lvl-@j.Status">
+                    <tr class="lvl-@j.Status job-row" @onclick="() => Toggle(j.Id)">
+                        <td class="nowrap">@(expanded.Contains(j.Id) ? "▾" : "▸")</td>
                         <td class="nowrap">@j.Id</td>
                         <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
                         <td>@j.Title</td>
-                        <td class="nowrap muted">@j.Spec.Workspace / @j.Spec.Dataset</td>
-                        <td class="nowrap">@Fmt(j.Duration)</td>
-                        <td>@if (j.CanCancel) { <button class="btn-sm" @onclick="() => Cancel(j.Id)">Cancel</button> }</td>
-                        <td class="msg">@(j.Error ?? (j.Status == JobStatus.Queued ? "waiting…" : ""))</td>
+                        <td class="nowrap muted">@(j.Step ?? "")</td>
+                        <td class="nowrap">@TimeCell(j)</td>
+                        <td>@if (j.CanCancel) { <button class="btn-sm" @onclick:stopPropagation="true" @onclick="() => Cancel(j.Id)">Cancel</button> }</td>
                     </tr>
+                    @if (j.Status == JobStatus.Running && j.Progress is { } p)
+                    {
+                        <tr class="progress-row"><td colspan="7"><div class="pbar"><div class="pbar-fill" style="width:@((int)(p * 100))%"></div></div></td></tr>
+                    }
+                    @if (expanded.Contains(j.Id))
+                    {
+                        <tr class="detail-row"><td colspan="7">
+                            <div class="job-detail">
+                                <div class="muted">@j.Spec.Workspace / @j.Spec.Dataset</div>
+                                <ul class="timeline">
+                                    @foreach (var e in Svc.EventsOf(j.Id))
+                                    {
+                                        <li><span class="t">@e.Time.ToString("HH:mm:ss")</span> @e.Message</li>
+                                    }
+                                </ul>
+                                @if (j.Error is not null) { <pre class="code">@j.Error</pre> }
+                            </div>
+                        </td></tr>
+                    }
                 }
             </tbody>
         </table>
@@ -47,23 +66,37 @@ else
 
 @code {
     private IReadOnlyList<Job> jobs = Array.Empty<Job>();
+    private readonly HashSet<int> expanded = new();
+    private Timer? ticker;
 
     protected override void OnInitialized()
     {
         Svc.Changed += OnChanged;
         Refresh();
+        // Tick once a second so elapsed time / progress update while a job runs.
+        ticker = new Timer(_ => InvokeAsync(() => { if (Svc.ActiveCount > 0) StateHasChanged(); }),
+            null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     private void Refresh() => jobs = Svc.Snapshot();
-
     private void ClearFinished() { Svc.ClearFinished(); Refresh(); }
-
     private void Cancel(int id) { Svc.Cancel(id); Refresh(); }
-
+    private void Toggle(int id) { if (!expanded.Remove(id)) expanded.Add(id); }
     private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
 
-    private static string Fmt(TimeSpan? d)
-        => d is null ? "" : d.Value.TotalSeconds < 1 ? "<1s" : $"{(int)d.Value.TotalSeconds}s";
+    private string TimeCell(Job j)
+    {
+        var elapsed = j.Duration is { } d ? (d.TotalSeconds < 1 ? "<1s" : $"{(int)d.TotalSeconds}s") : "";
+        if (j.Status == JobStatus.Running && j.EstimateSeconds is { } est)
+            return $"{elapsed} / ~{(int)est}s";
+        if (j.Status == JobStatus.Queued && j.EstimateSeconds is { } e2)
+            return $"~{(int)e2}s est.";
+        return elapsed;
+    }
 
-    public void Dispose() => Svc.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Svc.Changed -= OnChanged;
+        ticker?.Dispose();
+    }
 }

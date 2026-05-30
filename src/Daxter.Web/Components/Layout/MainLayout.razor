@@ -11,7 +11,7 @@
         <NavLink href="explore">Explore</NavLink>
         <NavLink href="refresh">Refresh</NavLink>
         <NavLink href="configure">Configure</NavLink>
-        <NavLink href="jobs">Jobs@if (Jobs.ActiveCount > 0) { <span class="nav-badge">@Jobs.ActiveCount</span> }</NavLink>
+        <NavLink href="jobs">@(Jobs.ActiveCount > 0 ? $"Jobs ({Jobs.ActiveCount})" : "Jobs")</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
 </header>

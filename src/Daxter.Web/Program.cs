@@ -17,6 +17,7 @@ builder.Services.AddHttpClient("github", c =>
 builder.Services.AddSingleton<VersionService>();
 builder.Services.AddSingleton<UsageStore>();
 builder.Services.AddSingleton<QueryHistoryStore>();
+builder.Services.AddSingleton<JobHistoryStore>();
 builder.Services.AddSingleton<JobService>();
 
 // Capture app logs into an in-memory buffer the Logs page reads (in addition to the console).

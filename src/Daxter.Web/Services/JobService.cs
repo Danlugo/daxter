@@ -15,6 +15,9 @@ public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled }
 public sealed record RefreshSpec(
     RefreshKind Kind, string Workspace, string Dataset, string? Table, string? Partition, PartitionOrder Order);
 
+/// <summary>One timestamped step in a job's activity log.</summary>
+public sealed record JobEvent(DateTimeOffset Time, string Message);
+
 /// <summary>A queued/running/finished refresh, shown on the Jobs page.</summary>
 public sealed class Job
 {
@@ -31,8 +34,28 @@ public sealed class Job
     internal IDisposable? Session { get; set; }
     internal bool CancelRequested { get; set; }
 
+    /// <summary>Timestamped activity log (Queued → Started → Connecting → Executing → Done/…).</summary>
+    public List<JobEvent> Events { get; } = new();
+
+    /// <summary>The latest activity message (what the job is doing now).</summary>
+    public string? Step { get; set; }
+
+    /// <summary>Estimated total seconds from history (set at enqueue); null if no history yet.</summary>
+    public double? EstimateSeconds { get; set; }
+
     public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
     public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
+
+    /// <summary>0..0.99 progress while running, from elapsed vs estimate; null if no estimate.</summary>
+    public double? Progress
+    {
+        get
+        {
+            if (Status != JobStatus.Running || EstimateSeconds is not { } est || est <= 0 || Duration is not { } d)
+                return null;
+            return Math.Clamp(d.TotalSeconds / est, 0, 0.99);
+        }
+    }
 }
 
 /// <summary>
@@ -46,6 +69,7 @@ public sealed class JobService
 {
     private readonly ConfigState _state;
     private readonly ILogger<JobService> _log;
+    private readonly JobHistoryStore _history;
 
     private readonly object _gate = new();
     private readonly List<Job> _jobs = new();
@@ -55,10 +79,33 @@ public sealed class JobService
 
     public event Action? Changed;
 
-    public JobService(ConfigState state, ILogger<JobService> log)
+    public JobService(ConfigState state, ILogger<JobService> log, JobHistoryStore history)
     {
         _state = state;
         _log = log;
+        _history = history;
+    }
+
+    /// <summary>History signature: same kind+dataset+table pool together (partition name ignored).</summary>
+    private static string Sig(RefreshSpec s) => $"{s.Kind}|{s.Workspace}|{s.Dataset}|{s.Table}";
+
+    /// <summary>Estimated duration (seconds) for a spec, from past runs; null if none yet.</summary>
+    public double? EstimateSeconds(RefreshSpec spec) => _history.EstimateSeconds(Sig(spec));
+
+    /// <summary>A copy of a job's activity log (thread-safe).</summary>
+    public IReadOnlyList<JobEvent> EventsOf(int id)
+    {
+        lock (_gate)
+            return _jobs.FirstOrDefault(j => j.Id == id)?.Events.ToList() ?? new List<JobEvent>();
+    }
+
+    private void AddEvent(Job job, string message)
+    {
+        lock (_gate)
+        {
+            job.Events.Add(new JobEvent(DateTimeOffset.Now, message));
+            job.Step = message;
+        }
     }
 
     /// <summary>Validates the write gate and enqueues a refresh. Throws if writes are off or the
@@ -81,10 +128,12 @@ public sealed class JobService
         lock (_gate)
         {
             job = new Job { Id = _nextId++, Title = TitleFor(spec), Spec = spec };
+            job.EstimateSeconds = _history.EstimateSeconds(Sig(spec));
             _jobs.Add(job);
             _queue.Enqueue(job);
         }
 
+        AddEvent(job, "Queued");
         _log.LogInformation("Queued job #{Id}: {Title}", job.Id, job.Title);
         EnsureWorker();
         Changed?.Invoke();
@@ -182,6 +231,7 @@ public sealed class JobService
 
                 job.Status = JobStatus.Running;
                 job.Started = DateTimeOffset.Now;
+                AddEvent(job, "Started");
                 _log.LogInformation("Running job #{Id}: {Title}", job.Id, job.Title);
                 Changed?.Invoke();
 
@@ -189,17 +239,21 @@ public sealed class JobService
                 {
                     await ExecuteAsync(job);
                     job.Status = JobStatus.Succeeded;
+                    AddEvent(job, $"Completed in {(int)(job.Duration?.TotalSeconds ?? 0)}s");
+                    _history.Record(Sig(job.Spec), job.Duration?.TotalSeconds ?? 0);
                     _log.LogInformation("Job #{Id} succeeded in {Ms} ms", job.Id, (long)(job.Duration?.TotalMilliseconds ?? 0));
                 }
                 catch (Exception) when (job.CancelRequested)
                 {
                     job.Status = JobStatus.Canceled;
+                    AddEvent(job, "Canceled");
                     _log.LogInformation("Job #{Id} canceled", job.Id);
                 }
                 catch (Exception ex)
                 {
                     job.Status = JobStatus.Failed;
                     job.Error = ex.Message;
+                    AddEvent(job, "Failed");
                     _log.LogError("Job #{Id} failed: {Error}", job.Id, ex.Message);
                 }
                 finally
@@ -223,6 +277,9 @@ public sealed class JobService
         var cfg = _state.ToConfig(spec.Workspace, spec.Dataset);
         ITokenProvider provider = new MsalTokenProvider(cfg, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
         var factory = new AdomdXmlaSessionFactory(cfg, provider);
+
+        AddEvent(job, "Connecting to the model…");
+        Changed?.Invoke();
         var session = await factory.CreateAsync();
         lock (_gate) job.Session = session;   // so Cancel can abort the running command
 
@@ -238,6 +295,8 @@ public sealed class JobService
                 _ => throw new DaxterException("Unknown refresh kind."),
             };
 
+            AddEvent(job, "Processing (TMSL refresh)…");
+            Changed?.Invoke();
             maint.Execute(tmsl);
         }
         finally
