@@ -9,8 +9,10 @@ All notable changes to DAXter are documented here. The format follows
 ### Added
 - **One-click "run it" actions in Explore.** Drill into a **table** → **Top 10 rows →** /
   **Top 100 rows →** buttons jump to the DAX tab pre-filled with `EVALUATE TOPN(n, 'Table')`
-  and run it. The **Measures** command is now a **clickable list** — click a measure to **run it**
-  (`EVALUATE ROW("Measure", [Measure])`) and see its value. Table/measure names are DAX-escaped.
+  and run it. **Measures** are now a **clickable list** that drills into a **measure detail**
+  showing its **DAX definition** (expression + display folder) with a **Run measure →** button
+  (`EVALUATE ROW("Measure", [Measure])`) — so you can both **read** and **run** it. Table/measure
+  names are DAX-escaped; the measure detail joins the Browse back-stack.
 - **Per-partition progress for "all / pick partitions" refreshes.** These jobs now refresh each
   partition as its own step, so the Jobs page shows **"Partition X / N: <name>"**, a progress bar
   that advances per completed partition, and an **activity log with the time each partition took**

@@ -94,12 +94,16 @@ else
         @if (!string.IsNullOrEmpty(dataset))
         {
             <span>›</span>
-            @if (!string.IsNullOrEmpty(selTable)) { <button class="link" @onclick="BrowseDataset">@dataset</button> }
+            @if (!string.IsNullOrEmpty(selTable) || !string.IsNullOrEmpty(selMeasure)) { <button class="link" @onclick="BrowseDataset">@dataset</button> }
             else { <span class="crumb-current">@dataset</span> }
         }
         @if (!string.IsNullOrEmpty(selTable))
         {
             <span>›</span><span class="crumb-current">@selTable</span>
+        }
+        else if (!string.IsNullOrEmpty(selMeasure))
+        {
+            <span>›</span><span class="crumb-current">[@selMeasure]</span>
         }
     </nav>
 
@@ -128,6 +132,22 @@ else
             <ResultGrid Result="result" Error="@error" />
         }
     }
+    else if (!string.IsNullOrEmpty(selMeasure))
+    {
+        <div class="cmd-group">
+            <button class="btn" @onclick="() => RunMeasure(selMeasure!)">Run measure →</button>
+            <span class="muted">@selMeasure@(string.IsNullOrEmpty(MeasureField("DisplayFolder")) ? "" : " · " + MeasureField("DisplayFolder"))</span>
+        </div>
+        <div class="side-h">DAX definition</div>
+        @if (string.IsNullOrEmpty(MeasureField("Expression")))
+        {
+            <p class="muted">No expression available for this measure.</p>
+        }
+        else
+        {
+            <pre class="code">@MeasureField("Expression")</pre>
+        }
+    }
     else if (string.IsNullOrEmpty(selTable))
     {
         <div class="cmd-group">
@@ -152,8 +172,8 @@ else
         else if (modelView == ModelView.Measures)
         {
             <ErrorBanner Message="@error" />
-            <p class="muted">Click a measure to <strong>run it</strong> (evaluates the measure and shows its value).</p>
-            <ClickableList Items="modelMeasures" OnSelect="RunMeasure"
+            <p class="muted">Click a measure to see its <strong>DAX definition</strong> and run it.</p>
+            <ClickableList Items="modelMeasures" OnSelect="SelectMeasure"
                            Empty="@(busy ? "Loading…" : "No measures.")" />
         }
         else
@@ -204,6 +224,8 @@ else
     private List<string> modelMeasures = new();
     private string workspace = "", dataset = "", dax = "";
     private string? selTable;
+    private string? selMeasure;
+    private QueryResult? measuresResult;
     private string? defaultWorkspace, defaultDataset;
     private QueryResult? result;
     private string? error;
@@ -215,9 +237,10 @@ else
     private bool CanGoBack => back.Count > 0;
 
     private sealed record BrowseState(
-        string Workspace, string Dataset, string? SelTable,
+        string Workspace, string Dataset, string? SelTable, string? SelMeasure,
         WsView WsView, ModelView ModelView, TableView TableView,
-        List<string> Datasets, List<string> ModelTables, List<string> ModelMeasures, QueryResult? Result, string? Error);
+        List<string> Datasets, List<string> ModelTables, List<string> ModelMeasures,
+        QueryResult? MeasuresResult, QueryResult? Result, string? Error);
 
     private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
 
@@ -278,21 +301,21 @@ else
         if (workspaces.Count == 0) await LoadWorkspaces();
     }
 
-    private void BrowseRoot() { PushBack(); workspace = ""; dataset = ""; selTable = null; modelView = ModelView.None; result = null; }
+    private void BrowseRoot() { PushBack(); workspace = ""; dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; result = null; }
 
     private async Task BrowseWorkspace()
     {
         PushBack();
-        dataset = ""; selTable = null; modelView = ModelView.None; wsView = WsView.Datasets; result = null;
+        dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; wsView = WsView.Datasets; result = null;
         if (datasets.Count == 0 && !string.IsNullOrEmpty(workspace)) await OnWorkspaceChanged();
     }
 
-    private void BrowseDataset() { PushBack(); selTable = null; modelView = ModelView.None; result = null; }
+    private void BrowseDataset() { PushBack(); selTable = null; selMeasure = null; modelView = ModelView.None; result = null; }
 
     private async Task SelectWorkspace(string ws)
     {
         PushBack();
-        workspace = ws; selTable = null; wsView = WsView.Datasets;
+        workspace = ws; selTable = null; selMeasure = null; wsView = WsView.Datasets;
         await OnWorkspaceChanged();
         result = null;
     }
@@ -300,14 +323,14 @@ else
     private void SelectDataset(string ds)
     {
         PushBack();
-        dataset = ds; selTable = null; modelView = ModelView.None; result = null;
+        dataset = ds; selTable = null; selMeasure = null; modelView = ModelView.None; result = null;
         Usage.Record(UsageStore.Dataset, ds, workspace, UsageStore.ExploreContext);
     }
 
     private async Task SelectTable(string t)
     {
         PushBack();
-        selTable = t;
+        selTable = t; selMeasure = null;
         Usage.Record(UsageStore.Table, t, $"{workspace}{Sep}{dataset}", UsageStore.ExploreContext);
         await ShowMcode();   // show M code by default
     }
@@ -336,7 +359,7 @@ else
 
     private async Task OnWorkspaceChanged()
     {
-        datasets = new(); dataset = ""; selTable = null;
+        datasets = new(); dataset = ""; selTable = null; selMeasure = null;
         if (string.IsNullOrEmpty(workspace)) return;
         busy = true; error = null;
         try
@@ -367,9 +390,39 @@ else
     {
         PushBack();
         modelView = ModelView.Measures; result = null; error = null; busy = true; StateHasChanged();
-        try { modelMeasures = ColumnValues(await Ui.MeasuresAsync(workspace, dataset), "Name"); }
+        try
+        {
+            measuresResult = await Ui.MeasuresAsync(workspace, dataset); // keeps Name + Expression + folder
+            modelMeasures = ColumnValues(measuresResult, "Name");
+        }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
+    }
+
+    private void SelectMeasure(string measure)
+    {
+        PushBack();
+        selMeasure = measure; result = null; error = null;
+    }
+
+    /// <summary>A column value for the selected measure, from the loaded measures result.</summary>
+    private string? MeasureField(string column)
+    {
+        if (measuresResult is null || string.IsNullOrEmpty(selMeasure)) return null;
+        var nameIdx = ColIndex(measuresResult, "Name");
+        var colIdx = ColIndex(measuresResult, column);
+        if (nameIdx < 0 || colIdx < 0) return null;
+        foreach (var row in measuresResult.Rows)
+            if (string.Equals(row[nameIdx]?.ToString(), selMeasure, StringComparison.Ordinal))
+                return row[colIdx]?.ToString();
+        return null;
+    }
+
+    private static int ColIndex(QueryResult r, string column)
+    {
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
     }
 
     // ---- quick "run it" actions: prefill the DAX tab and execute ----
@@ -462,17 +515,17 @@ else
     // ---- Back navigation ----
 
     private void PushBack() => back.Push(new BrowseState(
-        workspace, dataset, selTable, wsView, modelView, tableView,
-        datasets, modelTables, modelMeasures, result, error));
+        workspace, dataset, selTable, selMeasure, wsView, modelView, tableView,
+        datasets, modelTables, modelMeasures, measuresResult, result, error));
 
     private void GoBack()
     {
         if (back.Count == 0) return;
         var s = back.Pop();
-        workspace = s.Workspace; dataset = s.Dataset; selTable = s.SelTable;
+        workspace = s.Workspace; dataset = s.Dataset; selTable = s.SelTable; selMeasure = s.SelMeasure;
         wsView = s.WsView; modelView = s.ModelView; tableView = s.TableView;
         datasets = s.Datasets; modelTables = s.ModelTables; modelMeasures = s.ModelMeasures;
-        result = s.Result; error = s.Error;
+        measuresResult = s.MeasuresResult; result = s.Result; error = s.Error;
         busy = false;
     }
 
