@@ -11,8 +11,8 @@ public class DaxterConfigTests
     private static readonly string[] AllVars =
     [
         DaxterConfig.EnvWorkspace, DaxterConfig.EnvDataset, DaxterConfig.EnvTenantId,
-        DaxterConfig.EnvClientId, DaxterConfig.EnvClientSecret, DaxterConfig.EnvAuthMode,
-        DaxterConfig.EnvEnvironment, DaxterConfig.EnvProdWorkspaces,
+        DaxterConfig.EnvClientId, DaxterConfig.EnvClientSecret, DaxterConfig.EnvPublicClientId,
+        DaxterConfig.EnvAuthMode, DaxterConfig.EnvEnvironment, DaxterConfig.EnvProdWorkspaces,
         "DAXTER_WORKSPACE_DEV", "DAXTER_WORKSPACE_QA", "DAXTER_DATASET_DEV",
     ];
 
@@ -129,6 +129,33 @@ public class DaxterConfigTests
     public void Validate_passes_for_device_code_without_credentials()
     {
         new DaxterConfig { Workspace = "WS", AuthMode = AuthMode.DeviceCode }.Validate();
+    }
+
+    [Fact]
+    public void PublicClientId_is_separate_from_service_principal_client_id()
+    {
+        // A service-principal client id (confidential app) must NOT bleed into the public
+        // client id used by device-code — that caused AADSTS7000218 ("must contain client_secret").
+        WithEnv(new Dictionary<string, string?>
+        {
+            [DaxterConfig.EnvWorkspace] = "WS",
+            [DaxterConfig.EnvClientId] = "sp-confidential-app",
+        }, () =>
+        {
+            var config = DaxterConfig.FromEnvironment();
+            Assert.Equal("sp-confidential-app", config.ClientId);
+            Assert.Null(config.PublicClientId); // → falls back to DefaultPublicClientId, not the SP id
+        });
+    }
+
+    [Fact]
+    public void FromEnvironment_reads_public_client_id_override()
+    {
+        WithEnv(new Dictionary<string, string?>
+        {
+            [DaxterConfig.EnvWorkspace] = "WS",
+            [DaxterConfig.EnvPublicClientId] = "my-native-app",
+        }, () => Assert.Equal("my-native-app", DaxterConfig.FromEnvironment().PublicClientId));
     }
 
     [Fact]

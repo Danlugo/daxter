@@ -187,9 +187,12 @@ public sealed class MsalTokenProvider : ITokenProvider
 
     private async Task<IPublicClientApplication> BuildUserAppAsync()
     {
-        var clientId = string.IsNullOrWhiteSpace(_config.ClientId)
+        // Device-code requires a PUBLIC client. Never use _config.ClientId here — that is the
+        // service-principal (confidential) app id and the token endpoint would reject the
+        // public device-code request with AADSTS7000218 ("must contain client_secret").
+        var clientId = string.IsNullOrWhiteSpace(_config.PublicClientId)
             ? DaxterConfig.DefaultPublicClientId
-            : _config.ClientId;
+            : _config.PublicClientId;
 
         var app = PublicClientApplicationBuilder
             .Create(clientId)

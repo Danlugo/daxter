@@ -7,6 +7,12 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.3] - 2026-05-29
 
 ### Fixed
+- **Device-code sign-in no longer fails with `AADSTS7000218 / invalid_client`.** When an env had a
+  service-principal `DAXTER_CLIENT_ID` (+secret) *and* used device-code auth (the default), the
+  device-code flow reused that **confidential** app id as a public client — so Entra demanded a
+  client secret and sign-in failed. Device-code now always uses a **public** client:
+  `DefaultPublicClientId`, or a new optional `DAXTER_PUBLIC_CLIENT_ID` for your own native app.
+  `DAXTER_CLIENT_ID` is now strictly the service-principal (confidential) id.
 - **Sign-in page is now click-to-open.** The device-code prompt renders the verification URL as a
   **clickable link** (opens in a new tab) and the user code in a large, **one-click-copy** field —
   no more selecting/copying out of a text blob. (`DeviceLogin` now carries the structured

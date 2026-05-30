@@ -22,11 +22,23 @@ public sealed class DaxterConfig
     /// <summary>Entra ID tenant id (GUID) or domain. Required for service principal.</summary>
     public string? TenantId { get; init; }
 
-    /// <summary>App registration (client) id used by MSAL.</summary>
+    /// <summary>
+    /// Service-principal (confidential) app registration id, used by client-credentials auth.
+    /// <b>Not</b> used for the device-code flow — that needs a public client (see
+    /// <see cref="PublicClientId"/>), because a confidential app id demands a secret at the
+    /// token endpoint (AADSTS7000218).
+    /// </summary>
     public string? ClientId { get; init; }
 
     /// <summary>Client secret. Service-principal mode only. Never hardcode — read from env.</summary>
     public string? ClientSecret { get; init; }
+
+    /// <summary>
+    /// Public-client app id for the device-code flow. Optional — defaults to
+    /// <see cref="DefaultPublicClientId"/>. Set <c>DAXTER_PUBLIC_CLIENT_ID</c> only to use your
+    /// own native/public app registration (with "Allow public client flows" enabled).
+    /// </summary>
+    public string? PublicClientId { get; init; }
 
     /// <summary>Authentication mode. Defaults to <see cref="AuthMode.DeviceCode"/>.</summary>
     public AuthMode AuthMode { get; init; } = AuthMode.DeviceCode;
@@ -46,6 +58,7 @@ public sealed class DaxterConfig
     public const string EnvTenantId = "DAXTER_TENANT_ID";
     public const string EnvClientId = "DAXTER_CLIENT_ID";
     public const string EnvClientSecret = "DAXTER_CLIENT_SECRET";
+    public const string EnvPublicClientId = "DAXTER_PUBLIC_CLIENT_ID";
     public const string EnvAuthMode = "DAXTER_AUTH_MODE";
     public const string EnvEnvironment = "DAXTER_ENV";
     public const string EnvProdWorkspaces = "DAXTER_PROD_WORKSPACES";
@@ -106,6 +119,7 @@ public sealed class DaxterConfig
             TenantId = tenantId ?? Env(EnvTenantId),
             ClientId = clientId ?? Env(EnvClientId),
             ClientSecret = clientSecret ?? Env(EnvClientSecret),
+            PublicClientId = Env(EnvPublicClientId),
             AuthMode = resolvedAuth,
             Environment = string.IsNullOrWhiteSpace(activeEnv) ? null : activeEnv!.Trim().ToLowerInvariant(),
             ProdWorkspaces = ParseList(Env(EnvProdWorkspaces)),

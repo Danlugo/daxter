@@ -20,6 +20,7 @@ public sealed class ConfigState
     public string? TenantId { get; set; }
     public string? ClientId { get; set; }
     public string? ClientSecret { get; set; }
+    public string? PublicClientId { get; set; }
     public string? Workspace { get; set; }
     public string? Dataset { get; set; }
     public string? ProdWorkspaces { get; set; }
@@ -45,6 +46,7 @@ public sealed class ConfigState
         TenantId = Env("DAXTER_TENANT_ID");
         ClientId = Env("DAXTER_CLIENT_ID");
         ClientSecret = Env("DAXTER_CLIENT_SECRET");
+        PublicClientId = Env("DAXTER_PUBLIC_CLIENT_ID");
         Workspace = Env("DAXTER_WORKSPACE");
         Dataset = Env("DAXTER_DATASET");
         ProdWorkspaces = Env("DAXTER_PROD_WORKSPACES");
@@ -89,6 +91,7 @@ public sealed class ConfigState
         TenantId = TenantId,
         ClientId = ClientId,
         ClientSecret = ClientSecret,
+        PublicClientId = PublicClientId,
         AuthMode = string.Equals(AuthMode, "service-principal", StringComparison.OrdinalIgnoreCase)
             ? Daxter.Core.Auth.AuthMode.ServicePrincipal
             : Daxter.Core.Auth.AuthMode.DeviceCode,
