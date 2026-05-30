@@ -21,13 +21,15 @@ public sealed class MsalTokenProvider : ITokenProvider
     private readonly DaxterConfig _config;
     private readonly Func<DeviceCodeResult, Task> _deviceCodeCallback;
     private readonly string _cacheDirectory;
+    private readonly bool _allowInteractive;
 
     private XmlaAccessToken? _cached;
 
     public MsalTokenProvider(
         DaxterConfig config,
         Action<string>? deviceCodePrompt = null,
-        string? cacheDirectory = null)
+        string? cacheDirectory = null,
+        bool allowInteractive = true)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _deviceCodeCallback = result =>
@@ -36,6 +38,7 @@ public sealed class MsalTokenProvider : ITokenProvider
             return Task.CompletedTask;
         };
         _cacheDirectory = cacheDirectory ?? DefaultCacheDirectory();
+        _allowInteractive = allowInteractive;
     }
 
     public async Task<XmlaAccessToken> GetTokenAsync(CancellationToken cancellationToken = default)
@@ -77,17 +80,7 @@ public sealed class MsalTokenProvider : ITokenProvider
 
     private async Task<AuthenticationResult> AcquireForUserAsync(CancellationToken ct)
     {
-        var clientId = string.IsNullOrWhiteSpace(_config.ClientId)
-            ? DaxterConfig.DefaultPublicClientId
-            : _config.ClientId;
-
-        var app = PublicClientApplicationBuilder
-            .Create(clientId)
-            .WithAuthority(AuthorityFor(_config.TenantId ?? "organizations"))
-            .WithDefaultRedirectUri()
-            .Build();
-
-        await TryAttachPersistentCacheAsync(app);
+        var app = await BuildUserAppAsync();
 
         // Try the cache first so a previously signed-in user isn't re-prompted.
         var account = (await app.GetAccountsAsync()).FirstOrDefault();
@@ -99,13 +92,85 @@ public sealed class MsalTokenProvider : ITokenProvider
             }
             catch (MsalUiRequiredException)
             {
-                // Fall through to interactive device code.
+                // Fall through.
             }
+        }
+
+        if (!_allowInteractive)
+        {
+            // MCP/headless: don't block on a device-code prompt the user can't see.
+            throw new DaxterException(
+                "Not signed in to Power BI. Use the daxter_login tool to sign in (or `daxter login`).");
         }
 
         return await app
             .AcquireTokenWithDeviceCode(Scopes, _deviceCodeCallback)
             .ExecuteAsync(ct);
+    }
+
+    /// <summary>
+    /// Starts the device-code flow and returns the sign-in message (URL + code)
+    /// <b>immediately</b>; the token is acquired and cached in the background once the user
+    /// authenticates. For the in-chat <c>daxter_login</c> tool, so the code can be shown
+    /// without the call blocking. Returns "Already signed in." if a cached token is valid.
+    /// </summary>
+    public async Task<string> BeginInteractiveLoginAsync(CancellationToken cancellationToken = default)
+    {
+        if (_config.AuthMode == AuthMode.ServicePrincipal)
+        {
+            throw new DaxterException(
+                "This server uses a service principal — no interactive sign-in is needed.");
+        }
+
+        var app = await BuildUserAppAsync();
+        var account = (await app.GetAccountsAsync()).FirstOrDefault();
+        if (account is not null)
+        {
+            try
+            {
+                await app.AcquireTokenSilent(Scopes, account).ExecuteAsync(cancellationToken);
+                return "Already signed in.";
+            }
+            catch (MsalUiRequiredException)
+            {
+                // Need a fresh sign-in.
+            }
+        }
+
+        var messageReady = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await app.AcquireTokenWithDeviceCode(Scopes, result =>
+                {
+                    messageReady.TrySetResult(result.Message);
+                    return Task.CompletedTask;
+                }).ExecuteAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                messageReady.TrySetException(ex);
+            }
+        }, CancellationToken.None);
+
+        return await messageReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+    }
+
+    private async Task<IPublicClientApplication> BuildUserAppAsync()
+    {
+        var clientId = string.IsNullOrWhiteSpace(_config.ClientId)
+            ? DaxterConfig.DefaultPublicClientId
+            : _config.ClientId;
+
+        var app = PublicClientApplicationBuilder
+            .Create(clientId)
+            .WithAuthority(AuthorityFor(_config.TenantId ?? "organizations"))
+            .WithDefaultRedirectUri()
+            .Build();
+
+        await TryAttachPersistentCacheAsync(app);
+        return app;
     }
 
     private async Task TryAttachPersistentCacheAsync(IPublicClientApplication app)

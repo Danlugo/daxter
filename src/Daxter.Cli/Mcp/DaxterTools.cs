@@ -13,6 +13,10 @@ namespace Daxter.Cli.Mcp;
 [McpServerToolType]
 public static class DaxterTools
 {
+    [McpServerTool(Name = "daxter_login"), Description("Sign in to Power BI interactively (device code). Returns a URL and a code to enter in your browser; once you complete it, the other tools run as you. Call this if a tool reports 'Not signed in'. (No effect when the server uses a service principal.)")]
+    public static Task<string> Login(CancellationToken ct = default)
+        => DaxterToolRuntime.LoginAsync(ct);
+
     [McpServerTool(Name = "daxter_query"), Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON.")]
     public static Task<string> Query(
         [Description("The DAX or MDX query, e.g. EVALUATE TOPN(10, Sales)")] string query,
@@ -81,9 +85,9 @@ public static class DaxterTools
             return await rest.RefreshHistoryAsync(groupId, datasetId, top, c);
         }, ct);
 
-    [McpServerTool(Name = "daxter_workspaces"), Description("List Power BI workspaces (with their group ids) the identity can see.")]
+    [McpServerTool(Name = "daxter_workspaces"), Description("List Power BI workspaces (with their group ids) the identity can see. No workspace needs to be configured first.")]
     public static Task<string> Workspaces(CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.GroupsAsync(c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.GroupsAsync(c), ct);
 
     [McpServerTool(Name = "daxter_datasets"), Description("List datasets in a workspace.")]
     public static Task<string> Datasets(string? workspace = null, CancellationToken ct = default)
@@ -120,7 +124,7 @@ public static class DaxterTools
 
     [McpServerTool(Name = "daxter_gateways"), Description("List gateways visible to the identity (requires gateway-admin rights).")]
     public static Task<string> Gateways(CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.GatewaysAsync(c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.GatewaysAsync(c), ct);
 
     [McpServerTool(Name = "daxter_datasources"), Description("Data sources and gateway binding used by a dataset's refresh.")]
     public static Task<string> Datasources(string? dataset = null, string? workspace = null, CancellationToken ct = default)
@@ -142,17 +146,17 @@ public static class DaxterTools
 
     [McpServerTool(Name = "daxter_pipelines"), Description("List Fabric / Power BI deployment pipelines.")]
     public static Task<string> Pipelines(CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelinesAsync(c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.PipelinesAsync(c), ct);
 
     [McpServerTool(Name = "daxter_pipeline_stages"), Description("A deployment pipeline's stages (dev/test/prod) and their workspaces.")]
     public static Task<string> PipelineStages(
         [Description("Pipeline id (from daxter_pipelines).")] string pipelineId, CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelineStagesAsync(pipelineId, c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.PipelineStagesAsync(pipelineId, c), ct);
 
     [McpServerTool(Name = "daxter_pipeline_operations"), Description("Recent deploy operations for a pipeline.")]
     public static Task<string> PipelineOperations(
         [Description("Pipeline id (from daxter_pipelines).")] string pipelineId, CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelineOperationsAsync(pipelineId, c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.PipelineOperationsAsync(pipelineId, c), ct);
 
     // ---- Gated write tools (DRY-RUN by default; disabled unless DAXTER_MCP_ALLOW_WRITES=true) ----
 

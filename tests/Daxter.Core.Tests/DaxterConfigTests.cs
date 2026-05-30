@@ -46,6 +46,16 @@ public class DaxterConfigTests
     }
 
     [Fact]
+    public void FromEnvironment_allows_no_workspace_when_not_required()
+    {
+        WithEnv(new Dictionary<string, string?>(), () =>
+        {
+            var config = DaxterConfig.FromEnvironment(requireWorkspace: false);
+            Assert.Equal(string.Empty, config.Workspace);
+        });
+    }
+
+    [Fact]
     public void FromEnvironment_reads_workspace_and_defaults_to_device_code()
     {
         WithEnv(new Dictionary<string, string?> { [DaxterConfig.EnvWorkspace] = "WS" }, () =>

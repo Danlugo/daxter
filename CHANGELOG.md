@@ -4,6 +4,19 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-29
+
+### Added
+- **Sign-in-as-yourself onboarding (MCP).** New **`daxter_login`** tool returns the
+  device-code URL + code as the tool result (shown in chat) and finishes auth in the
+  background — no terminal needed. Normal tools no longer block on an interactive prompt:
+  if not signed in they return a clear "use the daxter_login tool" message.
+- Tenant-level tools (`daxter_workspaces`, `daxter_gateways`, `daxter_pipelines`,
+  `daxter_pipeline_stages`/`_operations`) now run with **no workspace configured**, so you
+  can sign in and then pick a workspace (`DaxterConfig.FromEnvironment(requireWorkspace: false)`).
+- **26 MCP tools**. `SETUP.md` now defaults to device-code (your own login); service
+  principal is documented as the automation alternative.
+
 ## [1.4.0] - 2026-05-29
 
 ### Added

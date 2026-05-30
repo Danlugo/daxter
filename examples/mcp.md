@@ -14,6 +14,18 @@ the environment, e.g. `Marketing - QA`; an unsuffixed name like `Sales Analytics
 > `Sales Analytics - Dev`, default model `Retail Model`. Name another workspace to target
 > it. It's read-only unless writes are explicitly enabled. Start with `daxter_workspaces`.
 
+## Sign in (device-code default)
+
+When the server is configured for your own login (default), sign in once per machine:
+
+| Ask | Tool |
+|-----|------|
+| "Sign in to Power BI" | `daxter_login` — returns a URL + code; open it, enter the code, sign in. The token is then cached. |
+| "List my workspaces" (after sign-in) | `daxter_workspaces` — then pick a default, or name a workspace per request. |
+
+If any tool replies *"Not signed in to Power BI"*, just say "sign in" again. (With a service
+principal there's nothing to sign in — it's already authenticated.)
+
 ## Query & metadata
 
 | Ask | Tool |

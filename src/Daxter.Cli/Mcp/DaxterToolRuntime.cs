@@ -144,8 +144,31 @@ internal static class DaxterToolRuntime
         => DaxterConfig.FromEnvironment(workspace: workspace, dataset: dataset);
 
     private static ITokenProvider Provider(DaxterConfig config)
-        // Device-code prompt → stderr so it never corrupts the stdio JSON-RPC channel.
-        => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine);
+        // Headless: never block on an interactive device-code prompt the user can't see —
+        // normal tools require a token cached by `daxter_login`. Device-code prompt → stderr.
+        => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
+
+    /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
+    private static DaxterConfig TenantConfig() => DaxterConfig.FromEnvironment(requireWorkspace: false);
+
+    /// <summary>Starts interactive sign-in and returns the device-code message for the user.</summary>
+    public static async Task<string> LoginAsync(CancellationToken ct)
+    {
+        var provider = new MsalTokenProvider(TenantConfig(), deviceCodePrompt: Console.Error.WriteLine);
+        var message = await provider.BeginInteractiveLoginAsync(ct);
+        return message +
+            "\n\nComplete the sign-in in your browser, then ask me to list your workspaces " +
+            "so you can pick a default.";
+    }
+
+    /// <summary>Runs a tenant-level REST call (no workspace required).</summary>
+    public static async Task<string> RestTenantAsync(
+        Func<PowerBiRestClient, CancellationToken, Task<QueryResult>> op, CancellationToken ct)
+    {
+        var config = TenantConfig();
+        using var rest = new PowerBiRestClient(Provider(config));
+        return Format(await op(rest, ct));
+    }
 
     private static DaxterConfig WithDataset(DaxterConfig c, string dataset) => new()
     {

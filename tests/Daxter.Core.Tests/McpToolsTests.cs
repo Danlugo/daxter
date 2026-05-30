@@ -20,6 +20,7 @@ public class McpToolsTests
         var names = ToolNames().ToHashSet(StringComparer.Ordinal);
         string[] expected =
         [
+            "daxter_login",
             "daxter_query", "daxter_dmv", "daxter_list_tables", "daxter_measures",
             "daxter_measure", "daxter_mcode", "daxter_parameters", "daxter_partitions",
             "daxter_rls", "daxter_diff_measures", "daxter_refresh_history",

@@ -64,7 +64,8 @@ public sealed class DaxterConfig
         string? clientId = null,
         string? clientSecret = null,
         AuthMode? authMode = null,
-        string? environment = null)
+        string? environment = null,
+        bool requireWorkspace = true)
     {
         static string? Env(string key) =>
             string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(key))
@@ -82,10 +83,18 @@ public sealed class DaxterConfig
         var resolvedWorkspace = workspace ?? PerEnv(EnvWorkspace) ?? Env(EnvWorkspace);
         if (string.IsNullOrWhiteSpace(resolvedWorkspace))
         {
-            var hint = string.IsNullOrWhiteSpace(activeEnv)
-                ? $"Pass --workspace or set {EnvWorkspace}."
-                : $"Pass --workspace or set {EnvWorkspace}_{activeEnv!.ToUpperInvariant()} (or {EnvWorkspace}).";
-            throw new DaxterException($"No workspace configured. {hint}");
+            if (!requireWorkspace)
+            {
+                // Tenant-level operations (list workspaces, gateways, sign-in) need no workspace.
+                resolvedWorkspace = string.Empty;
+            }
+            else
+            {
+                var hint = string.IsNullOrWhiteSpace(activeEnv)
+                    ? $"Pass --workspace or set {EnvWorkspace}."
+                    : $"Pass --workspace or set {EnvWorkspace}_{activeEnv!.ToUpperInvariant()} (or {EnvWorkspace}).";
+                throw new DaxterException($"No workspace configured. {hint}");
+            }
         }
 
         var resolvedAuth = authMode ?? ParseAuthMode(Env(EnvAuthMode));

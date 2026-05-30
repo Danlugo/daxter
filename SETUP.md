@@ -10,10 +10,10 @@ shell commands and edit the config file), or a person can do it manually.
 ## 0. Prerequisites
 
 - **Docker Desktop** installed and **running**.
-- **git** and **python3** (python3 is used only for the safe config merge in step 3).
-- A **Power BI service principal** with access to a Premium/PPU/Fabric workspace:
-  tenant id, client id, client secret. (Tenant admin must enable *"Allow service
-  principals to use Power BI APIs"*, and the SP must be a member of the workspace.)
+- **python3** (used only for the safe config merge in step 3). `git` only if you build from source.
+- A **Power BI account** with access to a Premium/PPU/Fabric workspace — you'll **sign in as
+  yourself** (default). *(For automation/CI you can use a service principal instead — see
+  [Service principal](#alternative-service-principal-automation).)*
 
 ## 1. Get the image
 
@@ -28,33 +28,26 @@ first use. Building from source is optional (`git clone … && make image`).
 
 ## 2. Create the env file
 
-Create an env file anywhere private — e.g. `~/daxter.env` (the image carries no creds, so
-you supply them here). Service-principal is the right mode for a headless MCP server:
+Create an env file anywhere private — e.g. `~/daxter.env`. For the default **sign-in-as-
+yourself** flow it's tiny — no secrets, no workspace required up front (you'll pick one in
+chat after signing in):
 
 ```ini
-DAXTER_AUTH_MODE=service-principal
+DAXTER_AUTH_MODE=device-code
+# Optional but recommended for a single org — pin to your tenant:
 DAXTER_TENANT_ID=<tenant-guid>
-DAXTER_CLIENT_ID=<app-client-id>
-DAXTER_CLIENT_SECRET=<app-secret>
-DAXTER_WORKSPACE=<default workspace name>
-DAXTER_DATASET=<default model name>          # optional
-# optional: protect prod when writes are enabled (unsuffixed prod workspaces)
-# DAXTER_PROD_WORKSPACES=<Prod WS 1>,<Prod WS 2>
+# Optional defaults (or just name a workspace in chat):
+# DAXTER_WORKSPACE=<workspace name>
+# DAXTER_DATASET=<model name>
 ```
 
-(If you cloned the repo, `cp .env.example .env` gives you a starting template.)
-Keep this file private and never commit it.
-
-**Fill in real values now — before you touch Claude Desktop.** Format matters:
+Keep this file private and never commit it. Format matters for any value you do set:
 
 - **No angle brackets** — replace each `<...>` entirely, brackets included.
-- **No surrounding quotes** and **no trailing spaces** on any value.
-- `DAXTER_TENANT_ID` and `DAXTER_CLIENT_ID` must be **GUIDs**
-  (e.g. `12345678-1234-1234-1234-123456789abc`).
-
-A placeholder, empty, or malformed `DAXTER_TENANT_ID` is the #1 cause of setup failure — it
-makes every tool call throw `The authority (including the tenant ID) must be in a
-well-formed URI format`.
+- **No surrounding quotes** and **no trailing spaces**.
+- `DAXTER_TENANT_ID` (and client ids for SP) must be **GUIDs**
+  (e.g. `12345678-1234-1234-1234-123456789abc`). A malformed/empty tenant id makes tools
+  throw `The authority (including the tenant ID) must be in a well-formed URI format`.
 
 > **Editor gotcha:** do **not** edit this file with **Claude Desktop's built-in editor** —
 > it refuses with *"This file can't be saved — its path is outside the session folder."*
@@ -63,6 +56,24 @@ well-formed URI format`.
 > **The container reads `--env-file` only once, at startup**, and Claude Desktop launches it
 > once per session — so **any change to the env file takes effect only after a full
 > quit-and-reopen of Claude Desktop** (step 4), not just saving the file.
+
+### Alternative: service principal (automation)
+
+For a headless/CI server or multi-client automation, use a service principal instead — no
+interactive sign-in, but you must supply the secret and a workspace:
+
+```ini
+DAXTER_AUTH_MODE=service-principal
+DAXTER_TENANT_ID=<tenant-guid>
+DAXTER_CLIENT_ID=<app-client-id>
+DAXTER_CLIENT_SECRET=<app-secret>
+DAXTER_WORKSPACE=<default workspace name>
+DAXTER_DATASET=<model name>                  # optional
+# DAXTER_PROD_WORKSPACES=<Prod WS 1>,<Prod WS 2>   # protect unsuffixed prod from writes
+```
+
+(Tenant admin must enable *"Allow service principals to use Power BI APIs"*; the SP must be a
+member of the workspace.) With SP, skip the sign-in in step 5.
 
 ## 3. Configure Claude Desktop
 
@@ -110,21 +121,30 @@ The equivalent JSON, if editing by hand (use absolute paths):
 
 ## 4. Restart Claude Desktop
 
-> **Do not restart until `daxter.env` contains real values — placeholders cause an auth
-> error.** Restarting while the file still has `<...>` / empty / malformed values makes
-> every tool call fail with `The authority (including the tenant ID) must be in a
-> well-formed URI format`.
+> **If you set any values (tenant id, or service-principal creds), make sure they're real —
+> not `<...>` placeholders — before restarting.** A malformed/empty tenant id makes every
+> tool call fail with `The authority (including the tenant ID) must be in a well-formed URI
+> format`. (Device-code mode needs no secret and no workspace, so a minimal file is fine.)
 
 **Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray
 icon → Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config
 and launches the env-file'd container only at startup, so this same full restart is required
 **every time you change `daxter.env`**. Docker must be running.
 
-## 5. Verify
+## 5. Sign in & pick a workspace
 
-In a Claude Desktop chat, ask: **"List my Power BI workspaces"** → it should call
-`daxter_workspaces`. Or open the tools / 🔌 menu (Settings → Developer) and confirm
-`daxter` is connected. See [`examples/mcp.md`](examples/mcp.md) for prompts per tool.
+In a Claude Desktop chat:
+
+1. **"Sign in to Power BI"** → Claude calls `daxter_login` and shows you a URL + code. Open
+   the URL, enter the code, and sign in with your account. (Skip this if you used a service
+   principal — it's already authenticated.)
+2. **"List my workspaces"** → Claude calls `daxter_workspaces`. Pick one as your default,
+   or just name a workspace per request (the name encodes the env, e.g. `Sales - QA`).
+3. Try it: **"List the tables in the &lt;your model&gt; model."**
+
+If a tool ever reports *"Not signed in,"* just say **"sign in"** again. The token is cached
+in the `daxter-tokens` volume, so you stay signed in across sessions. See
+[`examples/mcp.md`](examples/mcp.md) for prompts per tool.
 
 ## Multiple clients / environments
 
@@ -143,6 +163,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 
 | Symptom | Fix |
 |---------|-----|
+| Tool says **"Not signed in to Power BI"** | Device-code mode, no cached token yet — say **"sign in"** so Claude calls `daxter_login`, then complete the browser sign-in. |
 | `The authority ... must be in a well-formed URI format` | `DAXTER_TENANT_ID` is still a placeholder, empty, or malformed — **or** you edited `daxter.env` without fully restarting Claude Desktop. Verify the values are real GUIDs/strings (no `<>`, quotes, or spaces) and **fully quit & reopen** the app. |
 | Edited the env file but nothing changed | The container reads `--env-file` only at startup. Fully quit & reopen Claude Desktop (closing the window isn't enough). |
 | `can't be saved — path is outside the session folder` | You're editing `daxter.env` in Claude Desktop's built-in editor. Use a normal editor (Notepad, VS Code, `nano`). |
@@ -155,9 +176,9 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 ## Agent checklist
 
 - [ ] Docker running
-- [ ] env file has **real** values — GUID tenant/client ids, no `<>`/quotes/trailing spaces
-- [ ] env file edited with a normal editor (not Claude Desktop's), absolute path noted
+- [ ] env file created (device-code: just `DAXTER_AUTH_MODE=device-code` + optional tenant id),
+      any set values are real (GUID tenant id, no `<>`/quotes/spaces), edited in a normal editor
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
-- [ ] image pulls on first run (public GHCR) — or pre-pulled / built
-- [ ] Claude Desktop **fully** quit & reopened (after the env file had real values)
-- [ ] "List my Power BI workspaces" returns results
+- [ ] Claude Desktop **fully** quit & reopened (image auto-pulls from public GHCR on first run)
+- [ ] **"Sign in to Power BI"** → completed the device-code login in the browser
+- [ ] **"List my workspaces"** returns results

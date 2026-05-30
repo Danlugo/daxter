@@ -154,11 +154,13 @@ models directly. Add to `claude_desktop_config.json`:
 }
 ```
 
-Requires Docker running and a service-principal `.env` (interactive auth isn't viable in a
-headless server); [`SETUP.md`](SETUP.md) walks through this on a new machine. The MCP tools
-are at **full parity with the CLI** — the query, metadata, ops, and inventory operations
-from the feature matrix above, as **25 tools** (23 read + 2 gated write). Each accepts
-optional `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
+By default you **sign in as yourself**: ask Claude to "sign in to Power BI" and it calls
+`daxter_login`, which returns a device-code URL you complete in the browser; then list
+workspaces and pick one. (A service principal is the alternative for automation.)
+[`SETUP.md`](SETUP.md) walks through it on a new machine. The MCP tools are at **full parity
+with the CLI** — the query, metadata, ops, and inventory operations from the feature matrix
+above, as **26 tools** (`daxter_login` + 23 read + 2 gated write). Each accepts optional
+`workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
 **See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
 the gateways", datasources, pipelines, RLS testing).
 
