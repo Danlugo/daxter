@@ -8,15 +8,27 @@ shell commands and edit the config file), or a person can do it manually.
 > you supply them at runtime via `.env`.
 
 > **Just want to sign in and look around first?** The quickest path is the **web console** —
-> no Claude Desktop config needed:
+> no Claude Desktop config needed.
+>
+> ⚠️ **The web console is a separate process from the Claude Desktop MCP server.** Completing
+> the install steps (1–5) below does **NOT** start it — you must run the command below yourself.
 > ```bash
-> docker run -d -p 8080:8080 --env-file daxter.env \
+> # Use an ABSOLUTE path to the env file so Docker finds it from any working directory.
+> # macOS / Linux:
+> docker run -d -p 8080:8080 --env-file "$HOME/daxter.env" \
 >   -v daxter-tokens:/home/daxter/.daxter \
 >   ghcr.io/danlugo/daxter:latest web
+> # Windows (PowerShell): swap the env path → --env-file "C:\Users\<you>\daxter.env"
 > ```
 > Open <http://localhost:8080> → **Status → Sign in**, then **Configure** your default
 > workspace/dataset. The same `daxter-tokens` volume is reused by the MCP server below, so
 > **you only sign in once.** Continue here to also wire up Claude Desktop.
+>
+> - **Default port is `8080`.** For a different port, pass `web --port <N>` **and** match the
+>   publish flag `-p <N>:<N>` (e.g. `-p 9000:9000 … web --port 9000`).
+> - **Not persistent by default** — this container does **not** survive a reboot or Docker
+>   restart. Add `--restart unless-stopped` to the `docker run` to keep it coming back
+>   automatically.
 
 ## 0. Prerequisites
 
