@@ -132,9 +132,9 @@ else
             {
                 <p class="muted">@partitions.Count partitions. Refresh them <strong>in order</strong>, or pick one:</p>
                 <div class="cmd-group">
-                    <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => partMode = PartMode.AllNewest">All — newest→oldest</button>
-                    <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => partMode = PartMode.AllOldest">All — oldest→newest</button>
-                    <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => partMode = PartMode.Single">A single partition</button>
+                    <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => SetPartMode(PartMode.AllNewest)">All — newest→oldest</button>
+                    <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => SetPartMode(PartMode.AllOldest)">All — oldest→newest</button>
+                    <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => SetPartMode(PartMode.Single)">A single partition</button>
                 </div>
                 @if (partMode == PartMode.Single)
                 {
@@ -145,6 +145,15 @@ else
                                 @foreach (var p in partitions) { <option value="@p">@p</option> }
                             </select>
                         </label>
+                    </div>
+                }
+                else
+                {
+                    <div class="order-preview">
+                        <div class="side-h">Processing order — @OrderedPartitions().Count partitions, one at a time</div>
+                        <ol class="order-list">
+                            @foreach (var p in OrderedPartitions()) { <li>@p</li> }
+                        </ol>
                     </div>
                 }
             }
@@ -160,6 +169,11 @@ else
         <div class="card confirm">
             <p><strong>Confirm refresh</strong></p>
             <p>You're about to refresh: <strong>@Summary(pending)</strong> on '<strong>@dataset</strong>'.</p>
+            @if (pending.Kind == RefreshKind.AllPartitions)
+            {
+                <p class="muted">Partitions process one at a time, in this order:</p>
+                <ol class="order-list">@foreach (var p in OrderedPartitions()) { <li>@p</li> }</ol>
+            }
             <p class="muted">This triggers a processing operation against the live model. It runs as a background job.</p>
             <button class="btn" @onclick="ConfirmRefresh">Confirm refresh</button>
             <button class="btn-sm" @onclick="() => pending = null">Cancel</button>
@@ -336,6 +350,14 @@ else
         scope = s; pending = null;
         if (s == Scope.Partitions && !string.IsNullOrEmpty(selTable)) await OnTableChanged();
     }
+
+    private void SetPartMode(PartMode m) { partMode = m; pending = null; }
+
+    // Partitions in the exact order they'll be processed (matches MaintenanceService: Ordinal sort).
+    private List<string> OrderedPartitions()
+        => (partMode == PartMode.AllOldest
+                ? partitions.OrderBy(p => p, StringComparer.Ordinal)
+                : partitions.OrderByDescending(p => p, StringComparer.Ordinal)).ToList();
     private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; }
 
     private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }

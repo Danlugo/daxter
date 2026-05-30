@@ -20,6 +20,11 @@ All notable changes to DAXter are documented here. The format follows
   Automatic / **Calculate** / Data only / Clear values) — and **confirm** before it runs. The
   partition options are **table-aware**: a table with one partition just refreshes it (no
   "in order" choice); the order options appear only when a table has multiple partitions.
+  When you choose **all partitions in order**, the page shows the **exact ordered list** of
+  partitions (and the confirmation repeats it), and the refresh now **truly processes them in
+  that order** — the TMSL is wrapped in a `Sequence` with `maxParallelism: 1` (a plain refresh
+  runs partitions in parallel). `MaintenanceService.BuildPartitionsRefresh` gained an optional
+  `maxParallelism`.
   The page is **tabbed** — **New refresh** and **History**: picking a workspace+dataset loads
   the dataset's **refresh history** (read-only — works even for PROD or with writes off).
   The Jobs page now offers a **← Back to Refresh** link (keeping the workspace/dataset) when you

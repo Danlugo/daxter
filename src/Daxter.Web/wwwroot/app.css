@@ -95,6 +95,9 @@ label.inline input, label.inline select { min-width:auto; }
 .grid tr.lvl-Canceled td { color:#8c959f; }
 .card.refreshing { border-color:#0969da; background:#f0f6ff; max-width:none; }
 .card.confirm { border-color:var(--accent); background:#fbf7fb; }
+.order-preview { margin:.6rem 0; }
+.order-list { margin:.3rem 0; padding-left:1.4rem; max-height:220px; overflow:auto; font-size:.85rem; }
+.order-list li { padding:.1rem 0; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
 .spin { display:inline-block; animation:spin 1.2s linear infinite; }
 @keyframes spin { from { transform:rotate(0); } to { transform:rotate(360deg); } }
 .job-row { cursor:pointer; }

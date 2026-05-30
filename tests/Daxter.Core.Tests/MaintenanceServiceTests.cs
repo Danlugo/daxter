@@ -69,6 +69,36 @@ public class MaintenanceServiceTests
     }
 
     [Fact]
+    public void Partitions_refresh_wraps_in_sequence_when_maxParallelism_set()
+    {
+        var session = new FakeSession(q =>
+            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
+                ? new QueryResult(["ID"], [[1L]])
+                : new QueryResult(["Name"], [["2025Q1"], ["2026Q1"]]));
+
+        var tmsl = new MaintenanceService(session, "DB")
+            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full, maxParallelism: 1);
+
+        Assert.Contains("\"sequence\"", tmsl);
+        Assert.Contains("\"maxParallelism\": 1", tmsl);
+        Assert.Contains("\"refresh\"", tmsl);
+    }
+
+    [Fact]
+    public void Partitions_refresh_has_no_sequence_by_default()
+    {
+        var session = new FakeSession(q =>
+            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
+                ? new QueryResult(["ID"], [[1L]])
+                : new QueryResult(["Name"], [["2025Q1"]]));
+
+        var tmsl = new MaintenanceService(session, "DB")
+            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full);
+
+        Assert.DoesNotContain("\"sequence\"", tmsl);
+    }
+
+    [Fact]
     public void Partitions_refresh_throws_when_table_absent()
     {
         var session = new FakeSession(_ => QueryResult.Empty);

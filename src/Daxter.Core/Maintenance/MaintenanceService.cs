@@ -47,8 +47,19 @@ public sealed class MaintenanceService
     /// <summary>
     /// TMSL to refresh every partition of a table, ordered (newest-first by default).
     /// Partition names are sorted lexically — names like <c>2026Q205</c> sort correctly.
+    /// When <paramref name="maxParallelism"/> is set, the refresh is wrapped in a TMSL
+    /// <c>Sequence</c> with that thread limit — pass <c>1</c> to process the partitions
+    /// strictly in the listed order (a plain refresh runs them in parallel).
     /// </summary>
-    public string BuildPartitionsRefresh(string table, PartitionOrder order, RefreshType type)
+    public string BuildPartitionsRefresh(string table, PartitionOrder order, RefreshType type, int? maxParallelism = null)
+    {
+        var ordered = OrderedPartitionNames(table, order);
+        var objects = ordered.Select(p => Target(_database, table, p)).ToList();
+        return RefreshTmsl(type, objects, maxParallelism);
+    }
+
+    /// <summary>Partition names of a table in refresh order (newest- or oldest-first), Ordinal-sorted.</summary>
+    public IReadOnlyList<string> OrderedPartitionNames(string table, PartitionOrder order)
     {
         var names = PartitionNames(table);
         if (names.Count == 0)
@@ -56,12 +67,9 @@ public sealed class MaintenanceService
             throw new DaxterException($"No partitions found for table: {table}");
         }
 
-        var ordered = order == PartitionOrder.NewestFirst
+        return (order == PartitionOrder.NewestFirst
             ? names.OrderByDescending(n => n, StringComparer.Ordinal)
-            : names.OrderBy(n => n, StringComparer.Ordinal);
-
-        var objects = ordered.Select(p => Target(_database, table, p)).ToList();
-        return RefreshTmsl(type, objects);
+            : names.OrderBy(n => n, StringComparer.Ordinal)).ToList();
     }
 
     /// <summary>XMLA ClearCache command for this database.</summary>
@@ -76,16 +84,26 @@ public sealed class MaintenanceService
     /// <summary>Executes a previously built command.</summary>
     public void Execute(string command) => _session.ExecuteCommand(command);
 
-    private static string RefreshTmsl(RefreshType type, IReadOnlyList<Dictionary<string, string>> objects)
+    private static string RefreshTmsl(RefreshType type, IReadOnlyList<Dictionary<string, string>> objects, int? maxParallelism = null)
     {
-        var payload = new Dictionary<string, object>
+        var refresh = new Dictionary<string, object>
         {
-            ["refresh"] = new Dictionary<string, object>
-            {
-                ["type"] = TypeName(type),
-                ["objects"] = objects,
-            },
+            ["type"] = TypeName(type),
+            ["objects"] = objects,
         };
+
+        // A plain refresh processes objects in parallel. To honour the listed order, wrap it in a
+        // Sequence with maxParallelism (1 = strictly sequential). See TMSL Sequence command.
+        object payload = maxParallelism is { } mp
+            ? new Dictionary<string, object>
+            {
+                ["sequence"] = new Dictionary<string, object>
+                {
+                    ["maxParallelism"] = mp,
+                    ["operations"] = new[] { new Dictionary<string, object> { ["refresh"] = refresh } },
+                },
+            }
+            : new Dictionary<string, object> { ["refresh"] = refresh };
 
         return JsonSerializer.Serialize(payload, Json);
     }

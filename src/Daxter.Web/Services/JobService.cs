@@ -292,7 +292,7 @@ public sealed class JobService
                 RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
                 RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
                 RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
-                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, spec.Type),
+                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, spec.Type, maxParallelism: 1),
                 _ => throw new DaxterException("Unknown refresh kind."),
             };
 
