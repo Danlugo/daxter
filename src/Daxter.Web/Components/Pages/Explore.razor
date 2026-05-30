@@ -3,6 +3,7 @@
 @inject UsageStore Usage
 @inject QueryHistoryStore History
 @inject IJSRuntime JS
+@using System.Text
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -106,11 +107,18 @@
             <div class="dax-tools">
                 @if (!showFields) { <button class="btn-sm" @onclick="() => showFields = true" title="Show fields">▸ Fields</button> }
                 <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">▶ Run DAX</button>
+                <button class="btn-sm" @onclick="FormatQuery" disabled="@(string.IsNullOrWhiteSpace(dax))" title="Pretty-print the DAX">⌗ Format</button>
                 <span class="muted dax-hint">Tip: click a field on the left to insert it.</span>
                 @if (!showRecent) { <button class="btn-sm" @onclick="() => showRecent = true" title="Show recent queries">Recent ◂</button> }
             </div>
             <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7" @ref="editorRef"
                       placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
+            @if (DaxIssues() is { Count: > 0 } issues)
+            {
+                <div class="dax-issues">
+                    @foreach (var iss in issues) { <div class="dax-issue">⚠ @iss</div> }
+                </div>
+            }
             @if (busy) { <p class="muted">Running…</p> }
             <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
         </div>
@@ -481,6 +489,136 @@ else
     {
         "EVALUATE","DEFINE","MEASURE","VAR","RETURN","ORDER BY","START AT","TRUE","FALSE","BLANK()",
     };
+
+    // ---- Format + validate ----
+
+    private void FormatQuery() { dax = FormatDax(dax); }
+
+    private static readonly HashSet<string> DaxUpper =
+        new(DaxFunctions.Concat(new[] { "EVALUATE", "DEFINE", "MEASURE", "VAR", "RETURN", "TRUE", "FALSE", "BLANK", "IN", "NOT", "AND", "OR" }),
+            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Heuristic DAX pretty-printer (local — never sends the query anywhere).</summary>
+    private static string FormatDax(string src)
+    {
+        if (string.IsNullOrWhiteSpace(src)) return src;
+        var toks = TokenizeDax(src);
+
+        // match parens; a call breaks across lines only if it contains a nested call.
+        var match = new int[toks.Count];
+        var st = new Stack<int>();
+        for (var x = 0; x < toks.Count; x++)
+        {
+            if (toks[x].Kind == '(') st.Push(x);
+            else if (toks[x].Kind == ')' && st.Count > 0) { var o = st.Pop(); match[o] = x; match[x] = o; }
+        }
+        var block = new bool[toks.Count];
+        for (var x = 0; x < toks.Count; x++)
+            if (toks[x].Kind == '(')
+            {
+                var m = match[x] > x ? match[x] : toks.Count;
+                for (var y = x + 1; y < m; y++) if (toks[y].Kind == '(') { block[x] = true; break; }
+            }
+
+        var sb = new StringBuilder();
+        int indent = 0; bool needSpace = false;
+        (char Kind, string Value)? prev = null;
+        var blk = new Stack<bool>();
+        void NL() { while (sb.Length > 0 && sb[^1] == ' ') sb.Length--; sb.Append('\n').Append(new string(' ', indent * 4)); needSpace = false; }
+
+        for (var x = 0; x < toks.Count; x++)
+        {
+            var tk = toks[x];
+            if (tk.Kind == '(')
+            {
+                sb.Append('('); blk.Push(block[x]);
+                if (block[x]) { indent++; NL(); } else needSpace = false;
+                prev = null;
+            }
+            else if (tk.Kind == ')')
+            {
+                var b = blk.Count > 0 && blk.Pop();
+                if (b) { indent = Math.Max(0, indent - 1); NL(); }
+                sb.Append(')'); needSpace = true; prev = tk;
+            }
+            else if (tk.Kind == ',')
+            {
+                while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;
+                sb.Append(',');
+                if (blk.Count > 0 && blk.Peek()) NL(); else { sb.Append(' '); needSpace = false; }
+                prev = null;
+            }
+            else
+            {
+                var v = tk.Value;
+                if (tk.Kind == 'w' && DaxUpper.Contains(v)) v = v.ToUpperInvariant();
+                var attach = tk.Kind == 'l' && v.StartsWith("[")
+                    && prev is { Kind: 'l' } p && (p.Value.EndsWith("'") || p.Value.EndsWith("]"));
+                if (needSpace && !attach) sb.Append(' ');
+                sb.Append(v); needSpace = true; prev = tk;
+                if (tk.Kind == 'w' && indent == 0 && (v == "EVALUATE" || v == "DEFINE")) { NL(); prev = null; }
+            }
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static List<(char Kind, string Value)> TokenizeDax(string s)
+    {
+        var t = new List<(char, string)>();
+        int i = 0, n = s.Length;
+        while (i < n)
+        {
+            var c = s[i];
+            if (char.IsWhiteSpace(c)) { i++; continue; }
+            if (c == '"' || c == '\'')
+            {
+                var j = i + 1;
+                while (j < n) { if (s[j] == c) { if (j + 1 < n && s[j + 1] == c) { j += 2; continue; } j++; break; } j++; }
+                t.Add(('l', s[i..j])); i = j; continue;
+            }
+            if (c == '[')
+            {
+                var j = i + 1;
+                while (j < n && s[j] != ']') j++;
+                if (j < n) j++;
+                t.Add(('l', s[i..j])); i = j; continue;
+            }
+            if (c is '(' or ')' or ',') { t.Add((c, c.ToString())); i++; continue; }
+            var k = i;
+            while (k < n && !char.IsWhiteSpace(s[k]) && s[k] is not ('(' or ')' or ',' or '"' or '\'' or '[')) k++;
+            t.Add(('w', s[i..k])); i = k;
+        }
+        return t;
+    }
+
+    /// <summary>Quick static checks — unbalanced delimiters and the missing-EVALUATE case.</summary>
+    private List<string> DaxIssues()
+    {
+        var issues = new List<string>();
+        if (string.IsNullOrWhiteSpace(dax)) return issues;
+        int paren = 0, bracket = 0; bool inStr = false, inTick = false;
+        for (var i = 0; i < dax.Length; i++)
+        {
+            var c = dax[i];
+            if (inStr) { if (c == '"') { if (i + 1 < dax.Length && dax[i + 1] == '"') i++; else inStr = false; } continue; }
+            if (inTick) { if (c == '\'') { if (i + 1 < dax.Length && dax[i + 1] == '\'') i++; else inTick = false; } continue; }
+            if (c == '"') inStr = true;
+            else if (c == '\'') inTick = true;
+            else if (c == '(') paren++;
+            else if (c == ')') { if (paren == 0) { issues.Add("Extra ')' — a closing parenthesis with no opener."); } else paren--; }
+            else if (c == '[') bracket++;
+            else if (c == ']') { if (bracket == 0) { issues.Add("Extra ']' — a closing bracket with no opener."); } else bracket--; }
+        }
+        if (inStr) issues.Add("Unclosed string — a \" is never closed.");
+        if (inTick) issues.Add("Unclosed table name — a ' is never closed.");
+        if (paren > 0) issues.Add($"{paren} unclosed '(' — missing {paren} ')'.");
+        if (bracket > 0) issues.Add($"{bracket} unclosed '[' — missing {bracket} ']' (a column / measure reference).");
+        var trimmed = dax.TrimStart();
+        if (trimmed.Length > 0 && !trimmed.StartsWith("EVALUATE", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.StartsWith("DEFINE", StringComparison.OrdinalIgnoreCase))
+            issues.Add("A DAX query should start with EVALUATE (or DEFINE).");
+        return issues;
+    }
 
     private AcItem[] BuildCandidates()
     {

@@ -20,6 +20,11 @@ All notable changes to DAXter are documented here. The format follows
   no external editor/CDN dependency (a small `dax-complete.js` over the textarea).
 - The **Fields tree loads automatically** when you open the DAX tab / pick a dataset — no more
   "Load fields" button.
+- **Format button + live validation** in the DAX editor. **⌗ Format** pretty-prints the query
+  (indents by call depth, one argument per line, keeps simple calls inline, uppercases
+  functions/keywords) — done **locally**, the query is never sent anywhere. A validation strip
+  flags **unbalanced parentheses / brackets / quotes** and a missing `EVALUATE`/`DEFINE` as you
+  type (the exact class of error that an unclosed `[` causes).
 
 ### Fixed
 - **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse

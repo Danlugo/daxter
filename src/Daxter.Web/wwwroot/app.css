@@ -80,6 +80,8 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .dax-ac-item .ac-label { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; }
 .dax-ac-item .ac-docs { color:#0969da; text-decoration:none; font-size:.78rem; padding-left:.5rem; }
 .dax-ac-item .ac-docs:hover { text-decoration:underline; }
+.dax-issues { margin:.4rem 0; border:1px solid #f0c0c0; background:#fff5f5; border-radius:6px; padding:.3rem .6rem; }
+.dax-issue { color:#b32121; font-size:.82rem; padding:.1rem 0; }
 .obj-search { width:100%; min-width:0; box-sizing:border-box; margin-bottom:.5rem; }
 .obj-tree { font-size:.84rem; }
 .obj-table { margin-bottom:.05rem; }
