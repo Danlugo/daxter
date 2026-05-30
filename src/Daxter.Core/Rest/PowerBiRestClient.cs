@@ -108,8 +108,36 @@ public sealed class PowerBiRestClient : IDisposable
             "id", "type", "status", "executionStartTime");
 
     public async Task<QueryResult> DatasourcesAsync(string groupId, string datasetId, CancellationToken ct = default)
-        => ToTable(await GetAsync($"groups/{groupId}/datasets/{datasetId}/datasources", ct),
-            "datasourceType", "datasourceId", "gatewayId");
+    {
+        var root = await GetAsync($"groups/{groupId}/datasets/{datasetId}/datasources", ct);
+        string[] columns = ["datasourceType", "server", "database", "path", "url", "gatewayId"];
+        var rows = new List<object?[]>();
+
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            JsonElement details = item.TryGetProperty("connectionDetails", out var cd)
+                && cd.ValueKind == JsonValueKind.Object ? cd : default;
+
+            rows.Add(
+            [
+                Str(item, "datasourceType"),
+                Str(details, "server"),
+                Str(details, "database"),
+                Str(details, "path"),
+                Str(details, "url"),
+                Str(item, "gatewayId"),
+            ]);
+        }
+
+        return new QueryResult(columns, rows);
+    }
+
+    private static string? Str(JsonElement element, string property)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(property, out var v)
+           && v.ValueKind == JsonValueKind.String
+            ? v.GetString()
+            : null;
 
     // ---- refresh ----
 

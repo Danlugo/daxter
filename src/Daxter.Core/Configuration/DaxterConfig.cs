@@ -34,6 +34,12 @@ public sealed class DaxterConfig
     /// <summary>Active environment name (e.g. "dev"), if one was selected.</summary>
     public string? Environment { get; init; }
 
+    /// <summary>
+    /// Workspace names explicitly designated production (from <c>DAXTER_PROD_WORKSPACES</c>).
+    /// Used by the write-safety guard for tenants whose prod workspaces aren't named "...prod".
+    /// </summary>
+    public IReadOnlyCollection<string> ProdWorkspaces { get; init; } = [];
+
     // Environment variable names (single source of truth).
     public const string EnvWorkspace = "DAXTER_WORKSPACE";
     public const string EnvDataset = "DAXTER_DATASET";
@@ -42,6 +48,7 @@ public sealed class DaxterConfig
     public const string EnvClientSecret = "DAXTER_CLIENT_SECRET";
     public const string EnvAuthMode = "DAXTER_AUTH_MODE";
     public const string EnvEnvironment = "DAXTER_ENV";
+    public const string EnvProdWorkspaces = "DAXTER_PROD_WORKSPACES";
 
     /// <summary>Microsoft's first-party client id used for delegated Power BI access.</summary>
     public const string DefaultPublicClientId = "ea0616ba-638b-4df5-95b9-636659ae5121";
@@ -92,8 +99,35 @@ public sealed class DaxterConfig
             ClientSecret = clientSecret ?? Env(EnvClientSecret),
             AuthMode = resolvedAuth,
             Environment = string.IsNullOrWhiteSpace(activeEnv) ? null : activeEnv!.Trim().ToLowerInvariant(),
+            ProdWorkspaces = ParseList(Env(EnvProdWorkspaces)),
         };
     }
+
+    /// <summary>
+    /// True if the current target is production — used to block writes. Production is
+    /// detected by the active env being "prod", the workspace name containing "prod", or
+    /// the workspace appearing in <c>DAXTER_PROD_WORKSPACES</c> (for unsuffixed prod names).
+    /// </summary>
+    public bool IsProductionTarget()
+    {
+        if (string.Equals(Environment, "prod", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var current = Workspace.Trim();
+        return ProdWorkspaces.Any(w => string.Equals(w, current, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyCollection<string> ParseList(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>
     /// Lists configured environment names by scanning for <c>DAXTER_WORKSPACE_&lt;ENV&gt;</c>

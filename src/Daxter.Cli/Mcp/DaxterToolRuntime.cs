@@ -105,9 +105,7 @@ internal static class DaxterToolRuntime
     private static bool WritesAllowed()
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
 
-    private static bool LooksLikeProd(DaxterConfig config)
-        => string.Equals(config.Environment, "prod", StringComparison.OrdinalIgnoreCase)
-           || config.Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikeProd(DaxterConfig config) => config.IsProductionTarget();
 
     private const int ExportCap = 40_000;
 

@@ -12,7 +12,7 @@ public class DaxterConfigTests
     [
         DaxterConfig.EnvWorkspace, DaxterConfig.EnvDataset, DaxterConfig.EnvTenantId,
         DaxterConfig.EnvClientId, DaxterConfig.EnvClientSecret, DaxterConfig.EnvAuthMode,
-        DaxterConfig.EnvEnvironment,
+        DaxterConfig.EnvEnvironment, DaxterConfig.EnvProdWorkspaces,
         "DAXTER_WORKSPACE_DEV", "DAXTER_WORKSPACE_QA", "DAXTER_DATASET_DEV",
     ];
 
@@ -119,6 +119,46 @@ public class DaxterConfigTests
     public void Validate_passes_for_device_code_without_credentials()
     {
         new DaxterConfig { Workspace = "WS", AuthMode = AuthMode.DeviceCode }.Validate();
+    }
+
+    [Fact]
+    public void IsProductionTarget_true_when_env_is_prod()
+        => Assert.True(new DaxterConfig { Workspace = "Some WS", Environment = "prod" }.IsProductionTarget());
+
+    [Fact]
+    public void IsProductionTarget_true_when_name_contains_prod()
+        => Assert.True(new DaxterConfig { Workspace = "Sales - Prod" }.IsProductionTarget());
+
+    [Fact]
+    public void IsProductionTarget_true_when_listed()
+        => Assert.True(new DaxterConfig
+        {
+            Workspace = "Sales Analytics",
+            ProdWorkspaces = ["Sales Analytics", "Marketing"],
+        }.IsProductionTarget());
+
+    [Fact]
+    public void IsProductionTarget_false_for_dev_even_when_prod_listed()
+        => Assert.False(new DaxterConfig
+        {
+            Workspace = "Sales Analytics - Dev",   // exact match only — not flagged by "Sales Analytics" in the list
+            Environment = "dev",
+            ProdWorkspaces = ["Sales Analytics"],
+        }.IsProductionTarget());
+
+    [Fact]
+    public void FromEnvironment_parses_prod_workspaces()
+    {
+        WithEnv(new Dictionary<string, string?>
+        {
+            [DaxterConfig.EnvWorkspace] = "WS",
+            [DaxterConfig.EnvProdWorkspaces] = "Sales Analytics, Marketing",
+        }, () =>
+        {
+            var config = DaxterConfig.FromEnvironment();
+            Assert.Contains("Sales Analytics", config.ProdWorkspaces);
+            Assert.Contains("Marketing", config.ProdWorkspaces);
+        });
     }
 
     [Fact]

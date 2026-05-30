@@ -747,9 +747,7 @@ internal static class Program
         return 0;
     }
 
-    private static bool LooksLikeProd(DaxterConfig config)
-        => string.Equals(config.Environment, "prod", StringComparison.OrdinalIgnoreCase)
-           || config.Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikeProd(DaxterConfig config) => config.IsProductionTarget();
 
     private static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
     {

@@ -204,7 +204,9 @@ the gateways", datasources, pipelines, RLS testing).
 Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
 default** — they only execute when `execute=true` **and** the server sets
 `DAXTER_MCP_ALLOW_WRITES=true`, and PROD-looking targets are always blocked. So the server
-is safe for autonomous use out of the box.
+is safe for autonomous use out of the box. "Production" = the active env is `prod`, the
+workspace name contains "prod", **or** the workspace is listed in `DAXTER_PROD_WORKSPACES`
+(use this when prod workspaces are unsuffixed, e.g. `Sales Analytics`).
 
 ## How it works
 
