@@ -7,6 +7,15 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.3] - 2026-05-29
 
 ### Fixed
+- **Sign-in page is now click-to-open.** The device-code prompt renders the verification URL as a
+  **clickable link** (opens in a new tab) and the user code in a large, **one-click-copy** field —
+  no more selecting/copying out of a text blob. (`DeviceLogin` now carries the structured
+  `VerificationUrl`/`UserCode` from MSAL, not just the message.)
+- **Confirmed: saving the configuration does not sign you out.** `Save()` only writes
+  `~/.daxter/console-config.json`; the MSAL token cache (`~/.daxter/msal_cache.bin`) is a separate
+  file that nothing deletes. (Changing identity fields — auth mode, tenant, client id — can make
+  the *silent* token lookup miss because MSAL keys its cache by client+tenant, but the cached
+  token is still on disk; the sign-in link above recovers it.)
 - **Web sign-in now completes reliably.** The device-code flow returned the code but swallowed
   the background result, so after you entered the code on the page **nothing happened** (and a
   failed sign-in was invisible). The Status page now **awaits sign-in completion**, auto

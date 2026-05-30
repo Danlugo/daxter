@@ -6,10 +6,13 @@ namespace Daxter.Core.Auth;
 
 /// <summary>
 /// A started device-code sign-in: the <paramref name="Message"/> (URL + code) to show the user,
-/// and a <paramref name="Completion"/> task that completes once they authenticate (token cached)
-/// or faults with the failure reason.
+/// a <paramref name="Completion"/> task that completes once they authenticate (token cached) or
+/// faults with the failure reason, and the structured <paramref name="VerificationUrl"/> +
+/// <paramref name="UserCode"/> so a UI can render a clickable link and a copyable code.
+/// (URL/code are <c>null</c> when already signed in.)
 /// </summary>
-public sealed record DeviceLogin(string Message, Task Completion);
+public sealed record DeviceLogin(
+    string Message, Task Completion, string? VerificationUrl = null, string? UserCode = null);
 
 /// <summary>
 /// Acquires Power BI XMLA tokens via MSAL. Supports the device-code flow
@@ -154,32 +157,32 @@ public sealed class MsalTokenProvider : ITokenProvider
             }
         }
 
-        var messageReady = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var promptReady = new TaskCompletionSource<DeviceCodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var completion = Task.Run(async () =>
         {
             try
             {
                 await app.AcquireTokenWithDeviceCode(Scopes, result =>
                 {
-                    messageReady.TrySetResult(result.Message);
+                    promptReady.TrySetResult(result);
                     return Task.CompletedTask;
                 }).ExecuteAsync(CancellationToken.None);
             }
             catch (MsalException ex)
             {
                 var wrapped = new DaxterException($"Sign-in failed ({ex.ErrorCode}): {ex.Message}", ex);
-                messageReady.TrySetException(wrapped);
+                promptReady.TrySetException(wrapped);
                 throw wrapped;
             }
             catch (Exception ex)
             {
-                messageReady.TrySetException(ex);
+                promptReady.TrySetException(ex);
                 throw;
             }
         }, CancellationToken.None);
 
-        var message = await messageReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
-        return new DeviceLogin(message, completion);
+        var prompt = await promptReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        return new DeviceLogin(prompt.Message, completion, prompt.VerificationUrl, prompt.UserCode);
     }
 
     private async Task<IPublicClientApplication> BuildUserAppAsync()

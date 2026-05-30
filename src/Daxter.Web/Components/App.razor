@@ -21,6 +21,7 @@
             document.body.appendChild(a); a.click(); a.remove();
             URL.revokeObjectURL(url);
         };
+        window.daxterCopy = (text) => navigator.clipboard && navigator.clipboard.writeText(text);
     </script>
     <script src="_framework/blazor.web.js"></script>
 </body>

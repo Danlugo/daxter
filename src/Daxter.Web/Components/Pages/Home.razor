@@ -1,5 +1,6 @@
 @page "/"
 @inject DaxterUi Ui
+@inject IJSRuntime JS
 
 <PageTitle>DAXter — Status</PageTitle>
 
@@ -30,9 +31,17 @@
                 @(loggingIn ? "Starting…" : "Sign in")
             </button>
         }
-        else
+        else if (!string.IsNullOrEmpty(verificationUrl))
         {
-            <pre class="code">@loginMsg</pre>
+            <p>
+                1. Open
+                <a href="@verificationUrl" target="_blank" rel="noopener noreferrer">@verificationUrl ↗</a>
+                &nbsp;2. Enter this code:
+            </p>
+            <div class="device-code">
+                <code class="usercode">@userCode</code>
+                <button class="btn-sm" @onclick="CopyCode">@(copied ? "Copied ✓" : "Copy code")</button>
+            </div>
             @if (loginError is not null)
             {
                 <p class="bad-text">@loginError</p>
@@ -43,13 +52,19 @@
             }
             <button class="btn" @onclick="RunAsync">@(awaitingAuth ? "Re-check now" : "I've signed in — re-check")</button>
         }
+        else
+        {
+            <pre class="code">@loginMsg</pre>
+            @if (loginError is not null) { <p class="bad-text">@loginError</p> }
+            <button class="btn" @onclick="RunAsync">I've signed in — re-check</button>
+        }
     </div>
 }
 
 @code {
     private List<HealthCheck>? checks;
-    private bool busy, needsLogin, loggingIn, awaitingAuth;
-    private string? loginMsg, loginError;
+    private bool busy, needsLogin, loggingIn, awaitingAuth, copied;
+    private string? loginMsg, loginError, verificationUrl, userCode;
 
     protected override async Task OnInitializedAsync() => await RunAsync();
 
@@ -73,10 +88,13 @@
     {
         loggingIn = true;
         loginError = null;
+        copied = false;
         try
         {
             var login = await Ui.BeginLoginAsync();
             loginMsg = login.Message;
+            verificationUrl = login.VerificationUrl;
+            userCode = login.UserCode;
             loggingIn = false;
 
             if (login.Completion.IsCompletedSuccessfully)
@@ -110,5 +128,16 @@
         {
             loggingIn = false;
         }
+    }
+
+    private async Task CopyCode()
+    {
+        if (string.IsNullOrEmpty(userCode)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("daxterCopy", userCode);
+            copied = true;
+        }
+        catch { /* clipboard unavailable */ }
     }
 }
