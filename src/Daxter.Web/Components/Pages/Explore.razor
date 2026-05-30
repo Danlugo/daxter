@@ -2,6 +2,7 @@
 @inject DaxterUi Ui
 @inject UsageStore Usage
 @inject QueryHistoryStore History
+@inject IJSRuntime JS
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -112,8 +113,8 @@
                 <span class="muted dax-hint">Tip: click a field on the left to insert it.</span>
                 @if (!showRecent) { <button class="btn-sm" @onclick="() => showRecent = true" title="Show recent queries">Recent ◂</button> }
             </div>
-            <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7"
-                      placeholder="EVALUATE TOPN(10, 'Table')" spellcheck="false"></textarea>
+            <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7" @ref="editorRef"
+                      placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
             @if (busy) { <p class="muted">Running…</p> }
             <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
         </div>
@@ -308,6 +309,11 @@ else
     private string objSearch = "";
     private bool showFields = true;
     private bool showRecent = true;
+    private ElementReference editorRef;
+    private bool acAttached;
+    private bool acDirty;
+
+    private sealed record AcItem(string Label, string Insert, string Kind);
 
     // Browse navigation history (browser-style Back).
     private readonly Stack<BrowseState> back = new();
@@ -432,9 +438,70 @@ else
     {
         if (string.IsNullOrEmpty(dataset)) return;
         objLoading = true; objError = null; objects = null; StateHasChanged();
-        try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; }
+        try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; acDirty = true; }
         catch (Exception ex) { objError = ex.Message; }
         finally { objLoading = false; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (tab != Tab.Query) { acAttached = false; return; } // re-attach when the editor re-appears
+
+        if (!acAttached)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.attach", editorRef); acAttached = true; acDirty = true; }
+            catch { /* JS not ready */ }
+        }
+        if (acAttached && acDirty)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.setCandidates", editorRef, BuildCandidates()); acDirty = false; }
+            catch { }
+        }
+    }
+
+    // Functions inserted with "(", keywords as-is; fields from the loaded model.
+    private static readonly string[] DaxFunctions =
+    {
+        "CALCULATE","CALCULATETABLE","FILTER","ALL","ALLEXCEPT","ALLSELECTED","ALLNOBLANKROW","REMOVEFILTERS",
+        "KEEPFILTERS","VALUES","DISTINCT","RELATED","RELATEDTABLE","EARLIER","SELECTEDVALUE","HASONEVALUE",
+        "SUM","SUMX","AVERAGE","AVERAGEX","MIN","MINX","MAX","MAXX","COUNT","COUNTA","COUNTAX","COUNTX",
+        "COUNTROWS","COUNTBLANK","DISTINCTCOUNT","DIVIDE","PRODUCT","PRODUCTX","ROUND","ABS","INT","MOD",
+        "IF","IFERROR","SWITCH","AND","OR","NOT","ISBLANK","ISERROR","ISFILTERED","ISINSCOPE","COALESCE",
+        "CONCATENATE","CONCATENATEX","FORMAT","LEFT","RIGHT","MID","LEN","UPPER","LOWER","TRIM","SUBSTITUTE",
+        "SEARCH","FIND","VALUE","DATE","TODAY","NOW","YEAR","MONTH","DAY","WEEKDAY","WEEKNUM","EOMONTH",
+        "EDATE","DATEDIFF","DATEADD","TOTALYTD","TOTALQTD","TOTALMTD","DATESYTD","DATESMTD","SAMEPERIODLASTYEAR",
+        "PARALLELPERIOD","PREVIOUSYEAR","PREVIOUSMONTH","NEXTYEAR","NEXTMONTH","FIRSTDATE","LASTDATE",
+        "STARTOFMONTH","ENDOFMONTH","DATESBETWEEN","DATESINPERIOD","RANKX","TOPN","ROW","SUMMARIZE",
+        "SUMMARIZECOLUMNS","ADDCOLUMNS","SELECTCOLUMNS","GROUPBY","CROSSJOIN","UNION","INTERSECT","EXCEPT",
+        "TREATAS","USERELATIONSHIP","CROSSFILTER","CONTAINS","LOOKUPVALUE","USERPRINCIPALNAME",
+    };
+    private static readonly string[] DaxKeywords =
+    {
+        "EVALUATE","DEFINE","MEASURE","VAR","RETURN","ORDER BY","START AT","TRUE","FALSE","BLANK()",
+    };
+
+    private AcItem[] BuildCandidates()
+    {
+        var list = new List<AcItem>();
+        foreach (var f in DaxFunctions) list.Add(new AcItem(f, f + "(", "function"));
+        foreach (var k in DaxKeywords) list.Add(new AcItem(k, k.EndsWith(")") ? k : k + " ", "function"));
+
+        if (objects is not null)
+        {
+            foreach (var t in objects.Tables)
+            {
+                var tref = "'" + t.Table.Replace("'", "''") + "'";
+                list.Add(new AcItem("'" + t.Table + "'", tref, "table"));
+                foreach (var o in t.Items)
+                {
+                    if (o.IsMeasure)
+                        list.Add(new AcItem("[" + o.Name + "]", "[" + o.Name.Replace("]", "]]") + "]", "measure"));
+                    else
+                        list.Add(new AcItem("'" + t.Table + "'[" + o.Name + "]", tref + "[" + o.Name.Replace("]", "]]") + "]", "column"));
+                }
+            }
+        }
+        return list.ToArray();
     }
 
     private bool IsExpanded(string table) => !string.IsNullOrEmpty(objSearch) || expandedTables.Contains(table);
