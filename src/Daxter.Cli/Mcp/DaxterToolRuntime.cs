@@ -2,6 +2,7 @@ using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Daxter.Core.Export;
 using Daxter.Core.Formatting;
 using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
@@ -107,6 +108,39 @@ internal static class DaxterToolRuntime
     private static bool LooksLikeProd(DaxterConfig config)
         => string.Equals(config.Environment, "prod", StringComparison.OrdinalIgnoreCase)
            || config.Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase);
+
+    private const int ExportCap = 40_000;
+
+    /// <summary>Exports the model definition (.bim) via TOM; truncates very large output.</summary>
+    public static async Task<string> ExportAsync(string? workspace, string? dataset, CancellationToken ct)
+    {
+        var config = Config(workspace, dataset);
+        var token = await Provider(config).GetTokenAsync(ct);
+        var bim = new ModelExportService(config, token).ExportBim();
+        return bim.Length <= ExportCap
+            ? bim
+            : bim[..ExportCap] + $"\n/* truncated: {ExportCap} of {bim.Length} chars — use the CLI `model export` for the full file */";
+    }
+
+    /// <summary>Runs a DAX query under a role and/or impersonated user, returning the filtered result.</summary>
+    public static async Task<string> TestRlsAsync(
+        string? workspace, string? dataset, string? role, string? user, string query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(role) && string.IsNullOrWhiteSpace(user))
+        {
+            throw new DaxterException("Provide a role and/or a user to impersonate.");
+        }
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            throw new DaxterException("Provide a DAX query to evaluate under the identity.");
+        }
+
+        var config = Config(workspace, dataset);
+        var factory = new AdomdXmlaSessionFactory(config, Provider(config), role, user);
+        using var session = await factory.CreateAsync(ct);
+        return Format(session.Execute(query));
+    }
 
     private static DaxterConfig Config(string? workspace, string? dataset)
         => DaxterConfig.FromEnvironment(workspace: workspace, dataset: dataset);

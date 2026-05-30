@@ -100,6 +100,60 @@ public static class DaxterTools
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
 
+    [McpServerTool(Name = "daxter_export"), Description("Export the model's full definition as Tabular (.bim) JSON. Large output is truncated — use the CLI for the complete file.")]
+    public static Task<string> Export(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ExportAsync(workspace, dataset, ct);
+
+    [McpServerTool(Name = "daxter_permissions"), Description("Who has access. With a dataset → dataset users; without a dataset → workspace users.")]
+    public static Task<string> Permissions(string? dataset = null, string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            if (!string.IsNullOrWhiteSpace(cfg.Dataset))
+            {
+                var datasetId = await rest.ResolveDatasetIdAsync(groupId, cfg.Dataset!, c);
+                return await rest.DatasetUsersAsync(groupId, datasetId, c);
+            }
+
+            return await rest.WorkspaceUsersAsync(groupId, c);
+        }, ct);
+
+    [McpServerTool(Name = "daxter_gateways"), Description("List gateways visible to the identity (requires gateway-admin rights).")]
+    public static Task<string> Gateways(CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.GatewaysAsync(c), ct);
+
+    [McpServerTool(Name = "daxter_datasources"), Description("Data sources and gateway binding used by a dataset's refresh.")]
+    public static Task<string> Datasources(string? dataset = null, string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var datasetId = await rest.ResolveDatasetIdAsync(
+                groupId, cfg.Dataset ?? throw new DaxterException("A dataset is required."), c);
+            return await rest.DatasourcesAsync(groupId, datasetId, c);
+        }, ct);
+
+    [McpServerTool(Name = "daxter_test_rls"), Description("Test RLS: run a DAX query impersonating a user and/or under a role; returns the filtered result.")]
+    public static Task<string> TestRls(
+        [Description("DAX query to evaluate under the identity, e.g. EVALUATE ROW(\"n\", COUNTROWS('Sales'))")] string query,
+        [Description("RLS role name.")] string? role = null,
+        [Description("User UPN to impersonate, e.g. user@contoso.com")] string? user = null,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.TestRlsAsync(workspace, dataset, role, user, query, ct);
+
+    [McpServerTool(Name = "daxter_pipelines"), Description("List Fabric / Power BI deployment pipelines.")]
+    public static Task<string> Pipelines(CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelinesAsync(c), ct);
+
+    [McpServerTool(Name = "daxter_pipeline_stages"), Description("A deployment pipeline's stages (dev/test/prod) and their workspaces.")]
+    public static Task<string> PipelineStages(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelineStagesAsync(pipelineId, c), ct);
+
+    [McpServerTool(Name = "daxter_pipeline_operations"), Description("Recent deploy operations for a pipeline.")]
+    public static Task<string> PipelineOperations(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, _, c) => rest.PipelineOperationsAsync(pipelineId, c), ct);
+
     // ---- Gated write tools (DRY-RUN by default; disabled unless DAXTER_MCP_ALLOW_WRITES=true) ----
 
     [McpServerTool(Name = "daxter_refresh"), Description(

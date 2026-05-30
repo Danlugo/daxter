@@ -339,12 +339,17 @@ models directly. Add to `claude_desktop_config.json`:
 ```
 
 Requires Docker running and a service-principal `.env` (interactive auth isn't viable in
-a headless server). Exposes **read-only** tools (`daxter_query`, `daxter_dmv`,
-`daxter_list_tables`, `daxter_measures`, `daxter_measure`, `daxter_mcode`,
-`daxter_parameters`, `daxter_partitions`, `daxter_rls`, `daxter_diff_measures`,
-`daxter_refresh_history`, `daxter_workspaces`, `daxter_datasets`, `daxter_reports`,
-`daxter_lineage`) — each accepting optional `workspace`/`dataset` arguments. Results are
-JSON, capped to 1,000 rows.
+a headless server). The MCP tools are at **full parity with the CLI** — 23 read tools:
+
+- **Query/metadata:** `daxter_query`, `daxter_dmv`, `daxter_list_tables`, `daxter_measures`,
+  `daxter_measure`, `daxter_mcode`, `daxter_parameters`, `daxter_partitions`, `daxter_rls`,
+  `daxter_diff_measures`, `daxter_export`, `daxter_test_rls`
+- **Ops:** `daxter_refresh_history`
+- **Inventory:** `daxter_workspaces`, `daxter_datasets`, `daxter_reports`, `daxter_lineage`,
+  `daxter_permissions`, `daxter_gateways`, `daxter_datasources`, `daxter_pipelines`,
+  `daxter_pipeline_stages`, `daxter_pipeline_operations`
+
+Each accepts optional `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
 
 Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
 default** — they only execute when `execute=true` **and** the server sets
