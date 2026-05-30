@@ -46,17 +46,24 @@ public sealed class Job
     /// <summary>Estimated total seconds from history (set at enqueue); null if no history yet.</summary>
     public double? EstimateSeconds { get; set; }
 
+    /// <summary>For multi-partition jobs: total partitions and how many have completed.</summary>
+    public int? PartitionTotal { get; set; }
+    public int? PartitionDone { get; set; }
+
     [JsonIgnore] public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
     [JsonIgnore] public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
 
-    /// <summary>0..0.99 progress while running, from elapsed vs estimate; null if no estimate.</summary>
+    /// <summary>0..1 progress while running — by completed partitions when known, else elapsed vs estimate.</summary>
     [JsonIgnore] public double? Progress
     {
         get
         {
-            if (Status != JobStatus.Running || EstimateSeconds is not { } est || est <= 0 || Duration is not { } d)
-                return null;
-            return Math.Clamp(d.TotalSeconds / est, 0, 0.99);
+            if (Status != JobStatus.Running) return null;
+            if (PartitionTotal is { } total && total > 0 && PartitionDone is { } done)
+                return Math.Clamp((double)done / total, 0, 1);
+            if (EstimateSeconds is { } est && est > 0 && Duration is { } d)
+                return Math.Clamp(d.TotalSeconds / est, 0, 0.99);
+            return null;
         }
     }
 }
@@ -342,19 +349,53 @@ public sealed class JobService
         try
         {
             var maint = new MaintenanceService(session, spec.Dataset);
-            var tmsl = spec.Kind switch
-            {
-                RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
-                RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
-                RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
-                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, spec.Type, maxParallelism: 1),
-                RefreshKind.SomePartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Partitions!, spec.Type, maxParallelism: 1),
-                _ => throw new DaxterException("Unknown refresh kind."),
-            };
 
-            AddEvent(job, "Processing (TMSL refresh)…");
-            NotifyChanged();
-            maint.Execute(tmsl);
+            if (spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions)
+            {
+                // Refresh each partition as its own command so we can report "X of N" and per-
+                // partition timing (a single multi-partition command is opaque). Sequential by
+                // construction, in the listed order.
+                var parts = spec.Kind == RefreshKind.AllPartitions
+                    ? maint.OrderedPartitionNames(spec.Table!, spec.Order)
+                    : spec.Partitions ?? Array.Empty<string>();
+
+                job.PartitionTotal = parts.Count;
+                job.PartitionDone = 0;
+                AddEvent(job, $"Refreshing {parts.Count} partition(s) of '{spec.Table}', one at a time");
+                NotifyChanged();
+
+                for (var i = 0; i < parts.Count; i++)
+                {
+                    if (job.CancelRequested) throw new OperationCanceledException();
+
+                    var name = parts[i];
+                    job.Step = $"Partition {i + 1}/{parts.Count}: {name}";
+                    AddEvent(job, $"[{i + 1}/{parts.Count}] refreshing {name}…");
+                    NotifyChanged();
+
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    maint.Execute(maint.BuildPartitionRefresh(spec.Table!, name, spec.Type));
+                    sw.Stop();
+
+                    job.PartitionDone = i + 1;
+                    AddEvent(job, $"[{i + 1}/{parts.Count}] ✓ {name} — {(int)sw.Elapsed.TotalSeconds}s");
+                    NotifyChanged();
+                }
+            }
+            else
+            {
+                var tmsl = spec.Kind switch
+                {
+                    RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
+                    RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
+                    RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
+                    _ => throw new DaxterException("Unknown refresh kind."),
+                };
+
+                AddEvent(job, "Processing (TMSL refresh)…");
+                NotifyChanged();
+                maint.Execute(tmsl);
+            }
         }
         finally
         {

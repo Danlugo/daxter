@@ -4,6 +4,16 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-05-30
+
+### Added
+- **Per-partition progress for "all / pick partitions" refreshes.** These jobs now refresh each
+  partition as its own step, so the Jobs page shows **"Partition X / N: <name>"**, a progress bar
+  that advances per completed partition, and an **activity log with the time each partition took**
+  (e.g. `[2/7] ✓ 2026Q1 — 18s`). Cancel stops cleanly between partitions. (Trade-off: each
+  partition is processed with the chosen type, so a `Full` of N partitions recalculates N times —
+  in exchange for the live visibility.)
+
 ## [1.6.4] - 2026-05-29
 
 ### Fixed
