@@ -174,7 +174,22 @@ image means the only dependency on any machine is Docker.
   enabled** (Admin portal → Capacity settings → XMLA Endpoint = Read or Read/Write).
 - An Entra ID identity with access to the workspace (see [Authentication](#authentication)).
 
-## Build
+## Install
+
+**Pull the prebuilt image** (published to GHCR by CI on every release — no build needed):
+
+```bash
+docker pull ghcr.io/danlugo/daxter:latest
+docker run --rm ghcr.io/danlugo/daxter:latest --help
+```
+
+The `bin/daxter` wrapper can use it too — point `DAXTER_IMAGE` at the registry:
+
+```bash
+DAXTER_IMAGE=ghcr.io/danlugo/daxter:latest ./bin/daxter ls
+```
+
+**Or build it yourself:**
 
 ```bash
 make image          # builds daxter:latest, running the test suite inside the build
@@ -264,13 +279,16 @@ the workspace.
 
 ## Passing the image around
 
+Easiest: **pull from GHCR** (see [Install](#install)) — CI publishes
+`ghcr.io/danlugo/daxter:latest` and a tag per release (`:v1.2.0`, …) on every `v*` tag.
+
+Offline / air-gapped: ship a tarball:
+
 ```bash
 make save           # → daxter-image.tar.gz
 # on another machine:
 make load           # docker load < daxter-image.tar.gz
 ```
-
-Or push to a registry: `docker tag daxter:latest <registry>/daxter:1.0 && docker push …`.
 
 ## MCP server
 
