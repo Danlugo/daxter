@@ -202,20 +202,28 @@ icon → Quit** (Windows) — **closing the window is not enough**. Claude reads
 and launches the env-file'd container only at startup, so this same full restart is required
 **every time you change `daxter.env`**. Docker must be running.
 
-## 5. Sign in & pick a workspace
+## 5. Sign in to Power BI
 
-In a Claude Desktop chat:
+In a Claude Desktop chat, just type:
 
-1. **"Sign in to Power BI"** → Claude calls `daxter_login` and shows you a URL + code. Open
-   the URL, enter the code, and sign in with your account. (Skip this if you used a service
-   principal — it's already authenticated.)
-2. **"List my workspaces"** → Claude calls `daxter_workspaces`. Pick one as your default,
-   or just name a workspace per request (the name encodes the env, e.g. `Sales - QA`).
-3. Try it: **"List the tables in the &lt;your model&gt; model."**
+> **Sign in to Power BI**
 
-If a tool ever reports *"Not signed in,"* just say **"sign in"** again. The token is cached
-in the `daxter-tokens` volume, so you stay signed in across sessions. See
-[`examples/mcp.md`](examples/mcp.md) for prompts per tool.
+Claude tells you it's starting sign-in and replies with a **clickable link and a short code**.
+Then it's three taps:
+
+1. **Click the link** — it opens the Microsoft sign-in page.
+2. **Enter the code** Claude gave you and **sign in** with your account.
+3. **Done** — the page confirms, and you're signed in. Return to the chat.
+
+That's the whole sign-in. *(Used a service principal? You're already authenticated — skip this.)*
+
+**Now pick where to work** — type **"List my workspaces"**, then name one as your default (or
+just mention a workspace in any request, e.g. `Sales - QA`). Try it:
+**"List the tables in the `<your model>` model"**.
+
+Your sign-in is cached on the `daxter-tokens` volume, so **you stay signed in across sessions** —
+no need to repeat this. If a tool ever says *"Not signed in,"* just type **sign in** again.
+See [`examples/mcp.md`](examples/mcp.md) for a prompt per tool.
 
 ## Multiple clients / environments
 
