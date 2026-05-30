@@ -43,7 +43,7 @@ Full walkthrough (Windows notes, multi-client, service-principal automation) is 
 | **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
-| **Pipeline** | `pipeline ls/stages/operations` + `pipeline rules --pipeline X --model Y` (deployment rules — inferred from per-stage parameter differences) + `pipeline audit --pipeline X` (list models without rules; or `--mode check --stage X --param Y --value Z` to find models whose parameter matches) |
+| **Pipeline** | `pipeline ls/stages/operations` + `pipeline rules --pipeline X --model Y` (deployment rules — inferred from per-stage parameter differences) + `pipeline audit --pipeline X` (list models without rules; or `--mode check --stage X --param Y --value Z [--model M]` to find matching models) + saved rule sets (`--saved "name"`, `--list-saved`, `--run-all-saved`) |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
@@ -78,6 +78,10 @@ they persist across restarts and upgrades.
 - **Gateways** — on-premises data gateways visible to the signed-in identity (REST).
 - **Pipelines** — deployment pipelines with their stages (Dev → Test → Prod workspaces) and
   recent operations (REST).
+- **Audit** — a per-model deployment-rule board plus pipeline-wide checks: pick a stage,
+  parameter, and expected value; **➕ Add rule** to stack several into a rule set; **▶ Run all
+  rules**; and **★ save** a check (shared with the CLI/MCP and persisted to the volume). Scope
+  to every model in the pipeline or a single model.
 - **⚙ Configure** (gear icon, top-right) — edit auth mode / defaults / prod workspaces and
   **Save** (persisted to the volume); also generates the env file + Claude Desktop MCP entry.
 - **Logs** — recent activity (operations with row counts + timing, sign-in, errors); secrets redacted.
@@ -85,7 +89,7 @@ they persist across restarts and upgrades.
 ## Examples
 
 - **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
-- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 27 tools (query, metadata, columns, inventory, gateways, datasources, pipelines, RLS testing, refresh, …).
+- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 33 tools (query, metadata, columns, inventory, gateways, datasources, pipelines, deployment-rule audits, RLS testing, refresh, …).
 
 ## Requirements
 
@@ -184,7 +188,7 @@ the workspace.
 ## Passing the image around
 
 Easiest: **pull from GHCR** (see [Install](#install)) — CI publishes
-`ghcr.io/danlugo/daxter:latest` and a tag per release (`:v1.2.0`, …) on every `v*` tag.
+`ghcr.io/danlugo/daxter:latest` and a tag per release (`:v1.7.0`, …) on every `v*` tag.
 
 Offline / air-gapped: ship a tarball:
 
@@ -217,7 +221,7 @@ By default you **sign in as yourself**: ask Claude to "sign in to Power BI" and 
 workspaces and pick one. (A service principal is the alternative for automation.)
 [`SETUP.md`](SETUP.md) walks through it on a new machine. The MCP tools are at **full parity
 with the CLI** — the query, metadata, ops, and inventory operations from the feature matrix
-above, as **27 tools** (`daxter_login` + 24 read + 2 gated write). Each accepts optional
+above, as **33 tools** (`daxter_login` + 30 read + 2 gated write). Each accepts optional
 `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
 **See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
 the gateways", datasources, pipelines, RLS testing).

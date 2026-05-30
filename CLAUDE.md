@@ -25,7 +25,8 @@ Power BI from macOS/Linux (interactive ADOMD login is Windows-only).
 
 ## Skills (`.claude/skills/`)
 
-Recurring workflows are packaged as composable skills. Use them instead of improvising:
+Recurring workflows are packaged as composable skills. Use them instead of improvising.
+(`.claude/` is gitignored — these live locally, not in the public repo.)
 
 | Skill | When | Notes |
 |-------|------|-------|
@@ -69,11 +70,13 @@ src/Daxter.Core/    # UI-free engine
   Query/  Metadata/ # QueryResult; ModelMetadataService, ModelDiffService
   Maintenance/      # MaintenanceService (TMSL refresh / ClearCache)
   Export/           # ModelExportService (TOM → .bim)
+  Audit/            # SavedAuditCheckStore (saved param-checks, shared by CLI/MCP/Web)
   Rest/             # PowerBiRestClient (workspaces, datasets, reports, lineage,
-                    #   permissions, gateways, datasources, pipelines, refresh)
+                    #   permissions, gateways, datasources, pipelines, refresh) +
+                    #   PipelineRulesService (deployment rules inferred from stage param diffs)
   Formatting/       # table (Spectre) / csv / json formatters
 src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server + tools
-tests/              # xUnit (75+); fakes for IXmlaSession; env tests serialized
+tests/              # xUnit (94); fakes for IXmlaSession; env tests serialized
 Dockerfile          # multi-stage: sdk build+test → slim non-root runtime
 .github/workflows/  # CI: test → docker build → publish to GHCR on v* tags (3× retry)
 ```
@@ -82,7 +85,7 @@ Dockerfile          # multi-stage: sdk build+test → slim non-root runtime
 
 `Daxter.Cli` is a thin shell over `Daxter.Core`. The MCP server (`Mcp/DaxterTools.cs`,
 discovered via `[McpServerTool]`) is **another shell over the same Core** — keep CLI and MCP
-at parity (25 MCP tools today). Shared logic (prod detection, token provider) lives in Core
+at parity (33 MCP tools today). Shared logic (prod detection, token provider) lives in Core
 or shared CLI helpers, not duplicated.
 
 ## Conventions

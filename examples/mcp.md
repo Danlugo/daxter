@@ -59,6 +59,20 @@ principal there's nothing to sign in — it's already authenticated.)
 | "Show the stages of pipeline <id>" | `daxter_pipeline_stages` |
 | "Show recent deploy operations for pipeline <id>" | `daxter_pipeline_operations` |
 
+## Deployment-rule audits
+
+Deployment rules are inferred by comparing a model's parameter values across pipeline stages
+(there is no public get-rules API). Saved checks are shared with the CLI and persisted to the volume.
+
+| Ask | Tool |
+|-----|------|
+| "Show the deployment rules for model Sales in pipeline <id>" | `daxter_pipeline_rules` |
+| "Which models in pipeline <id> have no deployment rule (identical across every stage)?" | `daxter_pipeline_models_without_rules` |
+| "In pipeline <id>, which models have WAREHOUSE_URL = X in the Prod stage?" (add a model to check just one) | `daxter_pipeline_param_check` |
+| "List my saved audit checks" | `daxter_audit_list_saved` |
+| "Run my saved check 'Prod warehouse URL'" | `daxter_audit_run_saved` |
+| "Run all my saved checks for pipeline <id>" (optionally scoped to one model) | `daxter_audit_run_all_saved` |
+
 ## Ops
 
 | Ask | Tool |
