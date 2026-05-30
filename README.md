@@ -183,7 +183,37 @@ docker pull ghcr.io/danlugo/daxter:latest
 docker run --rm ghcr.io/danlugo/daxter:latest --help
 ```
 
-The `bin/daxter` wrapper can use it too — point `DAXTER_IMAGE` at the registry:
+Real commands need config. The image ships with **no credentials** — pass them at
+runtime via an env file or `-e` flags, plus a volume to persist the cached token:
+
+```bash
+# 1) put your settings in a file (keys are listed in .env.example)
+cat > daxter.env <<'EOF'
+DAXTER_AUTH_MODE=service-principal
+DAXTER_TENANT_ID=<tenant-guid>
+DAXTER_CLIENT_ID=<app-id>
+DAXTER_CLIENT_SECRET=<secret>
+DAXTER_WORKSPACE=My Workspace
+DAXTER_DATASET=My Model
+EOF
+
+# 2) run, passing the file + a token-cache volume
+docker run --rm --env-file daxter.env -v daxter-tokens:/home/daxter/.daxter \
+  ghcr.io/danlugo/daxter:latest query 'EVALUATE ROW("ok", 1)'
+
+# inline -e works too (no file):
+docker run --rm \
+  -e DAXTER_WORKSPACE="My Workspace" -e DAXTER_DATASET="My Model" \
+  -e DAXTER_AUTH_MODE=service-principal \
+  -e DAXTER_TENANT_ID=... -e DAXTER_CLIENT_ID=... -e DAXTER_CLIENT_SECRET=... \
+  ghcr.io/danlugo/daxter:latest ls
+
+# interactive device-code sign-in (needs -it; token persists in the volume):
+docker run --rm -it -v daxter-tokens:/home/daxter/.daxter \
+  -e DAXTER_WORKSPACE="My Workspace" ghcr.io/danlugo/daxter:latest login
+```
+
+The `bin/daxter` wrapper bundles these flags for you — point `DAXTER_IMAGE` at the registry:
 
 ```bash
 DAXTER_IMAGE=ghcr.io/danlugo/daxter:latest ./bin/daxter ls
