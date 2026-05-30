@@ -1,0 +1,65 @@
+@page "/jobs"
+@inject JobService Svc
+@implements IDisposable
+
+<PageTitle>DAXter — Jobs</PageTitle>
+
+<h1>Jobs</h1>
+<p class="muted">
+    Refresh operations run here as background jobs — one at a time, in the order you launch them.
+    Launch them from Explore → Browse → a dataset or table (with <strong>Allow writes</strong> on).
+</p>
+
+<div class="cmd-group">
+    <button class="btn-sm" @onclick="Refresh">Refresh</button>
+    <button class="btn-sm" @onclick="ClearFinished" disabled="@(jobs.Count == 0)">Clear finished</button>
+    <span class="muted">@Svc.ActiveCount active · @jobs.Count total</span>
+</div>
+
+@if (jobs.Count == 0)
+{
+    <p class="muted">No jobs yet.</p>
+}
+else
+{
+    <div class="grid-wrap">
+        <table class="grid">
+            <thead>
+                <tr><th>#</th><th>Status</th><th>Job</th><th>Duration</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var j in jobs)
+                {
+                    <tr class="lvl-@j.Status">
+                        <td class="nowrap">@j.Id</td>
+                        <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
+                        <td>@j.Title</td>
+                        <td class="nowrap">@Fmt(j.Duration)</td>
+                        <td class="msg">@(j.Error ?? (j.Status == JobStatus.Queued ? "waiting…" : ""))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<Job> jobs = Array.Empty<Job>();
+
+    protected override void OnInitialized()
+    {
+        Svc.Changed += OnChanged;
+        Refresh();
+    }
+
+    private void Refresh() => jobs = Svc.Snapshot();
+
+    private void ClearFinished() { Svc.ClearFinished(); Refresh(); }
+
+    private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
+
+    private static string Fmt(TimeSpan? d)
+        => d is null ? "" : d.Value.TotalSeconds < 1 ? "<1s" : $"{(int)d.Value.TotalSeconds}s";
+
+    public void Dispose() => Svc.Changed -= OnChanged;
+}

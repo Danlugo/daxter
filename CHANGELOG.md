@@ -14,6 +14,16 @@ All notable changes to DAXter are documented here. The format follows
   so you can immediately type a new search.
 
 ### Added
+- **Refresh runs as background jobs.** Explore → Browse now exposes **refresh** (gated by
+  **Allow writes**, and always **refused for PROD** targets, same as the MCP/CLI): refresh the
+  **whole model** (dataset level), or a **table**, **all its partitions in order**
+  (newest→oldest / oldest→newest), or **a single partition** (click it). Each action queues a
+  **Job**; a new **Jobs** page (with an active-count badge in the nav) shows them running **one
+  at a time in launch order**, with status, duration, and errors — so you can fire off many
+  partition refreshes and watch them process in sequence. Backed by a single-worker
+  `JobService`; reuses Core's `MaintenanceService` (TMSL).
+- **Browse is now the default Explore tab** (and listed first); the workspace list loads on
+  arrival so you land straight in the explorer.
 - **Back button in Browse.** The drill-down explorer now has a **← Back** that returns to the
   exact previous view — from a table's M code back to the full **list of tables**, from a command
   result back to the dataset's commands, and so on up the chain (browser-style history, not just

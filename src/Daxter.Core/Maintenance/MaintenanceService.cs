@@ -40,6 +40,10 @@ public sealed class MaintenanceService
     public string BuildTableRefresh(string table, RefreshType type)
         => RefreshTmsl(type, [Target(_database, table)]);
 
+    /// <summary>TMSL to refresh a single named partition of a table.</summary>
+    public string BuildPartitionRefresh(string table, string partition, RefreshType type)
+        => RefreshTmsl(type, [Target(_database, table, partition)]);
+
     /// <summary>
     /// TMSL to refresh every partition of a table, ordered (newest-first by default).
     /// Partition names are sorted lexically — names like <c>2026Q205</c> sort correctly.

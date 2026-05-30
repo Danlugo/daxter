@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject VersionService Version
 @inject UsageStore Usage
+@inject JobService Jobs
 
 <header class="topbar">
     <span class="brand">DAXter <small>Console @Version.Current</small></span>
@@ -9,6 +10,7 @@
         <NavLink href="" Match="NavLinkMatch.All">Status</NavLink>
         <NavLink href="explore">Explore</NavLink>
         <NavLink href="configure">Configure</NavLink>
+        <NavLink href="jobs">Jobs@if (Jobs.ActiveCount > 0) { <span class="nav-badge">@Jobs.ActiveCount</span> }</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
 </header>
@@ -83,6 +85,7 @@
     protected override void OnInitialized()
     {
         Usage.Changed += OnUsageChanged;
+        Jobs.Changed += OnUsageChanged; // refresh the Jobs nav badge
         Reload();
     }
 
@@ -109,5 +112,9 @@
         return $"explore?ws={Uri.EscapeDataString(ws)}&ds={Uri.EscapeDataString(ds)}&table={Uri.EscapeDataString(t.Name)}";
     }
 
-    public void Dispose() => Usage.Changed -= OnUsageChanged;
+    public void Dispose()
+    {
+        Usage.Changed -= OnUsageChanged;
+        Jobs.Changed -= OnUsageChanged;
+    }
 }

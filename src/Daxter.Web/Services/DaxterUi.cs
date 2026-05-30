@@ -26,6 +26,12 @@ public sealed class DaxterUi
     /// <summary>The console's current effective config (editable via the Configure page).</summary>
     public DaxterConfig Config(bool requireWorkspace = false) => _state.ToConfig();
 
+    /// <summary>True when refreshes/writes are enabled (Configure → Allow writes).</summary>
+    public bool WritesEnabled => _state.AllowWrites;
+
+    /// <summary>True when the target looks like production (refreshes are refused).</summary>
+    public bool IsProductionTarget(string ws, string ds) => _state.ToConfig(ws, ds).IsProductionTarget();
+
     private static ITokenProvider Provider(DaxterConfig config, bool interactive = false)
         => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: interactive);
 
