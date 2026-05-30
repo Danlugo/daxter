@@ -46,13 +46,6 @@ See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 - **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
 - **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 25 tools (query, metadata, inventory, gateways, datasources, pipelines, RLS testing, refresh, …).
 
-## Why a container
-
-ADOMD.NET's built-in interactive login and TCP connectivity are Windows-only. DAXter
-sidesteps that by acquiring an Entra ID token itself (MSAL) and injecting it into the
-connection via `AccessToken` — the supported cross-platform path. Packaging it as an
-image means the only dependency on any machine is Docker.
-
 ## Requirements
 
 - Docker (Desktop or Engine).
@@ -69,49 +62,18 @@ docker pull ghcr.io/danlugo/daxter:latest
 docker run --rm ghcr.io/danlugo/daxter:latest --help
 ```
 
-Real commands need config. The image ships with **no credentials** — pass them at
-runtime via an env file or `-e` flags, plus a volume to persist the cached token:
+The image ships with **no credentials** — pass them at runtime via an env file (the
+variables are documented in [Configure](#configure) below) plus a volume for the cached
+token:
 
 ```bash
-# 1) put your settings in a file (keys are listed in .env.example)
-cat > daxter.env <<'EOF'
-DAXTER_AUTH_MODE=service-principal
-DAXTER_TENANT_ID=<tenant-guid>
-DAXTER_CLIENT_ID=<app-id>
-DAXTER_CLIENT_SECRET=<secret>
-DAXTER_WORKSPACE=My Workspace
-DAXTER_DATASET=My Model
-EOF
-
-# 2) run, passing the file + a token-cache volume
-docker run --rm --env-file daxter.env -v daxter-tokens:/home/daxter/.daxter \
+docker run --rm --env-file .env -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest query 'EVALUATE ROW("ok", 1)'
-
-# inline -e works too (no file):
-docker run --rm \
-  -e DAXTER_WORKSPACE="My Workspace" -e DAXTER_DATASET="My Model" \
-  -e DAXTER_AUTH_MODE=service-principal \
-  -e DAXTER_TENANT_ID=... -e DAXTER_CLIENT_ID=... -e DAXTER_CLIENT_SECRET=... \
-  ghcr.io/danlugo/daxter:latest ls
-
-# interactive device-code sign-in (needs -it; token persists in the volume):
-docker run --rm -it -v daxter-tokens:/home/daxter/.daxter \
-  -e DAXTER_WORKSPACE="My Workspace" ghcr.io/danlugo/daxter:latest login
 ```
 
-The `bin/daxter` wrapper bundles these flags for you — point `DAXTER_IMAGE` at the registry:
-
-```bash
-DAXTER_IMAGE=ghcr.io/danlugo/daxter:latest ./bin/daxter ls
-```
-
-**Or build it yourself:**
-
-```bash
-make image          # builds daxter:latest, running the test suite inside the build
-```
-
-The build fails if any unit test fails, so a successful image is always a tested image.
+Prefer to **build it yourself**: `make image`. For a guided, end-to-end setup (including
+Claude Desktop), see **[`SETUP.md`](SETUP.md)**; for `-e` flags, device-code login, and the
+`bin/daxter` wrapper, see [`examples/cli.md`](examples/cli.md).
 
 ## Configure
 
@@ -142,17 +104,9 @@ interactive:
 ./bin/daxter ws gateways                          # inventory via REST
 ```
 
-Or without the wrapper:
-
-```bash
-docker run --rm --env-file .env -v daxter-tokens:/home/daxter/.daxter \
-  daxter:latest query 'EVALUATE ROW("ok", 1)'
-```
-
 Results go to **stdout**, status to **stderr**; `-o` is `table` (default), `csv`, or `json`.
-**See [`examples/cli.md`](examples/cli.md) for every command** (query, model, refresh,
-workspace inventory, RLS testing, pipelines), and [`examples/mcp.md`](examples/mcp.md) for
-the MCP tools.
+**Every command is in [`examples/cli.md`](examples/cli.md)**; MCP prompts in
+[`examples/mcp.md`](examples/mcp.md).
 
 ## Authentication
 
@@ -200,18 +154,11 @@ models directly. Add to `claude_desktop_config.json`:
 }
 ```
 
-Requires Docker running and a service-principal `.env` (interactive auth isn't viable in
-a headless server). The MCP tools are at **full parity with the CLI** — 23 read tools:
-
-- **Query/metadata:** `daxter_query`, `daxter_dmv`, `daxter_list_tables`, `daxter_measures`,
-  `daxter_measure`, `daxter_mcode`, `daxter_parameters`, `daxter_partitions`, `daxter_rls`,
-  `daxter_diff_measures`, `daxter_export`, `daxter_test_rls`
-- **Ops:** `daxter_refresh_history`
-- **Inventory:** `daxter_workspaces`, `daxter_datasets`, `daxter_reports`, `daxter_lineage`,
-  `daxter_permissions`, `daxter_gateways`, `daxter_datasources`, `daxter_pipelines`,
-  `daxter_pipeline_stages`, `daxter_pipeline_operations`
-
-Each accepts optional `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
+Requires Docker running and a service-principal `.env` (interactive auth isn't viable in a
+headless server); [`SETUP.md`](SETUP.md) walks through this on a new machine. The MCP tools
+are at **full parity with the CLI** — the query, metadata, ops, and inventory operations
+from the feature matrix above, as **25 tools** (23 read + 2 gated write). Each accepts
+optional `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
 **See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
 the gateways", datasources, pipelines, RLS testing).
 
@@ -232,8 +179,9 @@ workspace name contains "prod", **or** the workspace is listed in `DAXTER_PROD_W
 | CLI | `System.CommandLine` 2.0 |
 | Output | Spectre.Console (table), CSV (RFC 4180), JSON |
 
-The image is multi-stage: a `sdk:8.0` stage restores, **tests**, and publishes; the
-`runtime:8.0` stage ships only the app and runs as a non-root user.
+Multi-stage build — the `sdk:8.0` stage restores + **tests** + publishes; the slim
+`runtime:8.0` stage ships only the app as a non-root user. Full design in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Finding workspace & model names
 
@@ -260,18 +208,9 @@ Set `DAXTER_WORKSPACE` to the workspace name (e.g. `Sales Analytics`) and
 - Tenant-wide audit (Scanner/Admin API) requires a Fabric admin identity — not included.
 - Interactive `login` needs a TTY (`docker run -it`); the wrapper handles this.
 
-## Project layout
+## Contributing & development
 
-```
-src/Daxter.Core/    # auth, connection, query, formatting (the engine)
-src/Daxter.Cli/     # System.CommandLine entry point
-tests/              # xUnit unit tests (run inside the Docker build)
-Dockerfile          # multi-stage build/test/publish
-bin/daxter          # docker run wrapper
-```
-
-## Development
-
-A local .NET SDK is **not** required — everything runs in Docker. If you have the SDK and
-want a fast inner loop, `dotnet test` and `dotnet run --project src/Daxter.Cli` work too
-(the projects roll forward to a newer runtime when net8 isn't installed).
+Docker-only — no local .NET SDK required. Build/test commands, the repo layout, and
+conventions live in **[`CLAUDE.md`](CLAUDE.md)**; design in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); roadmap in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
