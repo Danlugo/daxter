@@ -66,3 +66,8 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 .grid-toolbar { display:flex; align-items:center; gap:.8rem; margin:.6rem 0; flex-wrap:wrap; }
 .pager { display:flex; align-items:center; gap:.4rem; margin-left:auto; }
 .combo { min-width:320px; }
+.tabs { display:flex; gap:.3rem; border-bottom:2px solid var(--line); margin:1.2rem 0 1rem; }
+.tab { border:0; background:none; padding:.5rem 1rem; cursor:pointer; font:inherit; color:#656d76; border-bottom:2px solid transparent; margin-bottom:-2px; }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+.cmd-group { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin:.6rem 0; }
+.cmd-group .cmd-label { font-size:.8rem; color:#656d76; text-transform:uppercase; letter-spacing:.04em; width:80px; }

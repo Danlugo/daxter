@@ -11,35 +11,57 @@
         <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
         <input class="combo" list="ws-list" @bind="workspace" @bind:after="OnWorkspaceChanged"
                placeholder="type to search…" autocomplete="off" />
-        <datalist id="ws-list">
-            @foreach (var w in workspaces) { <option value="@w"></option> }
-        </datalist>
+        <datalist id="ws-list">@foreach (var w in workspaces) { <option value="@w"></option> }</datalist>
         <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
     </div>
     <div>
         <label>Dataset <span class="muted">(@datasets.Count)</span></label>
         <input class="combo" list="ds-list" @bind="dataset" placeholder="type to search…" autocomplete="off" />
-        <datalist id="ds-list">
-            @foreach (var d in datasets) { <option value="@d"></option> }
-        </datalist>
+        <datalist id="ds-list">@foreach (var d in datasets) { <option value="@d"></option> }</datalist>
     </div>
 </div>
 
-<div class="actions">
-    <button class="btn-sm" @onclick="ShowTables" disabled="@(!Ready)">Tables</button>
-    <button class="btn-sm" @onclick="ShowMeasures" disabled="@(!Ready)">Measures</button>
-    <button class="btn-sm" @onclick="ShowRefreshHistory" disabled="@(!Ready)">Refresh history</button>
+<div class="tabs">
+    <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="@(() => tab = Tab.Query)">DAX query</button>
+    <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="@(() => tab = Tab.Browse)">Browse</button>
 </div>
 
-<div class="query">
-    <textarea @bind="dax" rows="3" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
-    <button class="btn" @onclick="RunQuery" disabled="@(!Ready)">Run DAX</button>
-</div>
+@if (tab == Tab.Query)
+{
+    <div class="query">
+        <textarea @bind="dax" rows="4" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
+        <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
+    </div>
+}
+else
+{
+    <div class="cmd-group">
+        <span class="cmd-label">Workspace</span>
+        <button class="btn-sm" @onclick="ShowDatasets" disabled="@(!HasWorkspace)">Datasets</button>
+        <button class="btn-sm" @onclick="ShowReports" disabled="@(!HasWorkspace)">Reports</button>
+        <button class="btn-sm" @onclick="ShowLineage" disabled="@(!HasWorkspace)">Lineage</button>
+    </div>
+    <div class="cmd-group">
+        <span class="cmd-label">Model</span>
+        <button class="btn-sm" @onclick="ShowTables" disabled="@(!HasDataset)">Tables</button>
+        <button class="btn-sm" @onclick="ShowMeasures" disabled="@(!HasDataset)">Measures</button>
+        <button class="btn-sm" @onclick="ShowParameters" disabled="@(!HasDataset)">Parameters</button>
+        <button class="btn-sm" @onclick="ShowPartitions" disabled="@(!HasDataset)">Partitions</button>
+        <button class="btn-sm" @onclick="ShowRls" disabled="@(!HasDataset)">RLS</button>
+        <button class="btn-sm" @onclick="ShowDatasources" disabled="@(!HasDataset)">Datasources</button>
+        <button class="btn-sm" @onclick="ShowPermissions" disabled="@(!HasDataset)">Permissions</button>
+        <button class="btn-sm" @onclick="ShowRefreshHistory" disabled="@(!HasDataset)">Refresh history</button>
+        <button class="btn" @onclick="GoToQuery" disabled="@(!HasDataset)">Run DAX →</button>
+    </div>
+}
 
 @if (busy) { <p class="muted">Running…</p> }
 <ResultGrid Result="result" Error="@error" Empty="Load workspaces, pick a model, then run a command." />
 
 @code {
+    private enum Tab { Query, Browse }
+    private Tab tab = Tab.Query;
+
     private List<string> workspaces = new();
     private List<string> datasets = new();
     private string workspace = "", dataset = "", dax = "";
@@ -47,7 +69,10 @@
     private string? error;
     private bool busy;
 
-    private bool Ready => !string.IsNullOrEmpty(workspace) && !string.IsNullOrEmpty(dataset) && !busy;
+    private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
+    private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
+
+    private void GoToQuery() => tab = Tab.Query;
 
     private async Task LoadWorkspaces()
     {
@@ -68,8 +93,16 @@
         finally { busy = false; }
     }
 
+    private Task ShowDatasets() => Show(() => Ui.DatasetsAsync(workspace));
+    private Task ShowReports() => Show(() => Ui.ReportsAsync(workspace));
+    private Task ShowLineage() => Show(() => Ui.LineageAsync(workspace));
     private Task ShowTables() => Show(() => Ui.TablesAsync(workspace, dataset));
     private Task ShowMeasures() => Show(() => Ui.MeasuresAsync(workspace, dataset));
+    private Task ShowParameters() => Show(() => Ui.ParametersAsync(workspace, dataset));
+    private Task ShowPartitions() => Show(() => Ui.PartitionsAsync(workspace, dataset));
+    private Task ShowRls() => Show(() => Ui.RlsAsync(workspace, dataset));
+    private Task ShowDatasources() => Show(() => Ui.DatasourcesAsync(workspace, dataset));
+    private Task ShowPermissions() => Show(() => Ui.PermissionsAsync(workspace, dataset));
     private Task ShowRefreshHistory() => Show(() => Ui.RefreshHistoryAsync(workspace, dataset));
     private Task RunQuery() => Show(() => Ui.QueryAsync(workspace, dataset, dax));
 

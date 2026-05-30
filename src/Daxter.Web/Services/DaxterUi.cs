@@ -111,6 +111,43 @@ public sealed class DaxterUi
     public Task<QueryResult> QueryAsync(string ws, string ds, string dax, CancellationToken ct = default)
         => XmlaAsync(ws, ds, s => s.Execute(dax), ct);
 
+    public Task<QueryResult> ParametersAsync(string ws, string ds, CancellationToken ct = default)
+        => XmlaAsync(ws, ds, s => new ModelMetadataService(s).Parameters(), ct);
+
+    public Task<QueryResult> PartitionsAsync(string ws, string ds, CancellationToken ct = default)
+        => XmlaAsync(ws, ds, s => new ModelMetadataService(s).Partitions(null), ct);
+
+    public Task<QueryResult> RlsAsync(string ws, string ds, CancellationToken ct = default)
+        => XmlaAsync(ws, ds, s => new ModelMetadataService(s).Roles(), ct);
+
+    public async Task<QueryResult> ReportsAsync(string ws, CancellationToken ct = default)
+    {
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        return await rest.ReportsAsync(await rest.ResolveGroupIdAsync(ws, ct), ct);
+    }
+
+    public async Task<QueryResult> LineageAsync(string ws, CancellationToken ct = default)
+    {
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        return await rest.LineageAsync(await rest.ResolveGroupIdAsync(ws, ct), ct);
+    }
+
+    public async Task<QueryResult> DatasourcesAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+        return await rest.DatasourcesAsync(groupId, datasetId, ct);
+    }
+
+    public async Task<QueryResult> PermissionsAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+        return await rest.DatasetUsersAsync(groupId, datasetId, ct);
+    }
+
     private async Task<QueryResult> XmlaAsync(string ws, string ds, Func<IXmlaSession, QueryResult> op, CancellationToken ct)
     {
         var cfg = DaxterConfig.FromEnvironment(workspace: ws, dataset: ds);
