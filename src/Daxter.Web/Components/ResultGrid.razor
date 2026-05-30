@@ -1,0 +1,35 @@
+@if (Error is not null)
+{
+    <p class="bad-text">@Error</p>
+}
+else if (Result is null)
+{
+    <p class="muted">@(Empty ?? "No data yet.")</p>
+}
+else if (Result.RowCount == 0)
+{
+    <p class="muted">0 rows.</p>
+}
+else
+{
+    <div class="grid-wrap">
+        <table class="grid">
+            <thead>
+                <tr>@foreach (var col in Result.Columns) { <th>@col</th> }</tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Result.Rows)
+                {
+                    <tr>@foreach (var cell in row) { <td>@(cell?.ToString())</td> }</tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="muted">@Result.RowCount row@(Result.RowCount == 1 ? "" : "s")</p>
+}
+
+@code {
+    [Parameter] public QueryResult? Result { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public string? Empty { get; set; }
+}

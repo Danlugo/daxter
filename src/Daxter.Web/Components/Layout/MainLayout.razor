@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+<header class="topbar">
+    <span class="brand">DAXter <small>Console</small></span>
+    <nav>
+        <NavLink href="" Match="NavLinkMatch.All">Status</NavLink>
+        <NavLink href="explore">Explore</NavLink>
+        <NavLink href="configure">Configure</NavLink>
+    </nav>
+</header>
+
+<main class="content">
+    @Body
+</main>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>

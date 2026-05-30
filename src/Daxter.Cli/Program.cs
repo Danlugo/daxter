@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Diagnostics;
 using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
@@ -94,11 +95,15 @@ internal static class Program
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
 
+        var webPort = new Option<int>("--port") { Description = "Port for the web console.", DefaultValueFactory = _ => 8080 };
+        var webCommand = new Command("web", "Run the DAXter web console (status, configure, explore).") { webPort };
+        webCommand.SetAction((pr, ct) => RunWebAsync(pr.GetValue(webPort), ct));
+
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, mcpCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, mcpCommand, webCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -572,6 +577,34 @@ internal static class Program
         {
             return Fail(ex);
         }
+    }
+
+    private static async Task<int> RunWebAsync(int port, CancellationToken ct)
+    {
+        var dll = Path.Combine(AppContext.BaseDirectory, "Daxter.Web.dll");
+        if (!File.Exists(dll))
+        {
+            Console.Error.WriteLine($"daxter: web console not found at {dll}.");
+            return 1;
+        }
+
+        Console.Error.WriteLine($"DAXter web console → http://localhost:{port}  (Ctrl+C to stop)");
+        var psi = new ProcessStartInfo("dotnet") { UseShellExecute = false };
+        psi.ArgumentList.Add(dll);
+        psi.ArgumentList.Add("--urls");
+        psi.ArgumentList.Add($"http://0.0.0.0:{port}");
+
+        using var proc = Process.Start(psi)!;
+        try
+        {
+            await proc.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { /* ignore */ }
+        }
+
+        return proc.HasExited ? proc.ExitCode : 0;
     }
 
     private static ITokenProvider BuildTokenProvider(DaxterConfig config)

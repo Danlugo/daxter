@@ -1,0 +1,92 @@
+@page "/explore"
+@inject DaxterUi Ui
+
+<PageTitle>DAXter — Explore</PageTitle>
+
+<h1>Explore</h1>
+<p class="muted">Browse models and run commands — the CLI/MCP capabilities, graphically.</p>
+
+<div class="row">
+    <div>
+        <label>Workspace</label>
+        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
+            <option value="">— pick —</option>
+            @foreach (var w in workspaces) { <option value="@w">@w</option> }
+        </select>
+        <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
+    </div>
+    <div>
+        <label>Dataset</label>
+        <select @bind="dataset">
+            <option value="">— pick —</option>
+            @foreach (var d in datasets) { <option value="@d">@d</option> }
+        </select>
+    </div>
+</div>
+
+<div class="actions">
+    <button class="btn-sm" @onclick="@(() => Run(() => Ui.TablesAsync(workspace, dataset)))" disabled="@(!Ready)">Tables</button>
+    <button class="btn-sm" @onclick="@(() => Run(() => Ui.MeasuresAsync(workspace, dataset)))" disabled="@(!Ready)">Measures</button>
+    <button class="btn-sm" @onclick="@(() => Run(() => Ui.RefreshHistoryAsync(workspace, dataset)))" disabled="@(!Ready)">Refresh history</button>
+</div>
+
+<div class="query">
+    <textarea @bind="dax" rows="3" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
+    <button class="btn" @onclick="RunQuery" disabled="@(!Ready)">Run DAX</button>
+</div>
+
+@if (busy) { <p class="muted">Running…</p> }
+<ResultGrid Result="result" Error="error" Empty="Pick a workspace + dataset, then run a command." />
+
+@code {
+    private List<string> workspaces = new();
+    private List<string> datasets = new();
+    private string workspace = "", dataset = "", dax = "";
+    private QueryResult? result;
+    private string? error;
+    private bool busy;
+
+    private bool Ready => !string.IsNullOrEmpty(workspace) && !string.IsNullOrEmpty(dataset) && !busy;
+
+    private async Task LoadWorkspaces()
+    {
+        await Run(async () =>
+        {
+            var r = await Ui.WorkspacesAsync();
+            workspaces = ColumnValues(r, "name");
+            return (QueryResult?)null;
+        });
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        datasets = new();
+        dataset = "";
+        if (string.IsNullOrEmpty(workspace)) return;
+        await Run(async () =>
+        {
+            var r = await Ui.DatasetsAsync(workspace);
+            datasets = ColumnValues(r, "name");
+            return (QueryResult?)null;
+        });
+    }
+
+    private Task RunQuery() => Run(() => Ui.QueryAsync(workspace, dataset, dax));
+
+    private async Task Run(Func<Task<QueryResult?>> op)
+    {
+        busy = true; error = null; StateHasChanged();
+        try { var r = await op(); if (r is not null) result = r; }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private static List<string> ColumnValues(QueryResult r, string column)
+    {
+        var idx = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        if (idx < 0) return new();
+        return r.Rows.Select(row => row[idx]?.ToString() ?? "").Where(s => s.Length > 0).OrderBy(s => s).ToList();
+    }
+}

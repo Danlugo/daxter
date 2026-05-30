@@ -4,6 +4,20 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-05-29
+
+### Added
+- **Web console** — `daxter web` serves a local Blazor UI
+  (`docker run -p 8080:8080 --env-file daxter.env daxter:latest web` → http://localhost:8080):
+  - **Status / health** — config summary, sign-in/token + connectivity checks, with a
+    device-code **Sign in** button.
+  - **Explore** — workspaces → datasets → tables / measures, a DAX query box → results grid,
+    refresh history.
+  - **Configure** — view the current config and generate an env file + the Claude Desktop MCP
+    entry to copy.
+  Reuses `Daxter.Core` (same logic as CLI/MCP); the runtime image moved to `aspnet:8.0` to
+  host it.
+
 ## [1.5.1] - 2026-05-29
 
 ### Fixed

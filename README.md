@@ -49,6 +49,18 @@ Full walkthrough (Windows notes, multi-client, service-principal automation) is 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
+## Web console
+
+Prefer a UI? `daxter web` serves a local Blazor console:
+
+```bash
+docker run --rm -p 8080:8080 --env-file daxter.env daxter:latest web   # → http://localhost:8080
+```
+
+- **Status** — health checks (config, sign-in/token, connectivity), with a device-code sign-in button
+- **Explore** — workspaces → models → tables/measures, a DAX query box → results grid, refresh history
+- **Configure** — view the current config + generate an env file and the Claude Desktop MCP entry
+
 ## Examples
 
 - **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.

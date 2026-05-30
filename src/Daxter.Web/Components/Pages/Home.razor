@@ -1,0 +1,79 @@
+@page "/"
+@inject DaxterUi Ui
+
+<PageTitle>DAXter — Status</PageTitle>
+
+<h1>Status &amp; health</h1>
+<p class="muted">Is this server ready to query Power BI / serve as an MCP server?</p>
+
+<button class="btn" @onclick="RunAsync" disabled="@busy">@(busy ? "Checking…" : "Run health check")</button>
+
+@if (checks is not null)
+{
+    <ul class="checks">
+        @foreach (var c in checks)
+        {
+            <li class="@(c.Ok ? "ok" : "bad")">
+                <span class="dot"></span><strong>@c.Name</strong> — @c.Detail
+            </li>
+        }
+    </ul>
+}
+
+@if (needsLogin)
+{
+    <div class="card">
+        <h3>Sign in to Power BI</h3>
+        @if (loginMsg is null)
+        {
+            <button class="btn" @onclick="LoginAsync" disabled="@loggingIn">
+                @(loggingIn ? "Starting…" : "Sign in")
+            </button>
+        }
+        else
+        {
+            <pre class="code">@loginMsg</pre>
+            <button class="btn" @onclick="RunAsync">I've signed in — re-check</button>
+        }
+    </div>
+}
+
+@code {
+    private List<HealthCheck>? checks;
+    private bool busy, needsLogin, loggingIn;
+    private string? loginMsg;
+
+    protected override async Task OnInitializedAsync() => await RunAsync();
+
+    private async Task RunAsync()
+    {
+        busy = true;
+        loginMsg = null;
+        try
+        {
+            checks = await Ui.RunHealthAsync();
+            needsLogin = checks.Any(c => c.Name == "Authentication" && !c.Ok);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task LoginAsync()
+    {
+        loggingIn = true;
+        try
+        {
+            loginMsg = await Ui.BeginLoginAsync();
+        }
+        catch (Exception ex)
+        {
+            loginMsg = ex.Message;
+        }
+        finally
+        {
+            loggingIn = false;
+        }
+    }
+}

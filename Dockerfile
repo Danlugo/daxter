@@ -12,17 +12,20 @@ WORKDIR /src
 # dependency changes. (SDK 8.0 cannot parse the .slnx solution, so restore by project.)
 COPY src/Daxter.Core/Daxter.Core.csproj src/Daxter.Core/
 COPY src/Daxter.Cli/Daxter.Cli.csproj src/Daxter.Cli/
+COPY src/Daxter.Web/Daxter.Web.csproj src/Daxter.Web/
 COPY tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj tests/Daxter.Core.Tests/
 RUN dotnet restore src/Daxter.Cli/Daxter.Cli.csproj \
+    && dotnet restore src/Daxter.Web/Daxter.Web.csproj \
     && dotnet restore tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj
 
-# Build, test, then publish. The image fails to build if any test fails.
+# Build, test, then publish the CLI and the web console into the same /app.
 COPY . .
 RUN dotnet test tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj -c Release --no-restore
 RUN dotnet publish src/Daxter.Cli/Daxter.Cli.csproj -c Release --no-restore -o /app
+RUN dotnet publish src/Daxter.Web/Daxter.Web.csproj -c Release --no-restore -o /app
 
-# ---- runtime ----
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+# ---- runtime ----  (aspnet base: hosts the web console; also runs the CLI/MCP)
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
 # Non-root user with a home directory for the MSAL token cache (~/.daxter).
@@ -38,5 +41,6 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     HOME=/home/daxter
 
 USER daxter
+EXPOSE 8080
 ENTRYPOINT ["dotnet", "/app/daxter.dll"]
 CMD ["--help"]
