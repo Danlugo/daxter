@@ -7,11 +7,15 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.8] - 2026-05-30
 
 ### Added
-- **DAX autocomplete.** The query editor now suggests as you type (≥2 chars): the model's
-  **tables, columns, and measures** (from the loaded Fields tree) plus ~130 **DAX functions** and
-  keywords. Arrow keys to navigate, Enter/Tab to accept, Esc to dismiss; the chosen reference is
-  inserted correctly (`'Table'[Column]`, `[Measure]`, `FUNCTION(`). Self-contained — no external
-  editor/CDN dependency (a small `dax-complete.js` over the textarea).
+- **DAX autocomplete + signature help.** The query editor now suggests as you type (≥2 chars):
+  the model's **tables, columns, and measures** (from the loaded Fields tree) plus ~130 **DAX
+  functions** and keywords. Arrow keys to navigate, Enter/Tab to accept, Esc to dismiss; the
+  chosen reference is inserted correctly (`'Table'[Column]`, `[Measure]`, `FUNCTION(`).
+  Inside a function call, a **signature hint** shows its arguments with the **current argument
+  highlighted** (e.g. `CALCULATE(Expression, **Filter1**, Filter2, …)`), and field suggestions
+  are **biased to what that argument expects** (a `Table` arg surfaces tables first, a `Column`
+  arg surfaces columns, an `Expression`/`Value` arg surfaces measures + columns). Self-contained —
+  no external editor/CDN dependency (a small `dax-complete.js` over the textarea).
 
 ### Fixed
 - **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse

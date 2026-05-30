@@ -71,6 +71,9 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .dax-ac-item.sel, .dax-ac-item:hover { background:#eef1f4; }
 .dax-ac .ac-kind { flex:0 0 1.1em; text-align:center; color:#8c959f; font-weight:700; }
 .dax-ac .ac-function { color:#8250df; } .dax-ac .ac-measure { color:#1a7f37; } .dax-ac .ac-column { color:#0969da; } .dax-ac .ac-table { color:#656d76; }
+.dax-sig { position:fixed; z-index:1001; transform:translateY(-100%); background:#1f2328; color:#e6edf3; border-radius:6px; padding:.3rem .6rem; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.8rem; box-shadow:0 4px 14px rgba(0,0,0,.2); max-width:560px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dax-sig .sig-fn { color:#d2a8ff; font-weight:700; }
+.dax-sig b { color:#7ee787; font-weight:700; }
 .obj-search { width:100%; min-width:0; box-sizing:border-box; margin-bottom:.5rem; }
 .obj-tree { font-size:.84rem; }
 .obj-table { margin-bottom:.05rem; }
