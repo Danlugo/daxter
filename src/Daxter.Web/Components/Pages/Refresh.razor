@@ -38,19 +38,35 @@
 {
     <p class="muted">Pick a workspace and dataset to refresh.</p>
 }
+else
+{
+    <div class="tabs">
+        <button class="tab @(refTab == RefTab.New ? "active" : "")" @onclick="() => refTab = RefTab.New">New refresh</button>
+        <button class="tab @(refTab == RefTab.History ? "active" : "")" @onclick="() => refTab = RefTab.History">History</button>
+    </div>
+}
+
+@if (string.IsNullOrEmpty(dataset))
+{
+}
+else if (refTab == RefTab.History)
+{
+    @if (historyBusy) { <p class="muted">Loading refresh history…</p> }
+    else { <ResultGrid Result="historyResult" Error="@historyError" Empty="No refresh history for this dataset." /> }
+}
 else if (!Ui.WritesEnabled)
 {
     <div class="card bad">
         <p class="bad-text"><strong>Refresh is disabled.</strong></p>
-        <p class="muted">Turn on <strong>Allow writes</strong> on the Configure page to enable refreshes.</p>
+        <p class="muted">Turn on <strong>Allow writes</strong> on the Configure page to enable new refreshes (the <strong>History</strong> tab works without it).</p>
         <a class="btn" href="configure">Go to Configure →</a>
     </div>
 }
 else if (Ui.IsProductionTarget(workspace, dataset))
 {
     <div class="card bad">
-        <p class="bad-text"><strong>Production target — refresh is blocked.</strong></p>
-        <p class="muted">'@workspace' looks like production. Refreshing production from the console is not allowed.</p>
+        <p class="bad-text"><strong>Production target — launching refreshes is blocked.</strong></p>
+        <p class="muted">'@workspace' looks like production. You can still view its <strong>History</strong>, but not start a refresh from the console.</p>
     </div>
 }
 else
@@ -155,7 +171,7 @@ else
     <h3>Jobs for this dataset</h3>
     @if (Mine.Count == 0)
     {
-        <p class="muted">No refreshes launched yet. <a href="jobs">All jobs →</a></p>
+        <p class="muted">No refreshes launched yet. <a href="@JobsLink()">All jobs →</a></p>
     }
     else
     {
@@ -177,7 +193,7 @@ else
                 </tbody>
             </table>
         </div>
-        <p class="muted"><a href="jobs">All jobs →</a></p>
+        <p class="muted"><a href="@JobsLink()">All jobs →</a></p>
     }
 }
 
@@ -186,6 +202,7 @@ else
 
     private enum Scope { Full, Table, Partitions }
     private enum PartMode { AllNewest, AllOldest, Single }
+    private enum RefTab { New, History }
 
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
@@ -200,6 +217,11 @@ else
     private RefreshSpec? pending;
     private string? jobMsg, error;
     private bool jobMsgOk, busy;
+
+    private RefTab refTab = RefTab.New;
+    private QueryResult? historyResult;
+    private string? historyError;
+    private bool historyBusy;
 
     private IReadOnlyList<Job> Mine => Jobs.For(workspace, dataset);
 
@@ -264,16 +286,33 @@ else
     private async Task OnDatasetChanged()
     {
         ResetSelection();
-        if (string.IsNullOrEmpty(dataset) || !Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
+        if (string.IsNullOrEmpty(dataset)) return;
+
+        // History is read-only — load it for any dataset (even prod / writes-off).
+        await LoadHistory();
+
+        // Tables are only needed for launching a refresh (writes on, non-prod).
+        if (!Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
         busy = true; error = null;
-        try
-        {
-            tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table");
-            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.RefreshContext);
-        }
+        try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
+
+    private async Task LoadHistory()
+    {
+        historyBusy = true; historyError = null; historyResult = null;
+        try
+        {
+            historyResult = await Ui.RefreshHistoryAsync(workspace, dataset, 25);
+            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.RefreshContext);
+        }
+        catch (Exception ex) { historyError = ex.Message; }
+        finally { historyBusy = false; }
+    }
+
+    private string JobsLink()
+        => $"jobs?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}";
 
     private async Task OnTableChanged()
     {
@@ -297,7 +336,7 @@ else
         scope = s; pending = null;
         if (s == Scope.Partitions && !string.IsNullOrEmpty(selTable)) await OnTableChanged();
     }
-    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; }
+    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; }
 
     private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }
     private async Task OnWorkspaceChangedClear() { workspace = ""; await OnWorkspaceChanged(); }

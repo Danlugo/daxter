@@ -20,6 +20,10 @@ All notable changes to DAXter are documented here. The format follows
   Automatic / **Calculate** / Data only / Clear values) — and **confirm** before it runs. The
   partition options are **table-aware**: a table with one partition just refreshes it (no
   "in order" choice); the order options appear only when a table has multiple partitions.
+  The page is **tabbed** — **New refresh** and **History**: picking a workspace+dataset loads
+  the dataset's **refresh history** (read-only — works even for PROD or with writes off).
+  The Jobs page now offers a **← Back to Refresh** link (keeping the workspace/dataset) when you
+  arrive from a per-dataset "All jobs →" link, so you don't have to re-pick them.
   A **"Refreshing…"** banner shows while a refresh is in progress for the dataset, and a
   per-dataset job tracker (plus the **Jobs** page) lets you **cancel** and **see details**
   (status, duration, target, error). Refreshes deep-link from Explore (a dataset or table →

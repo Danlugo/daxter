@@ -10,6 +10,11 @@
     Click a row for its activity log. Launch refreshes from the <a href="refresh">Refresh</a> page.
 </p>
 
+@if (!string.IsNullOrEmpty(Qws) && !string.IsNullOrEmpty(Qds))
+{
+    <p><a class="btn-sm back-btn" href="@($"refresh?ws={Uri.EscapeDataString(Qws!)}&ds={Uri.EscapeDataString(Qds!)}")">← Back to Refresh (@Qds)</a></p>
+}
+
 <div class="cmd-group">
     <button class="btn-sm" @onclick="Refresh">Refresh</button>
     <button class="btn-sm" @onclick="ClearFinished" disabled="@(jobs.Count == 0)">Clear finished</button>
@@ -65,6 +70,9 @@ else
 }
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+
     private IReadOnlyList<Job> jobs = Array.Empty<Job>();
     private readonly HashSet<int> expanded = new();
     private Timer? ticker;
