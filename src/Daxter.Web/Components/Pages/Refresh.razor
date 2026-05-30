@@ -1,0 +1,308 @@
+@page "/refresh"
+@inject DaxterUi Ui
+@inject JobService Jobs
+@implements IDisposable
+@using Daxter.Core.Maintenance
+
+<PageTitle>DAXter — Refresh</PageTitle>
+
+<h1>Refresh</h1>
+<p class="muted">Process a model — full, a table, or partitions — as a tracked background job.</p>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count)</span></label>
+        <div class="combo-wrap">
+            <input class="combo" list="rf-ws" @bind="workspace" @bind:after="OnWorkspaceChanged"
+                   placeholder="type to search…" autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(workspace)) { <button class="combo-clear" @onclick="ClearWorkspace" title="Clear">×</button> }
+        </div>
+        <datalist id="rf-ws">@foreach (var w in workspaces) { <option value="@w"></option> }</datalist>
+        <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
+    </div>
+    <div>
+        <label>Dataset <span class="muted">(@datasets.Count)</span></label>
+        <div class="combo-wrap">
+            <input class="combo" list="rf-ds" @bind="dataset" @bind:after="OnDatasetChanged"
+                   placeholder="type to search…" autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(dataset)) { <button class="combo-clear" @onclick="ClearDataset" title="Clear">×</button> }
+        </div>
+        <datalist id="rf-ds">@foreach (var d in datasets) { <option value="@d"></option> }</datalist>
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+@if (string.IsNullOrEmpty(dataset))
+{
+    <p class="muted">Pick a workspace and dataset to refresh.</p>
+}
+else if (!Ui.WritesEnabled)
+{
+    <div class="card bad">
+        <p class="bad-text"><strong>Refresh is disabled.</strong></p>
+        <p class="muted">Turn on <strong>Allow writes</strong> on the Configure page to enable refreshes.</p>
+        <a class="btn" href="configure">Go to Configure →</a>
+    </div>
+}
+else if (Ui.IsProductionTarget(workspace, dataset))
+{
+    <div class="card bad">
+        <p class="bad-text"><strong>Production target — refresh is blocked.</strong></p>
+        <p class="muted">'@workspace' looks like production. Refreshing production from the console is not allowed.</p>
+    </div>
+}
+else
+{
+    @if (Jobs.IsRefreshing(workspace, dataset))
+    {
+        <div class="card refreshing">
+            <span class="spin">↻</span> <strong>Refreshing…</strong>
+            <span class="muted">a refresh is in progress for '@dataset'. See its status below.</span>
+        </div>
+    }
+
+    <h3>What to refresh</h3>
+    <div class="cmd-group">
+        <button class="btn-sm @(scope == Scope.Full ? "active" : "")" @onclick="() => SetScope(Scope.Full)">Full model</button>
+        <button class="btn-sm @(scope == Scope.Table ? "active" : "")" @onclick="() => SetScope(Scope.Table)">A table</button>
+        <button class="btn-sm @(scope == Scope.Partitions ? "active" : "")" @onclick="() => SetScope(Scope.Partitions)">Partitions</button>
+    </div>
+
+    @if (scope == Scope.Full)
+    {
+        <p class="muted">Refreshes <strong>every table</strong> in '@dataset' (TMSL <code>full</code>).</p>
+    }
+    else if (scope == Scope.Table || scope == Scope.Partitions)
+    {
+        <div class="form" style="max-width:420px;">
+            <label>Table
+                <select @bind="selTable" @bind:after="OnTableChanged">
+                    <option value="">— select a table —</option>
+                    @foreach (var t in tables) { <option value="@t">@t</option> }
+                </select>
+            </label>
+        </div>
+
+        @if (scope == Scope.Partitions && !string.IsNullOrEmpty(selTable))
+        {
+            <div class="cmd-group" style="margin-top:.6rem;">
+                <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => partMode = PartMode.AllNewest">All — newest→oldest</button>
+                <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => partMode = PartMode.AllOldest">All — oldest→newest</button>
+                <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => partMode = PartMode.Single">A single partition</button>
+            </div>
+            @if (partMode == PartMode.Single)
+            {
+                <div class="form" style="max-width:420px;">
+                    <label>Partition
+                        <select @bind="selPartition">
+                            <option value="">— select a partition —</option>
+                            @foreach (var p in partitions) { <option value="@p">@p</option> }
+                        </select>
+                    </label>
+                </div>
+            }
+        }
+    }
+
+    <div class="actions">
+        <button class="btn" @onclick="Review" disabled="@(!CanReview)">Review &amp; refresh →</button>
+    </div>
+
+    @if (pending is not null)
+    {
+        <div class="card confirm">
+            <p><strong>Confirm refresh</strong></p>
+            <p>You're about to refresh: <strong>@Summary(pending)</strong> on '<strong>@dataset</strong>'.</p>
+            <p class="muted">This triggers a processing operation against the live model. It runs as a background job.</p>
+            <button class="btn" @onclick="ConfirmRefresh">Confirm refresh</button>
+            <button class="btn-sm" @onclick="() => pending = null">Cancel</button>
+        </div>
+    }
+
+    @if (jobMsg is not null) { <p class="@(jobMsgOk ? "ok-text" : "bad-text")">@jobMsg</p> }
+
+    <h3>Jobs for this dataset</h3>
+    @if (Mine.Count == 0)
+    {
+        <p class="muted">No refreshes launched yet. <a href="jobs">All jobs →</a></p>
+    }
+    else
+    {
+        <div class="grid-wrap">
+            <table class="grid">
+                <thead><tr><th>#</th><th>Status</th><th>Job</th><th>Duration</th><th></th><th>Detail</th></tr></thead>
+                <tbody>
+                    @foreach (var j in Mine)
+                    {
+                        <tr class="lvl-@j.Status">
+                            <td class="nowrap">@j.Id</td>
+                            <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
+                            <td>@j.Title</td>
+                            <td class="nowrap">@Fmt(j.Duration)</td>
+                            <td>@if (j.CanCancel) { <button class="btn-sm" @onclick="() => Jobs.Cancel(j.Id)">Cancel</button> }</td>
+                            <td class="msg">@(j.Error ?? (j.Status == JobStatus.Queued ? "waiting…" : ""))</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="muted"><a href="jobs">All jobs →</a></p>
+    }
+}
+
+@code {
+    private enum Scope { Full, Table, Partitions }
+    private enum PartMode { AllNewest, AllOldest, Single }
+
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "table")] public string? Qtable { get; set; }
+    private string? appliedQuery;
+
+    private List<string> workspaces = new(), datasets = new(), tables = new(), partitions = new();
+    private string workspace = "", dataset = "", selTable = "", selPartition = "";
+    private Scope scope = Scope.Full;
+    private PartMode partMode = PartMode.AllNewest;
+    private RefreshSpec? pending;
+    private string? jobMsg, error;
+    private bool jobMsgOk, busy;
+
+    private IReadOnlyList<Job> Mine => Jobs.For(workspace, dataset);
+
+    private bool CanReview => scope switch
+    {
+        Scope.Full => true,
+        Scope.Table => !string.IsNullOrEmpty(selTable),
+        Scope.Partitions => !string.IsNullOrEmpty(selTable) && (partMode != PartMode.Single || !string.IsNullOrEmpty(selPartition)),
+        _ => false,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Jobs.Changed += OnJobsChanged;
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}|{Qds}|{Qtable}";
+        if (key == appliedQuery) return;
+        appliedQuery = key;
+
+        workspace = Qws!;
+        await OnWorkspaceChanged();
+        if (!string.IsNullOrEmpty(Qds))
+        {
+            dataset = Qds!;
+            await OnDatasetChanged();
+            if (!string.IsNullOrEmpty(Qtable))
+            {
+                scope = Scope.Table;
+                selTable = Qtable!;
+            }
+        }
+    }
+
+    private async Task LoadWorkspaces()
+    {
+        busy = true; error = null;
+        try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        datasets = new(); dataset = ""; ResetSelection();
+        if (string.IsNullOrEmpty(workspace)) return;
+        busy = true; error = null;
+        try { datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task OnDatasetChanged()
+    {
+        ResetSelection();
+        if (string.IsNullOrEmpty(dataset) || !Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
+        busy = true; error = null;
+        try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task OnTableChanged()
+    {
+        selPartition = ""; partitions = new(); pending = null;
+        if (scope != Scope.Partitions || string.IsNullOrEmpty(selTable)) return;
+        busy = true; error = null;
+        try { partitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable), "Name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private void SetScope(Scope s) { scope = s; pending = null; }
+    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; }
+
+    private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }
+    private async Task OnWorkspaceChangedClear() { workspace = ""; await OnWorkspaceChanged(); }
+    private void ClearDataset() { dataset = ""; ResetSelection(); }
+
+    private void Review() => pending = BuildSpec();
+
+    private RefreshSpec BuildSpec() => scope switch
+    {
+        Scope.Full => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst),
+        Scope.Table => new RefreshSpec(RefreshKind.Table, workspace, dataset, selTable, null, PartitionOrder.NewestFirst),
+        Scope.Partitions when partMode == PartMode.Single
+            => new RefreshSpec(RefreshKind.Partition, workspace, dataset, selTable, selPartition, PartitionOrder.NewestFirst),
+        Scope.Partitions
+            => new RefreshSpec(RefreshKind.AllPartitions, workspace, dataset, selTable, null,
+                partMode == PartMode.AllOldest ? PartitionOrder.OldestFirst : PartitionOrder.NewestFirst),
+        _ => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst),
+    };
+
+    private void ConfirmRefresh()
+    {
+        if (pending is null) return;
+        try
+        {
+            var job = Jobs.Enqueue(pending);
+            jobMsg = $"Queued job #{job.Id} — {job.Title}.";
+            jobMsgOk = true;
+        }
+        catch (Exception ex)
+        {
+            jobMsg = ex.Message;
+            jobMsgOk = false;
+        }
+        finally { pending = null; }
+    }
+
+    private static string Summary(RefreshSpec s) => s.Kind switch
+    {
+        RefreshKind.Model => "the full model",
+        RefreshKind.Table => $"table '{s.Table}'",
+        RefreshKind.Partition => $"partition '{s.Partition}' of '{s.Table}'",
+        RefreshKind.AllPartitions => $"all partitions of '{s.Table}' ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")})",
+        _ => "the model",
+    };
+
+    private static string Fmt(TimeSpan? d)
+        => d is null ? "" : d.Value.TotalSeconds < 1 ? "<1s" : $"{(int)d.Value.TotalSeconds}s";
+
+    private void OnJobsChanged() => InvokeAsync(StateHasChanged);
+
+    private static List<string> ColumnValues(QueryResult r, string column)
+    {
+        var idx = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        if (idx < 0) return new();
+        return r.Rows.Select(row => row[idx]?.ToString() ?? "").Where(s => s.Length > 0).OrderBy(s => s).ToList();
+    }
+
+    public void Dispose() => Jobs.Changed -= OnJobsChanged;
+}

@@ -2,8 +2,6 @@
 @inject DaxterUi Ui
 @inject UsageStore Usage
 @inject QueryHistoryStore History
-@inject JobService Jobs
-@using Daxter.Core.Maintenance
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -141,13 +139,9 @@ else
             <button class="btn-sm" @onclick="ShowDatasources">Datasources</button>
             <button class="btn-sm" @onclick="ShowPermissions">Permissions</button>
             <button class="btn-sm" @onclick="ShowRefreshHistory">Refresh history</button>
-            @if (Ui.WritesEnabled && !Ui.IsProductionTarget(workspace, dataset))
-            {
-                <button class="btn-sm refresh-btn" @onclick="RefreshModel" title="Queue a full model refresh">↻ Refresh model</button>
-            }
+            <a class="btn-sm" href="@($"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}")" title="Refresh this dataset">↻ Refresh…</a>
             <button class="btn" @onclick="GoToQuery">Run DAX →</button>
         </div>
-        @if (jobMsg is not null) { <p class="@(jobMsgOk ? "ok-text" : "bad-text")">@jobMsg</p> }
         @if (modelView == ModelView.Tables)
         {
             <ErrorBanner Message="@error" />
@@ -166,57 +160,20 @@ else
         <div class="cmd-group">
             <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
             <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
-            <button class="btn-sm @(tableView == TableView.Refresh ? "active" : "")" @onclick="ShowRefresh">↻ Refresh</button>
+            <a class="btn-sm" href="@RefreshLink()" title="Refresh this table on the Refresh page">↻ Refresh…</a>
         </div>
 
-        @if (tableView == TableView.Refresh)
+        @if (busy) { <p class="muted">Running…</p> }
+        else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
+        else if (tableView == TableView.Mcode && result is not null)
         {
-            @if (!Ui.WritesEnabled)
-            {
-                <p class="muted">Refresh is disabled. Turn on <strong>Allow writes</strong> on the
-                    <a href="configure">Configure</a> page to enable it.</p>
-            }
-            else if (Ui.IsProductionTarget(workspace, dataset))
-            {
-                <p class="bad-text">This target looks like <strong>production</strong> — refresh is blocked here.</p>
-            }
-            else
-            {
-                <div class="card">
-                    <p class="muted">Each action queues a background <a href="jobs">job</a>. Jobs run one at a
-                        time, in the order you launch them — so partition refreshes process in sequence.</p>
-                    <div class="cmd-group">
-                        <button class="btn-sm refresh-btn" @onclick="RefreshTable">↻ Refresh whole table</button>
-                        <button class="btn-sm refresh-btn" @onclick="@(() => RefreshAllPartitions(PartitionOrder.NewestFirst))">↻ All partitions (newest→oldest)</button>
-                        <button class="btn-sm refresh-btn" @onclick="@(() => RefreshAllPartitions(PartitionOrder.OldestFirst))">↻ All partitions (oldest→newest)</button>
-                    </div>
-                    @if (jobMsg is not null) { <p class="@(jobMsgOk ? "ok-text" : "bad-text")">@jobMsg</p> }
-
-                    <div class="side-h" style="margin-top:1rem;">Partitions — click to refresh one</div>
-                    @if (busy) { <p class="muted">Loading partitions…</p> }
-                    else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
-                    else
-                    {
-                        <ClickableList Items="refreshPartitions" OnSelect="RefreshPartition"
-                                       Empty="No partitions." />
-                    }
-                </div>
-            }
+            var mcode = SingleCell(result, "QueryDefinition");
+            if (string.IsNullOrEmpty(mcode)) { <p class="muted">No M code for this table (it may be a calculated or DirectQuery table).</p> }
+            else { <pre class="code">@mcode</pre> }
         }
         else
         {
-            @if (busy) { <p class="muted">Running…</p> }
-            else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
-            else if (tableView == TableView.Mcode && result is not null)
-            {
-                var mcode = SingleCell(result, "QueryDefinition");
-                if (string.IsNullOrEmpty(mcode)) { <p class="muted">No M code for this table (it may be a calculated or DirectQuery table).</p> }
-                else { <pre class="code">@mcode</pre> }
-            }
-            else
-            {
-                <ResultGrid Result="result" Error="@error" Empty="Loading…" />
-            }
+            <ResultGrid Result="result" Error="@error" Empty="Loading…" />
         }
     }
 }
@@ -225,7 +182,7 @@ else
     private enum Tab { Query, Browse }
     private enum WsView { Datasets, Reports, Lineage }
     private enum ModelView { None, Tables }
-    private enum TableView { Mcode, Partitions, Refresh }
+    private enum TableView { Mcode, Partitions }
 
     private Tab tab = Tab.Browse;
     private WsView wsView = WsView.Datasets;
@@ -242,9 +199,6 @@ else
     private string? error;
     private bool busy;
     private IReadOnlyList<QueryEntry> history = Array.Empty<QueryEntry>();
-    private List<string> refreshPartitions = new();
-    private string? jobMsg;
-    private bool jobMsgOk;
 
     // Browse navigation history (browser-style Back).
     private readonly Stack<BrowseState> back = new();
@@ -451,44 +405,9 @@ else
     private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }
     private Task ShowTablePartitions() { tableView = TableView.Partitions; return Show(() => Ui.TablePartitionsAsync(workspace, dataset, selTable!)); }
 
-    // ---- Refresh (jobs) ----
-
-    private async Task ShowRefresh()
-    {
-        tableView = TableView.Refresh;
-        jobMsg = null; error = null; result = null; modelView = ModelView.None;
-        if (Ui.WritesEnabled && !Ui.IsProductionTarget(workspace, dataset))
-        {
-            busy = true; StateHasChanged();
-            try { refreshPartitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable!), "Name"); }
-            catch (Exception ex) { error = ex.Message; }
-            finally { busy = false; }
-        }
-    }
-
-    private void Enqueue(RefreshSpec spec)
-    {
-        try
-        {
-            var job = Jobs.Enqueue(spec);
-            jobMsg = $"Queued job #{job.Id} — {job.Title}. Track it on the Jobs page.";
-            jobMsgOk = true;
-        }
-        catch (Exception ex)
-        {
-            jobMsg = ex.Message;
-            jobMsgOk = false;
-        }
-    }
-
-    private void RefreshModel()
-        => Enqueue(new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst));
-    private void RefreshTable()
-        => Enqueue(new RefreshSpec(RefreshKind.Table, workspace, dataset, selTable, null, PartitionOrder.NewestFirst));
-    private void RefreshAllPartitions(PartitionOrder order)
-        => Enqueue(new RefreshSpec(RefreshKind.AllPartitions, workspace, dataset, selTable, null, order));
-    private void RefreshPartition(string partition)
-        => Enqueue(new RefreshSpec(RefreshKind.Partition, workspace, dataset, selTable, partition, PartitionOrder.NewestFirst));
+    // Deep-link to the dedicated Refresh page with this table preselected.
+    private string RefreshLink()
+        => $"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}&table={Uri.EscapeDataString(selTable ?? "")}";
 
     private async Task Show(Func<Task<QueryResult>> op)
     {

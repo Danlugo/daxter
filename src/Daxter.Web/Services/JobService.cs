@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace Daxter.Web.Services;
 
 public enum RefreshKind { Model, Table, Partition, AllPartitions }
-public enum JobStatus { Queued, Running, Succeeded, Failed }
+public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled }
 
 /// <summary>What a refresh job targets. Table/Partition are null where not applicable.</summary>
 public sealed record RefreshSpec(
@@ -27,6 +27,11 @@ public sealed class Job
     public DateTimeOffset? Finished { get; set; }
     public string? Error { get; set; }
 
+    // Cancellation: the live session is aborted (disposed) to stop a running refresh.
+    internal IDisposable? Session { get; set; }
+    internal bool CancelRequested { get; set; }
+
+    public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
     public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
 }
 
@@ -92,15 +97,67 @@ public sealed class JobService
         lock (_gate) return _jobs.OrderByDescending(j => j.Id).ToList();
     }
 
+    /// <summary>Jobs for one dataset, newest first (for the Refresh page's tracker).</summary>
+    public IReadOnlyList<Job> For(string workspace, string dataset)
+    {
+        lock (_gate)
+            return _jobs
+                .Where(j => j.Spec.Workspace == workspace && j.Spec.Dataset == dataset)
+                .OrderByDescending(j => j.Id).ToList();
+    }
+
     public int ActiveCount
     {
         get { lock (_gate) return _jobs.Count(j => j.Status is JobStatus.Queued or JobStatus.Running); }
     }
 
-    /// <summary>Removes finished (succeeded/failed) jobs from the list.</summary>
+    /// <summary>True if a refresh is queued or running for this dataset (drives the "Refreshing…" state).</summary>
+    public bool IsRefreshing(string workspace, string dataset)
+    {
+        lock (_gate)
+            return _jobs.Any(j => j.Spec.Workspace == workspace && j.Spec.Dataset == dataset
+                && j.Status is JobStatus.Queued or JobStatus.Running);
+    }
+
+    /// <summary>Cancels a job: queued jobs are skipped; a running refresh is aborted (connection closed).</summary>
+    public void Cancel(int id)
+    {
+        Job? job;
+        IDisposable? session = null;
+        lock (_gate)
+        {
+            job = _jobs.FirstOrDefault(j => j.Id == id);
+            if (job is null) return;
+
+            if (job.Status == JobStatus.Queued)
+            {
+                job.Status = JobStatus.Canceled;
+                job.Finished = DateTimeOffset.Now;   // worker skips it when dequeued
+            }
+            else if (job.Status == JobStatus.Running)
+            {
+                job.CancelRequested = true;
+                session = job.Session;               // abort outside the lock
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        _log.LogInformation("Cancel requested for job #{Id}", id);
+        if (session is not null)
+        {
+            try { session.Dispose(); } catch { /* aborting the running command */ }
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>Removes finished (succeeded/failed/canceled) jobs from the list.</summary>
     public void ClearFinished()
     {
-        lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed);
+        lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Canceled);
         Changed?.Invoke();
     }
 
@@ -121,6 +178,8 @@ public sealed class JobService
         {
             while (_queue.TryDequeue(out var job))
             {
+                if (job.Status == JobStatus.Canceled) continue; // canceled while queued
+
                 job.Status = JobStatus.Running;
                 job.Started = DateTimeOffset.Now;
                 _log.LogInformation("Running job #{Id}: {Title}", job.Id, job.Title);
@@ -128,9 +187,14 @@ public sealed class JobService
 
                 try
                 {
-                    await ExecuteAsync(job.Spec);
+                    await ExecuteAsync(job);
                     job.Status = JobStatus.Succeeded;
                     _log.LogInformation("Job #{Id} succeeded in {Ms} ms", job.Id, (long)(job.Duration?.TotalMilliseconds ?? 0));
+                }
+                catch (Exception) when (job.CancelRequested)
+                {
+                    job.Status = JobStatus.Canceled;
+                    _log.LogInformation("Job #{Id} canceled", job.Id);
                 }
                 catch (Exception ex)
                 {
@@ -153,24 +217,34 @@ public sealed class JobService
         }
     }
 
-    private async Task ExecuteAsync(RefreshSpec spec)
+    private async Task ExecuteAsync(Job job)
     {
+        var spec = job.Spec;
         var cfg = _state.ToConfig(spec.Workspace, spec.Dataset);
         ITokenProvider provider = new MsalTokenProvider(cfg, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
         var factory = new AdomdXmlaSessionFactory(cfg, provider);
-        using var session = await factory.CreateAsync();
+        var session = await factory.CreateAsync();
+        lock (_gate) job.Session = session;   // so Cancel can abort the running command
 
-        var maint = new MaintenanceService(session, spec.Dataset);
-        var tmsl = spec.Kind switch
+        try
         {
-            RefreshKind.Model => maint.BuildModelRefresh(RefreshType.Full),
-            RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, RefreshType.Full),
-            RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, RefreshType.Full),
-            RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, RefreshType.Full),
-            _ => throw new DaxterException("Unknown refresh kind."),
-        };
+            var maint = new MaintenanceService(session, spec.Dataset);
+            var tmsl = spec.Kind switch
+            {
+                RefreshKind.Model => maint.BuildModelRefresh(RefreshType.Full),
+                RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, RefreshType.Full),
+                RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, RefreshType.Full),
+                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, RefreshType.Full),
+                _ => throw new DaxterException("Unknown refresh kind."),
+            };
 
-        maint.Execute(tmsl);
+            maint.Execute(tmsl);
+        }
+        finally
+        {
+            lock (_gate) job.Session = null;
+            try { session.Dispose(); } catch { /* may already be disposed by Cancel */ }
+        }
     }
 
     private static string TitleFor(RefreshSpec s) => s.Kind switch

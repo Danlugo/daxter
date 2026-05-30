@@ -14,14 +14,18 @@ All notable changes to DAXter are documented here. The format follows
   so you can immediately type a new search.
 
 ### Added
-- **Refresh runs as background jobs.** Explore → Browse now exposes **refresh** (gated by
-  **Allow writes**, and always **refused for PROD** targets, same as the MCP/CLI): refresh the
-  **whole model** (dataset level), or a **table**, **all its partitions in order**
-  (newest→oldest / oldest→newest), or **a single partition** (click it). Each action queues a
-  **Job**; a new **Jobs** page (with an active-count badge in the nav) shows them running **one
-  at a time in launch order**, with status, duration, and errors — so you can fire off many
-  partition refreshes and watch them process in sequence. Backed by a single-worker
-  `JobService`; reuses Core's `MaintenanceService` (TMSL).
+- **Dedicated Refresh page** (`/refresh`). Pick a workspace + dataset, then choose **what to
+  refresh** — the **full model**, a **table**, or **partitions** (all **in order**
+  newest→oldest / oldest→newest, or a **single** partition) — and **confirm** before it runs.
+  A **"Refreshing…"** banner shows while a refresh is in progress for the dataset, and a
+  per-dataset job tracker (plus the **Jobs** page) lets you **cancel** and **see details**
+  (status, duration, target, error). Refreshes deep-link from Explore (a dataset or table →
+  **↻ Refresh…**).
+- **Refreshes run as background jobs.** A single-worker `JobService` runs them **one at a time
+  in launch order** (so partitions process in sequence), reusing Core's `MaintenanceService`
+  (TMSL). New **Jobs** page with a nav active-count badge. Gated exactly like the MCP/CLI:
+  only with **Allow writes** on, and **always refused for PROD** targets. **Cancellation**
+  skips queued jobs and aborts a running refresh (closes its connection).
 - **Browse is now the default Explore tab** (and listed first); the workspace list loads on
   arrival so you land straight in the explorer.
 - **Back button in Browse.** The drill-down explorer now has a **← Back** that returns to the

@@ -25,7 +25,7 @@ else
     <div class="grid-wrap">
         <table class="grid">
             <thead>
-                <tr><th>#</th><th>Status</th><th>Job</th><th>Duration</th><th>Detail</th></tr>
+                <tr><th>#</th><th>Status</th><th>Job</th><th>Target</th><th>Duration</th><th></th><th>Detail</th></tr>
             </thead>
             <tbody>
                 @foreach (var j in jobs)
@@ -34,7 +34,9 @@ else
                         <td class="nowrap">@j.Id</td>
                         <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
                         <td>@j.Title</td>
+                        <td class="nowrap muted">@j.Spec.Workspace / @j.Spec.Dataset</td>
                         <td class="nowrap">@Fmt(j.Duration)</td>
+                        <td>@if (j.CanCancel) { <button class="btn-sm" @onclick="() => Cancel(j.Id)">Cancel</button> }</td>
                         <td class="msg">@(j.Error ?? (j.Status == JobStatus.Queued ? "waiting…" : ""))</td>
                     </tr>
                 }
@@ -55,6 +57,8 @@ else
     private void Refresh() => jobs = Svc.Snapshot();
 
     private void ClearFinished() { Svc.ClearFinished(); Refresh(); }
+
+    private void Cancel(int id) { Svc.Cancel(id); Refresh(); }
 
     private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
 

@@ -89,7 +89,13 @@ label.inline input, label.inline select { min-width:auto; }
 .badge-Error, .badge-Critical { background:var(--bad); } .badge-Debug, .badge-Trace { background:#8c959f; }
 .badge-job-Queued { background:#8c959f; } .badge-job-Running { background:#0969da; }
 .badge-job-Succeeded { background:var(--ok); } .badge-job-Failed { background:var(--bad); }
+.badge-job-Canceled { background:#8c959f; }
 .grid tr.lvl-Failed td { background:#fff5f5; } .grid tr.lvl-Running td { background:#f0f6ff; }
+.grid tr.lvl-Canceled td { color:#8c959f; }
+.card.refreshing { border-color:#0969da; background:#f0f6ff; max-width:none; }
+.card.confirm { border-color:var(--accent); background:#fbf7fb; }
+.spin { display:inline-block; animation:spin 1.2s linear infinite; }
+@keyframes spin { from { transform:rotate(0); } to { transform:rotate(360deg); } }
 .refresh-btn { border-color:#d4a72c; color:#9a6700; }
 .refresh-btn:hover { background:#fff8e6; }
 .nav-badge { display:inline-block; min-width:1.1rem; text-align:center; background:#cf222e; color:#fff; border-radius:10px; font-size:.65rem; font-weight:700; padding:0 .35rem; margin-left:.25rem; line-height:1.4; }
