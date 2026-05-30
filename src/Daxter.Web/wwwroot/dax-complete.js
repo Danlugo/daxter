@@ -64,25 +64,80 @@ window.daxComplete = (function () {
         return "https://learn.microsoft.com/en-us/dax/" + name.toLowerCase().replace(/\./g, "-") + "-function-dax";
     }
 
+    const KEYWORDS = new Set(["EVALUATE","DEFINE","MEASURE","COLUMN","TABLE","VAR","RETURN","ORDER","BY","START","AT","ASC","DESC","TRUE","FALSE","NOT","IN","AND","OR"]);
+
+    function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function wrap(cls, s) { return '<span class="' + cls + '">' + esc(s) + '</span>'; }
+
+    // Tokenize DAX into colored spans; everything else is emitted verbatim (escaped).
+    function highlight(text) {
+        let out = '', i = 0, n = text.length;
+        while (i < n) {
+            const c = text[i], c2 = text[i + 1];
+            if ((c === '-' && c2 === '-') || (c === '/' && c2 === '/')) {
+                let j = text.indexOf('\n', i); if (j < 0) j = n;
+                out += wrap('t-com', text.slice(i, j)); i = j; continue;
+            }
+            if (c === '/' && c2 === '*') {
+                let j = text.indexOf('*/', i + 2); j = j < 0 ? n : j + 2;
+                out += wrap('t-com', text.slice(i, j)); i = j; continue;
+            }
+            if (c === '"' || c === '\'') {
+                let j = i + 1;
+                while (j < n) { if (text[j] === c) { if (text[j + 1] === c) { j += 2; continue; } j++; break; } j++; }
+                out += wrap(c === '"' ? 't-str' : 't-tbl', text.slice(i, j)); i = j; continue;
+            }
+            if (c === '[') {
+                let j = i + 1; while (j < n && text[j] !== ']') j++; if (j < n) j++;
+                out += wrap('t-col', text.slice(i, j)); i = j; continue;
+            }
+            if (/[A-Za-z_]/.test(c)) {
+                let j = i + 1; while (j < n && /[A-Za-z0-9_]/.test(text[j])) j++;
+                const word = text.slice(i, j);
+                let k = j; while (k < n && /\s/.test(text[k])) k++;
+                const cls = text[k] === '(' ? 't-fn' : (KEYWORDS.has(word.toUpperCase()) ? 't-kw' : null);
+                out += cls ? wrap(cls, word) : esc(word); i = j; continue;
+            }
+            if (/[0-9]/.test(c)) {
+                let j = i + 1; while (j < n && /[0-9.]/.test(text[j])) j++;
+                out += wrap('t-num', text.slice(i, j)); i = j; continue;
+            }
+            out += esc(c); i++;
+        }
+        return out;
+    }
+
+    function paint(s) {
+        if (!s.code) return;
+        const v = s.el.value;
+        s.code.innerHTML = highlight(v) + (v.endsWith('\n') ? ' ' : '');
+        syncScroll(s);
+    }
+    function syncScroll(s) { if (s.code && s.code.parentElement) { s.code.parentElement.scrollTop = s.el.scrollTop; s.code.parentElement.scrollLeft = s.el.scrollLeft; } }
+
     function attach(el) {
         if (!el || states.get(el)) return;
         const box = document.createElement('div'); box.className = 'dax-ac'; box.style.display = 'none';
         const sig = document.createElement('div'); sig.className = 'dax-sig'; sig.style.display = 'none';
         document.body.appendChild(box); document.body.appendChild(sig);
 
-        const s = { el, box, sig, items: [], sel: 0, candidates: [], tokenStart: 0, tokenEnd: 0 };
+        const code = el.closest('.dax-edit') ? el.closest('.dax-edit').querySelector('.dax-hl-code') : null;
+        const s = { el, box, sig, code, items: [], sel: 0, candidates: [], tokenStart: 0, tokenEnd: 0 };
         states.set(el, s);
 
-        const activity = () => { update(s); updateSig(s); };
+        const activity = () => { update(s); updateSig(s); paint(s); };
         el.addEventListener('input', activity);
         el.addEventListener('click', activity);
         el.addEventListener('keyup', (e) => { if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) activity(); });
         el.addEventListener('keydown', (e) => onKey(s, e));
+        el.addEventListener('scroll', () => syncScroll(s));
         el.addEventListener('blur', () => setTimeout(() => { hide(s); s.sig.style.display = 'none'; }, 150));
         window.addEventListener('resize', () => { hide(s); s.sig.style.display = 'none'; });
+        paint(s);
     }
 
     function setCandidates(el, list) { const s = states.get(el); if (s) s.candidates = list || []; }
+    function rehighlight(el) { const s = states.get(el); if (s) paint(s); }
 
     function tokenAt(text, pos) {
         let start = pos;
@@ -238,5 +293,5 @@ window.daxComplete = (function () {
 
     function hide(s) { if (s) s.box.style.display = 'none'; }
 
-    return { attach, setCandidates };
+    return { attach, setCandidates, rehighlight };
 })();

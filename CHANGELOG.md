@@ -20,6 +20,10 @@ All notable changes to DAXter are documented here. The format follows
   no external editor/CDN dependency (a small `dax-complete.js` over the textarea).
 - The **Fields tree loads automatically** when you open the DAX tab / pick a dataset — no more
   "Load fields" button.
+- **DAX syntax highlighting.** The query editor now color-codes **functions**, **keywords**,
+  **strings**, **'table'** and **[column/measure]** references, **numbers**, and **comments** — via
+  a highlighted overlay behind a transparent textarea, painted client-side as you type (no server
+  round-trip), kept in sync after Format / field insertion. Self-contained (no editor library).
 - **Format button + live validation** in the DAX editor. **⌗ Format** pretty-prints the query
   (indents by call depth, one argument per line, keeps simple calls inline, uppercases
   functions/keywords) — done **locally**, the query is never sent anywhere. A validation strip

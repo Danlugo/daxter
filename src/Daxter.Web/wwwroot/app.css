@@ -65,7 +65,22 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .pane-x:hover { color:var(--bad); }
 .dax-tools { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
 .dax-tools .dax-hint { margin-left:auto; }
-.dax-editor { width:100%; box-sizing:border-box; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.5; resize:vertical; }
+/* Syntax-highlight overlay: a colored <pre> behind a transparent textarea (identical box model). */
+.dax-edit { position:relative; }
+.dax-edit .dax-hl,
+.dax-edit .dax-editor {
+    width:100%; box-sizing:border-box; margin:0;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.5;
+    padding:.4rem; border:1px solid var(--line); border-radius:6px;
+    white-space:pre-wrap; overflow-wrap:break-word; word-break:break-word;
+}
+.dax-edit .dax-hl { position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; border-color:transparent; background:#fff; color:#1f2328; }
+.dax-edit .dax-hl-code { font:inherit; }
+.dax-edit .dax-editor { position:relative; z-index:1; min-height:8.5rem; resize:vertical; background:transparent; color:transparent; caret-color:#1f2328; -webkit-text-fill-color:transparent; }
+.dax-edit .dax-editor::placeholder { color:#8c959f; -webkit-text-fill-color:#8c959f; }
+/* token colors (GitHub-light) */
+.t-fn { color:#8250df; } .t-kw { color:#cf222e; font-weight:600; } .t-str { color:#0a3069; }
+.t-tbl { color:#953800; } .t-col { color:#0969da; } .t-num { color:#0550ae; } .t-com { color:#6e7781; font-style:italic; }
 .dax-ac { position:fixed; z-index:1000; background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.14); max-height:260px; overflow:auto; min-width:220px; max-width:420px; font-size:.85rem; }
 .dax-ac-item { display:flex; align-items:center; gap:.5rem; padding:.3rem .6rem; cursor:pointer; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
 .dax-ac-item.sel, .dax-ac-item:hover { background:#eef1f4; }

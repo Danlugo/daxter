@@ -111,8 +111,11 @@
                 <span class="muted dax-hint">Tip: click a field on the left to insert it.</span>
                 @if (!showRecent) { <button class="btn-sm" @onclick="() => showRecent = true" title="Show recent queries">Recent ◂</button> }
             </div>
-            <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7" @ref="editorRef"
-                      placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
+            <div class="dax-edit">
+                <pre class="dax-hl" aria-hidden="true"><code class="dax-hl-code"></code></pre>
+                <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7" @ref="editorRef"
+                          placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
+            </div>
             @if (DaxIssues() is { Count: > 0 } issues)
             {
                 <div class="dax-issues">
@@ -465,6 +468,12 @@ else
         if (acAttached && acDirty)
         {
             try { await JS.InvokeVoidAsync("daxComplete.setCandidates", editorRef, BuildCandidates()); acDirty = false; }
+            catch { }
+        }
+        // Re-paint the syntax highlight after programmatic edits (Format, field/history insert).
+        if (acAttached)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.rehighlight", editorRef); }
             catch { }
         }
     }
