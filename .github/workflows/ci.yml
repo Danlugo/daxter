@@ -29,13 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Build image (tests run inside the build)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          tags: daxter:ci
+      - name: Build image (tests run inside; retry transient base-image pulls)
+        run: |
+          for attempt in 1 2 3; do
+            docker build -t daxter:ci . && exit 0
+            echo "::warning::build attempt $attempt failed (often a transient mcr.microsoft.com pull); retrying in 15s"
+            sleep 15
+          done
+          exit 1
 
   publish:
     name: Publish image to GHCR
@@ -47,21 +48,18 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Compute lowercase image name (GHCR requires lowercase)
-        id: img
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - name: Build & push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.img.outputs.name }}:latest
-            ${{ steps.img.outputs.name }}:${{ github.ref_name }}
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build & push (lowercase image name; retry transient pulls)
+        run: |
+          IMG="ghcr.io/${GITHUB_REPOSITORY,,}"
+          for attempt in 1 2 3; do
+            if docker build -t "$IMG:latest" -t "$IMG:${GITHUB_REF_NAME}" . \
+               && docker push "$IMG:latest" \
+               && docker push "$IMG:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "::warning::publish attempt $attempt failed; retrying in 15s"
+            sleep 15
+          done
+          exit 1
