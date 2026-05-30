@@ -100,7 +100,7 @@ Keep this file private and never commit it. Format matters for any value you do 
 
 > **The container reads `--env-file` only once, at startup**, and Claude Desktop launches it
 > once per session — so **any change to the env file takes effect only after a full
-> quit-and-reopen of Claude Desktop** (step 4), not just saving the file.
+> quit-and-reopen of Claude Desktop** (step 5), not just saving the file.
 
 ### Alternative: service principal (automation)
 
@@ -118,7 +118,7 @@ DAXTER_DATASET=<model name>                  # optional
 ```
 
 (Tenant admin must enable *"Allow service principals to use Power BI APIs"*; the SP must be a
-member of the workspace.) With SP, skip the sign-in in step 5.
+member of the workspace.) With SP, skip the sign-in in step 4.
 
 ## 3. Configure Claude Desktop
 
@@ -192,25 +192,13 @@ Either way, the equivalent JSON, if editing by hand (use absolute paths):
 }
 ```
 
-## 4. Restart Claude Desktop
-
-> **If you set any values (tenant id, or service-principal creds), make sure they're real —
-> not `<...>` placeholders — before restarting.** A malformed/empty tenant id makes every
-> tool call fail with `The authority (including the tenant ID) must be in a well-formed URI
-> format`. (Device-code mode needs no secret and no workspace, so a minimal file is fine.)
-
-**Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray
-icon → Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config
-and launches the env-file'd container only at startup, so this same full restart is required
-**every time you change `daxter.env`**. Docker must be running.
-
-## 5. Sign in to Power BI
+## 4. Sign in to Power BI
 
 Sign-in has two parts — **Claude starts the sign-in page; you finish it in the browser.**
 *(Service principal? You're already authenticated — skip this step.)*
 
 **Claude does this:** starts the **web console** — a local sign-in page (a separate,
-long-running container; the MCP setup above does **not** start it):
+long-running container; the MCP config above does **not** start it):
 
 ```bash
 # macOS / Linux:
@@ -223,12 +211,24 @@ docker run -d -p 8080:8080 --restart unless-stopped --env-file "$HOME/daxter.env
 **Sign in**. A Microsoft page opens with a **clickable link and a copyable code** — click the
 link, paste the code, and sign in with your account. The page updates itself when you're done.
 
-That's it. Your sign-in is cached on the shared `daxter-tokens` volume, so **Claude Desktop's
-`daxter` server reuses it automatically** and you only sign in once. In a chat, type
-**"List my workspaces"** and name one as your default (or just mention a workspace per request,
-e.g. `Sales - QA`). Try it: **"List the tables in the `<your model>` model"**.
+Your sign-in is cached on the shared `daxter-tokens` volume, so **Claude Desktop's `daxter`
+server will reuse it automatically** — you only sign in once.
 
-If a tool ever says *"Not signed in,"* just reopen **<http://localhost:8080> → Status → Sign in**.
+## 5. Restart Claude Desktop — last step, and you're done
+
+> **Before restarting, if you set any values (tenant id, or service-principal creds), make sure
+> they're real — not `<...>` placeholders.** A malformed/empty tenant id makes every tool call
+> fail with `The authority (including the tenant ID) must be in a well-formed URI format`.
+
+**Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray icon →
+Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config and launches
+the `daxter` container **only at startup** — so the tools don't appear until you do this. Because
+you signed in first (step 4), the container finds your cached token immediately and the tools work
+on the first try. (Docker must be running. Redo this restart **every time you change `daxter.env`**.)
+
+**Verify:** in a chat, type **"List my workspaces"** and name one as your default (or just mention
+a workspace per request, e.g. `Sales - QA`). Try it: **"List the tables in the `<your model>`
+model"**. If a tool says *"Not signed in,"* reopen **<http://localhost:8080> → Status → Sign in**.
 See [`examples/mcp.md`](examples/mcp.md) for a prompt per tool.
 
 ## Multiple clients / environments
@@ -265,8 +265,9 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
       or comment it out), any set values are real (GUID tenant id, no `<>`/quotes/spaces),
       edited in a normal editor
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
-- [ ] Claude Desktop **fully** quit & reopened (image auto-pulls from public GHCR on first run)
-- [ ] **Web console started by Claude** (`docker run -d -p 8080:8080 … web`), then the user
-      pointed to **http://localhost:8080 → Status → Sign in** to click the link + paste the code
-      (Claude starts the container; the user finishes the browser sign-in; shares the token volume)
+- [ ] **Signed in (step 4):** Claude started the web console (`docker run -d -p 8080:8080 … web`),
+      then the user finished at **http://localhost:8080 → Status → Sign in** (click link + paste
+      code). Token cached on the shared volume.
+- [ ] **Restarted last (step 5):** Claude Desktop **fully** quit & reopened — so it loads the
+      `daxter` config and the MCP container finds the cached token (image auto-pulls on first run)
 - [ ] **"List my workspaces"** returns results
