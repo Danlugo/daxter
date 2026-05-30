@@ -4,6 +4,24 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-05-30
+
+### Changed
+- **Simpler in-chat sign-in.** `daxter_login` now returns a clean, click-first message —
+  *"🔐 Signing you in to Power BI: 1) Open <link> 2) Enter code: XXXX 3) Sign in"* plus the
+  next step — built from the structured device-code URL/code instead of the raw MSAL string.
+  When a cached token is still valid it just says you're already signed in. Matches the
+  streamlined `SETUP.md` step 5 (`DaxterToolRuntime.FormatLoginPrompt`, unit-tested).
+
+### Docs
+- **`SETUP.md`** rewritten for a faster first run: a `docker info` "is the daemon running?"
+  gate before install; the web console called out as a separate process (with an absolute
+  `--env-file` path, configurable port, and persistence note); `DAXTER_TENANT_ID` promoted to
+  recommended with a placeholder-trap warning; a **Windows PowerShell** config-merge alongside
+  the macOS/Linux one; and a dead-simple, click-the-link sign-in step.
+- **`README.md` / `CLAUDE.md` / `examples/mcp.md`** synced to the current surface (33 MCP tools,
+  audit rule sets, the web Audit page).
+
 ## [1.7.0] - 2026-05-30
 
 ### Added

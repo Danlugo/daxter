@@ -176,16 +176,34 @@ internal static class DaxterToolRuntime
     /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
     private static DaxterConfig TenantConfig() => DaxterConfig.FromEnvironment(requireWorkspace: false);
 
-    /// <summary>Starts interactive sign-in and returns the device-code message for the user.</summary>
+    /// <summary>Starts interactive sign-in and returns a clean, click-first device-code message.</summary>
     public static Task<string> LoginAsync(CancellationToken ct)
         => Guard(async () =>
         {
             var provider = new MsalTokenProvider(TenantConfig(), deviceCodePrompt: Console.Error.WriteLine);
-            var message = await provider.BeginInteractiveLoginAsync(ct);
-            return message +
-                "\n\nComplete the sign-in in your browser, then ask me to list your workspaces " +
-                "so you can pick a default.";
+            // Returns the URL + code immediately; the token caches in the background once the
+            // user completes sign-in (Completion task is intentionally not awaited here).
+            var login = await provider.StartDeviceLoginAsync(ct);
+            return FormatLoginPrompt(login.VerificationUrl, login.UserCode);
         });
+
+    /// <summary>
+    /// User-facing sign-in message. With a device URL + code, returns a clean, click-first
+    /// prompt (the URL renders as a clickable link in the client); when both are absent —
+    /// already signed in — returns the ready-to-go message. Pure so it can be unit-tested.
+    /// </summary>
+    public static string FormatLoginPrompt(string? verificationUrl, string? userCode)
+    {
+        if (string.IsNullOrWhiteSpace(verificationUrl) || string.IsNullOrWhiteSpace(userCode))
+            return "You're already signed in to Power BI. Ask me to \"list my workspaces\" to pick a default.";
+
+        return
+            "🔐 Signing you in to Power BI:\n\n" +
+            $"1. Open {verificationUrl}\n" +
+            $"2. Enter code: {userCode}\n" +
+            "3. Sign in with your account — that's it.\n\n" +
+            "When you're done, ask me to \"list my workspaces\" to pick a default.";
+    }
 
     /// <summary>
     /// Deployment-rule check via XMLA: reads a model's parameters from each pipeline stage and
