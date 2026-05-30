@@ -199,6 +199,12 @@ internal static class Program
             () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
             svc => svc.Partitions(pr.GetValue(tableOption)), ct));
 
+        var columns = new Command("columns", "List columns (name, hidden), optionally for one table.") { tableOption, outputOption };
+        connectionOptions.AddTo(columns);
+        columns.SetAction((pr, ct) => RunModelAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
+            svc => svc.Columns(pr.GetValue(tableOption)), ct));
+
         var rls = new Command("rls", "Show RLS roles, or a role's filters + members.") { roleOption, outputOption };
         connectionOptions.AddTo(rls);
         rls.SetAction((pr, ct) => RunRlsAsync(
@@ -222,9 +228,9 @@ internal static class Program
             () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
             RequireArg(pr, otherArg, "other dataset"), ct));
 
-        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions, export, diff).")
+        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions, columns, export, diff).")
         {
-            measures, measure, mcode, parameters, partitions, rls, export, diff,
+            measures, measure, mcode, parameters, partitions, columns, rls, export, diff,
         };
     }
 
@@ -618,6 +624,8 @@ internal static class Program
     private static Command BuildRefreshCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
     {
         var tableOption = new Option<string?>("--table", "-t") { Description = "Table name." };
+        var partitionOption = new Option<string?>("--partition", "-p") { Description = "Partition name (for refresh partition)." };
+        var partitionsListOption = new Option<string?>("--partitions") { Description = "Comma-separated partition names (a subset) for refresh partitions; omit for all." };
         var typeOption = new Option<string?>("--type") { Description = "Refresh type: full|automatic|calculate|dataOnly|clearValues." };
         var orderOption = new Option<string?>("--order") { Description = "Partition order: newest-first (default) | oldest-first." };
         var dryRun = new Option<bool>("--dry-run") { Description = "Print the command without executing." };
@@ -638,15 +646,36 @@ internal static class Program
                 MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
 
-        var partitions = new Command("partitions", "Refresh a table's partitions, newest-first (TMSL).")
+        var partition = new Command("partition", "Refresh one named partition of a table (TMSL).")
         {
-            tableOption, orderOption, typeOption, dryRun, yes, force,
+            tableOption, partitionOption, typeOption, dryRun, yes, force,
+        };
+        connectionOptions.AddTo(partition);
+        partition.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+            svc => svc.BuildPartitionRefresh(
+                RequireOption(pr, tableOption, "--table"),
+                RequireOption(pr, partitionOption, "--partition"),
+                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var partitions = new Command("partitions", "Refresh a table's partitions in order, or a --partitions subset (TMSL, sequential).")
+        {
+            tableOption, partitionsListOption, orderOption, typeOption, dryRun, yes, force,
         };
         connectionOptions.AddTo(partitions);
         partitions.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
-            svc => svc.BuildPartitionsRefresh(RequireOption(pr, tableOption, "--table"),
-                ParseOrder(pr.GetValue(orderOption)),
-                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
+            svc =>
+            {
+                var table = RequireOption(pr, tableOption, "--table");
+                var type = MaintenanceService.ParseRefreshType(pr.GetValue(typeOption));
+                var subset = pr.GetValue(partitionsListOption);
+                // maxParallelism=1 → process in the listed order (a plain refresh runs in parallel).
+                return string.IsNullOrWhiteSpace(subset)
+                    ? svc.BuildPartitionsRefresh(table, ParseOrder(pr.GetValue(orderOption)), type, maxParallelism: 1)
+                    : svc.BuildPartitionsRefresh(table,
+                        subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                        type, maxParallelism: 1);
+            },
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
 
         var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force };
@@ -659,9 +688,9 @@ internal static class Program
         history.SetAction((pr, ct) => RunRefreshHistoryAsync(() => connectionOptions.Resolve(pr),
             () => pr.GetValue(outputOption), pr.GetValue(topOption), ct));
 
-        return new Command("refresh", "Refresh models / tables / partitions; view history.")
+        return new Command("refresh", "Refresh models / tables / partition(s); view history.")
         {
-            model, table, partitions, trigger, history,
+            model, table, partition, partitions, trigger, history,
         };
     }
 

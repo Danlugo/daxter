@@ -4,6 +4,16 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2026-05-30
+
+### Added
+- **CLI parity with the web Refresh page + Fields tree** (matching the MCP additions in 1.6.6):
+  - `daxter refresh partition --table T --partition P` — refresh **one** partition.
+  - `daxter refresh partitions --table T [--partitions A,B,C] [--order …]` — refresh **all** or a
+    **subset** of a table's partitions, now processed **in order** (TMSL `Sequence`,
+    `maxParallelism: 1`). `--type` covers full/automatic/**calculate**/dataOnly/clearValues.
+  - `daxter model columns [--table T]` — list a model's columns (name, hidden).
+
 ## [1.6.6] - 2026-05-30
 
 ### Added
