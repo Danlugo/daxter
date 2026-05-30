@@ -4,6 +4,14 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-05-29
+
+### Fixed
+- MCP tools now surface user-actionable messages (e.g. *"Not signed in — use the daxter_login
+  tool"*) instead of the SDK's generic *"An error occurred invoking …"* — `DaxterException`
+  text was being hidden, which would have stalled the device-code onboarding. `daxter_login`
+  under a service principal returns a clear "no interactive sign-in needed" message.
+
 ## [1.5.0] - 2026-05-29
 
 ### Added
