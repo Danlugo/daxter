@@ -132,7 +132,7 @@ else
     {
         <div class="cmd-group">
             <button class="btn-sm @(modelView == ModelView.Tables ? "active" : "")" @onclick="BrowseTables">Tables</button>
-            <button class="btn-sm" @onclick="ShowMeasures">Measures</button>
+            <button class="btn-sm @(modelView == ModelView.Measures ? "active" : "")" @onclick="BrowseMeasures">Measures</button>
             <button class="btn-sm" @onclick="ShowParameters">Parameters</button>
             <button class="btn-sm" @onclick="ShowPartitions">Partitions</button>
             <button class="btn-sm" @onclick="ShowRls">RLS</button>
@@ -145,9 +145,16 @@ else
         @if (modelView == ModelView.Tables)
         {
             <ErrorBanner Message="@error" />
-            <p class="muted">Click a table to see its M code &amp; partitions.</p>
+            <p class="muted">Click a table to see its M code &amp; partitions, or preview its rows.</p>
             <ClickableList Items="modelTables" OnSelect="SelectTable"
                            Empty="@(busy ? "Loading…" : "No tables.")" />
+        }
+        else if (modelView == ModelView.Measures)
+        {
+            <ErrorBanner Message="@error" />
+            <p class="muted">Click a measure to <strong>run it</strong> (evaluates the measure and shows its value).</p>
+            <ClickableList Items="modelMeasures" OnSelect="RunMeasure"
+                           Empty="@(busy ? "Loading…" : "No measures.")" />
         }
         else
         {
@@ -160,6 +167,8 @@ else
         <div class="cmd-group">
             <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
             <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
+            <button class="btn-sm" @onclick="() => RunTopN(10)" title="EVALUATE TOPN(10, …) on the DAX tab">Top 10 rows →</button>
+            <button class="btn-sm" @onclick="() => RunTopN(100)" title="EVALUATE TOPN(100, …) on the DAX tab">Top 100 rows →</button>
             <a class="btn-sm" href="@RefreshLink()" title="Refresh this dataset on the Refresh page">↻ Refresh…</a>
         </div>
 
@@ -181,7 +190,7 @@ else
 @code {
     private enum Tab { Query, Browse }
     private enum WsView { Datasets, Reports, Lineage }
-    private enum ModelView { None, Tables }
+    private enum ModelView { None, Tables, Measures }
     private enum TableView { Mcode, Partitions }
 
     private Tab tab = Tab.Browse;
@@ -192,6 +201,7 @@ else
     private List<string> workspaces = new();
     private List<string> datasets = new();
     private List<string> modelTables = new();
+    private List<string> modelMeasures = new();
     private string workspace = "", dataset = "", dax = "";
     private string? selTable;
     private string? defaultWorkspace, defaultDataset;
@@ -207,7 +217,7 @@ else
     private sealed record BrowseState(
         string Workspace, string Dataset, string? SelTable,
         WsView WsView, ModelView ModelView, TableView TableView,
-        List<string> Datasets, List<string> ModelTables, QueryResult? Result, string? Error);
+        List<string> Datasets, List<string> ModelTables, List<string> ModelMeasures, QueryResult? Result, string? Error);
 
     private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
 
@@ -353,9 +363,39 @@ else
         finally { busy = false; }
     }
 
+    private async Task BrowseMeasures()
+    {
+        PushBack();
+        modelView = ModelView.Measures; result = null; error = null; busy = true; StateHasChanged();
+        try { modelMeasures = ColumnValues(await Ui.MeasuresAsync(workspace, dataset), "Name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    // ---- quick "run it" actions: prefill the DAX tab and execute ----
+
+    private async Task GoRunDax(string daxQuery)
+    {
+        dax = daxQuery;
+        tab = Tab.Query;
+        await RunQuery();
+    }
+
+    private Task RunTopN(int n)
+    {
+        var t = selTable!.Replace("'", "''");
+        return GoRunDax("EVALUATE\nTOPN(" + n + ", '" + t + "')");
+    }
+
+    private Task RunMeasure(string measure)
+    {
+        var label = measure.Replace("\"", "\"\"");
+        var name = measure.Replace("]", "]]");
+        return GoRunDax("EVALUATE\nROW(\"" + label + "\", [" + name + "])");
+    }
+
     // Model commands push a back-state first, so Back returns to the dataset's command view.
     private Task Cmd(Func<Task<QueryResult>> op) { PushBack(); return Show(op); }
-    private Task ShowMeasures() => Cmd(() => Ui.MeasuresAsync(workspace, dataset));
     private Task ShowParameters() => Cmd(() => Ui.ParametersAsync(workspace, dataset));
     private Task ShowPartitions() => Cmd(() => Ui.PartitionsAsync(workspace, dataset));
     private Task ShowRls() => Cmd(() => Ui.RlsAsync(workspace, dataset));
@@ -423,7 +463,7 @@ else
 
     private void PushBack() => back.Push(new BrowseState(
         workspace, dataset, selTable, wsView, modelView, tableView,
-        datasets, modelTables, result, error));
+        datasets, modelTables, modelMeasures, result, error));
 
     private void GoBack()
     {
@@ -431,7 +471,8 @@ else
         var s = back.Pop();
         workspace = s.Workspace; dataset = s.Dataset; selTable = s.SelTable;
         wsView = s.WsView; modelView = s.ModelView; tableView = s.TableView;
-        datasets = s.Datasets; modelTables = s.ModelTables; result = s.Result; error = s.Error;
+        datasets = s.Datasets; modelTables = s.ModelTables; modelMeasures = s.ModelMeasures;
+        result = s.Result; error = s.Error;
         busy = false;
     }
 
