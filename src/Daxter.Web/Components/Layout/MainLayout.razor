@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject VersionService Version
+@inject UsageStore Usage
 
 <header class="topbar">
     <span class="brand">DAXter <small>Console @Version.Current</small></span>
@@ -11,12 +13,101 @@
     </nav>
 </header>
 
-<main class="content">
-    @Body
-</main>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="side-title">Frequent</div>
+
+        @if (wsTop.Count == 0 && dsTop.Count == 0 && tblTop.Count == 0)
+        {
+            <p class="side-empty">Your most-used workspaces, datasets, and tables show up here as you browse.</p>
+        }
+
+        @if (wsTop.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Workspaces</div>
+                @foreach (var w in wsTop)
+                {
+                    <a class="side-item" href="@WsLink(w)" title="@w.Name">
+                        <span class="side-name">@w.Name</span><span class="side-count">@w.Count</span>
+                    </a>
+                }
+            </div>
+        }
+
+        @if (dsTop.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Datasets</div>
+                @foreach (var d in dsTop)
+                {
+                    <a class="side-item" href="@DsLink(d)" title="@($"{d.Name} — {d.Parent}")">
+                        <span class="side-name">@d.Name</span><span class="side-count">@d.Count</span>
+                    </a>
+                }
+            </div>
+        }
+
+        @if (tblTop.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Tables</div>
+                @foreach (var t in tblTop)
+                {
+                    <a class="side-item" href="@TblLink(t)" title="@t.Name">
+                        <span class="side-name">@t.Name</span><span class="side-count">@t.Count</span>
+                    </a>
+                }
+            </div>
+        }
+    </aside>
+
+    <main class="content">
+        @Body
+    </main>
+</div>
 
 <div id="blazor-error-ui">
     An unhandled error has occurred.
     <a href="" class="reload">Reload</a>
     <a class="dismiss">🗙</a>
 </div>
+
+@code {
+    private const char Sep = '\u001F'; // table Parent = workspace<unit-sep>dataset
+
+    private IReadOnlyList<UsageItem> wsTop = Array.Empty<UsageItem>();
+    private IReadOnlyList<UsageItem> dsTop = Array.Empty<UsageItem>();
+    private IReadOnlyList<UsageItem> tblTop = Array.Empty<UsageItem>();
+
+    protected override void OnInitialized()
+    {
+        Usage.Changed += OnUsageChanged;
+        Reload();
+    }
+
+    private void Reload()
+    {
+        wsTop = Usage.Top(UsageStore.Workspace, 6);
+        dsTop = Usage.Top(UsageStore.Dataset, 6);
+        tblTop = Usage.Top(UsageStore.Table, 6);
+    }
+
+    private void OnUsageChanged() => InvokeAsync(() => { Reload(); StateHasChanged(); });
+
+    private static string WsLink(UsageItem w)
+        => $"explore?ws={Uri.EscapeDataString(w.Name)}";
+
+    private static string DsLink(UsageItem d)
+        => $"explore?ws={Uri.EscapeDataString(d.Parent ?? "")}&ds={Uri.EscapeDataString(d.Name)}";
+
+    private static string TblLink(UsageItem t)
+    {
+        var parts = (t.Parent ?? "").Split(Sep);
+        var ws = parts.Length > 0 ? parts[0] : "";
+        var ds = parts.Length > 1 ? parts[1] : "";
+        return $"explore?ws={Uri.EscapeDataString(ws)}&ds={Uri.EscapeDataString(ds)}&table={Uri.EscapeDataString(t.Name)}";
+    }
+
+    public void Dispose() => Usage.Changed -= OnUsageChanged;
+}

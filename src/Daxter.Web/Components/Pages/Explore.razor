@@ -1,5 +1,6 @@
 @page "/explore"
 @inject DaxterUi Ui
+@inject UsageStore Usage
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -157,6 +158,14 @@ else
     private string? error;
     private bool busy;
 
+    private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
+
+    // Deep-link from the "Frequent" sidebar: /explore?ws=..&ds=..&table=..
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "table")] public string? Qtable { get; set; }
+    private string? appliedQuery;
+
     private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
     private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
 
@@ -169,6 +178,29 @@ else
             defaultDataset = cfg.Dataset;
         }
         catch { /* no default configured */ }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}{Sep}{Qds}{Sep}{Qtable}";
+        if (key == appliedQuery) return;   // only apply a given deep-link once
+        appliedQuery = key;
+
+        tab = Tab.Browse;
+        if (workspaces.Count == 0) await LoadWorkspaces();
+        workspace = Qws!;
+        await OnWorkspaceChanged();        // loads datasets, records the workspace
+
+        if (!string.IsNullOrEmpty(Qds))
+        {
+            dataset = Qds!;
+            Usage.Record(UsageStore.Dataset, dataset, workspace);
+            if (!string.IsNullOrEmpty(Qtable))
+            {
+                await SelectTable(Qtable!); // drills in + shows M code + records the table
+            }
+        }
     }
 
     // ---- navigation ----
@@ -196,11 +228,16 @@ else
         result = null;
     }
 
-    private void SelectDataset(string ds) { dataset = ds; selTable = null; modelView = ModelView.None; result = null; }
+    private void SelectDataset(string ds)
+    {
+        dataset = ds; selTable = null; modelView = ModelView.None; result = null;
+        Usage.Record(UsageStore.Dataset, ds, workspace);
+    }
 
     private async Task SelectTable(string t)
     {
         selTable = t;
+        Usage.Record(UsageStore.Table, t, $"{workspace}{Sep}{dataset}");
         await ShowMcode();   // show M code by default
     }
 
@@ -227,7 +264,11 @@ else
         datasets = new(); dataset = ""; selTable = null;
         if (string.IsNullOrEmpty(workspace)) return;
         busy = true; error = null;
-        try { datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name"); }
+        try
+        {
+            datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
+            Usage.Record(UsageStore.Workspace, workspace); // valid workspace (it resolved)
+        }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
@@ -253,7 +294,12 @@ else
     private Task ShowDatasources() => Show(() => Ui.DatasourcesAsync(workspace, dataset));
     private Task ShowPermissions() => Show(() => Ui.PermissionsAsync(workspace, dataset));
     private Task ShowRefreshHistory() => Show(() => Ui.RefreshHistoryAsync(workspace, dataset));
-    private Task RunQuery() => Show(() => Ui.QueryAsync(workspace, dataset, dax));
+    private async Task RunQuery()
+    {
+        await Show(() => Ui.QueryAsync(workspace, dataset, dax));
+        if (error is null && !string.IsNullOrEmpty(dataset))
+            Usage.Record(UsageStore.Dataset, dataset, workspace); // dataset proven valid by a successful query
+    }
 
     private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }
     private Task ShowTablePartitions() { tableView = TableView.Partitions; return Show(() => Ui.TablePartitionsAsync(workspace, dataset, selTable!)); }

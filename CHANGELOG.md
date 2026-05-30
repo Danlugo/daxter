@@ -7,6 +7,12 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.4] - 2026-05-29
 
 ### Added
+- **"Frequent" sidebar.** A left rail across the console lists your **most-used workspaces,
+  datasets, and tables** (by open count) so you don't have to search for the same ones every
+  time. Click one to jump straight into Explore at that level (deep-linked via the query
+  string — a table even opens to its M code). Usage is tracked in a persisted `UsageStore`
+  (`~/.daxter/usage.json` on the mounted volume) and only records targets that actually
+  resolved, so typos don't pollute the list.
 - **Version awareness + update check.** The image is stamped with its version at build time
   (`DAXTER_VERSION`, from the git tag); the web console shows it in the header, and the Status
   page has a **Version & updates** card that checks GitHub `releases/latest` on demand. If a

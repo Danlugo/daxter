@@ -37,7 +37,18 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .topbar nav { display:flex; gap:1rem; }
 .topbar nav a { color:#fff; text-decoration:none; opacity:.85; padding:.2rem .4rem; border-radius:4px; }
 .topbar nav a:hover, .topbar nav a.active { opacity:1; background:rgba(255,255,255,.18); }
-.content { max-width:1000px; margin:0 auto; padding:1.5rem 1.2rem; }
+.shell { display:flex; align-items:flex-start; }
+.content { flex:1; min-width:0; max-width:1000px; margin:0 auto; padding:1.5rem 1.2rem; }
+.sidebar { flex:0 0 220px; width:220px; box-sizing:border-box; padding:1.1rem .8rem; border-right:1px solid var(--line); background:#fbfbfc; min-height:calc(100vh - 49px); position:sticky; top:0; }
+.sidebar .side-title { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em; color:#8c959f; margin-bottom:.7rem; }
+.side-empty { font-size:.8rem; color:#8c959f; line-height:1.4; }
+.side-group { margin-bottom:1.1rem; }
+.side-h { font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:#656d76; margin:.2rem 0 .35rem; }
+.side-item { display:flex; justify-content:space-between; align-items:center; gap:.4rem; padding:.32rem .45rem; border-radius:6px; color:#1f2328; text-decoration:none; font-size:.84rem; }
+.side-item:hover { background:#eef1f4; }
+.side-item .side-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.side-count { flex:0 0 auto; font-size:.68rem; color:#656d76; background:#eef1f4; border-radius:10px; padding:0 .42rem; line-height:1.5; }
+@media (max-width: 768px) { .sidebar { display:none; } }
 h1 { font-size:1.5rem; } h3 { margin-top:1.5rem; }
 .muted { color:#656d76; }
 .bad-text { color:var(--bad); }
