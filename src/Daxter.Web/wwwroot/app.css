@@ -81,3 +81,6 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 .nav-item { width:100%; text-align:left; background:#fff; border:0; padding:.55rem .8rem; cursor:pointer; font:inherit; display:flex; justify-content:space-between; align-items:center; }
 .nav-item:hover { background:#f6f8fa; }
 .nav-item .chev { color:#8c959f; }
+.ok-text { color:var(--ok); font-weight:600; }
+.form label.checkbox { display:flex; flex-direction:row; align-items:center; gap:.5rem; color:#1f2328; }
+.form label.checkbox input { min-width:auto; }

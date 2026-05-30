@@ -12,8 +12,12 @@ public sealed record HealthCheck(string Name, bool Ok, string Detail);
 /// <summary>Bridges the Blazor pages to the Daxter.Core engine (same logic as the CLI/MCP).</summary>
 public sealed class DaxterUi
 {
-    public DaxterConfig Config(bool requireWorkspace = false)
-        => DaxterConfig.FromEnvironment(requireWorkspace: requireWorkspace);
+    private readonly ConfigState _state;
+
+    public DaxterUi(ConfigState state) => _state = state;
+
+    /// <summary>The console's current effective config (editable via the Configure page).</summary>
+    public DaxterConfig Config(bool requireWorkspace = false) => _state.ToConfig();
 
     private static ITokenProvider Provider(DaxterConfig config, bool interactive = false)
         => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: interactive);
@@ -150,7 +154,7 @@ public sealed class DaxterUi
 
     private async Task<QueryResult> XmlaAsync(string ws, string ds, Func<IXmlaSession, QueryResult> op, CancellationToken ct)
     {
-        var cfg = DaxterConfig.FromEnvironment(workspace: ws, dataset: ds);
+        var cfg = _state.ToConfig(ws, ds);
         var factory = new AdomdXmlaSessionFactory(cfg, Provider(cfg));
         using var session = await factory.CreateAsync(ct);
         return op(session);

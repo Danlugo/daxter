@@ -4,6 +4,7 @@ using Daxter.Web.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+builder.Services.AddSingleton<ConfigState>();
 builder.Services.AddScoped<DaxterUi>();
 
 // Default to all interfaces on 8080 inside the container (override with --urls / ASPNETCORE_URLS).

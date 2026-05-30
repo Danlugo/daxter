@@ -16,6 +16,11 @@ All notable changes to DAXter are documented here. The format follows
   **Run DAX →** button jumps to the query tab with the drilled-into workspace/dataset filled in.
 - A **"Load default"** link appears when the server has a default workspace/dataset
   (`DAXTER_WORKSPACE`/`DAXTER_DATASET`) — one click fills them in.
+- **Editable Configure page** — change auth mode, tenant, default workspace/dataset, prod
+  workspaces, and allow-writes; edits apply to the console immediately and **Save** persists
+  them to the mounted `~/.daxter` volume (survives restarts). Backed by a `ConfigState`
+  service the console uses for all operations; the env file / Claude Desktop snippet preview
+  reflects the edits.
 
 ## [1.6.2] - 2026-05-29
 

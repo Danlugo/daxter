@@ -1,78 +1,74 @@
 @page "/configure"
-@inject DaxterUi Ui
+@inject ConfigState State
 
 <PageTitle>DAXter — Configure</PageTitle>
 
 <h1>Configure</h1>
+<p class="muted">
+    Edit the console's settings — changes apply <strong>immediately</strong> to Status/Explore.
+    <strong>Save</strong> persists them across restarts (to the mounted <code>~/.daxter</code>
+    volume). These drive this web console; for the MCP server, copy the env / snippet below.
+</p>
 
-<h3>Current config <span class="muted">(from this server's environment)</span></h3>
-<table class="grid kv">
-    <tr><td>Auth mode</td><td>@current?.AuthMode.ToString()</td></tr>
-    <tr><td>Workspace</td><td>@Show(current?.Workspace)</td></tr>
-    <tr><td>Dataset</td><td>@Show(current?.Dataset)</td></tr>
-    <tr><td>Tenant id</td><td>@Show(current?.TenantId)</td></tr>
-    <tr><td>Prod workspaces</td><td>@(current is null || current.ProdWorkspaces.Count == 0 ? "(none)" : string.Join(", ", current.ProdWorkspaces))</td></tr>
-</table>
-
-<h3>Build a config</h3>
-<p class="muted">Fill these in to generate an env file and the Claude Desktop MCP entry to copy.</p>
+@if (saved is not null) { <p class="ok-text">@saved</p> }
 
 <div class="form">
     <label>Auth mode
-        <select @bind="auth">
+        <select @bind="State.AuthMode">
             <option value="device-code">device-code (sign in as yourself)</option>
             <option value="service-principal">service-principal (automation)</option>
         </select>
     </label>
-    <label>Tenant id <input @bind="tenant" placeholder="GUID (optional for device-code)" /></label>
-    <label>Default workspace <input @bind="ws" placeholder="optional" /></label>
-    <label>Default dataset <input @bind="ds" placeholder="optional" /></label>
-    @if (auth == "service-principal")
+    <label>Tenant id <input @bind="State.TenantId" placeholder="GUID (optional for device-code)" /></label>
+    <label>Default workspace <input @bind="State.Workspace" placeholder="optional" /></label>
+    <label>Default dataset <input @bind="State.Dataset" placeholder="optional" /></label>
+    @if (string.Equals(State.AuthMode, "service-principal", StringComparison.OrdinalIgnoreCase))
     {
-        <label>Client id <input @bind="clientId" placeholder="app GUID" /></label>
-        <label>Client secret <input @bind="secret" placeholder="app secret" type="password" /></label>
+        <label>Client id <input @bind="State.ClientId" placeholder="app GUID" /></label>
+        <label>Client secret <input @bind="State.ClientSecret" type="password" placeholder="app secret" /></label>
     }
-    <label>Env file path (for the MCP entry) <input @bind="envPath" placeholder="/absolute/path/to/daxter.env" /></label>
+    <label>Prod workspaces (comma-separated) <input @bind="State.ProdWorkspaces" placeholder="e.g. Sales Analytics,Marketing" /></label>
+    <label class="checkbox"><input type="checkbox" @bind="State.AllowWrites" /> Allow writes (refresh/cache) over MCP</label>
+</div>
+
+<div class="actions">
+    <button class="btn" @onclick="DoSave">Save</button>
+    <span class="muted">@(State.Persisted ? "✓ persisted to volume" : "from environment (not yet persisted)")</span>
 </div>
 
 <h3>Env file</h3>
 <pre class="code">@EnvFile()</pre>
 
 <h3>Claude Desktop MCP entry</h3>
-<p class="muted">Add under <code>mcpServers</code> in <code>claude_desktop_config.json</code>, then restart Claude Desktop.</p>
+<p class="muted">For the MCP server — add under <code>mcpServers</code> in <code>claude_desktop_config.json</code>.</p>
+<div class="form"><label>Env file path <input @bind="envPath" placeholder="/absolute/path/to/daxter.env" /></label></div>
 <pre class="code">@Snippet()</pre>
 
 @code {
-    private DaxterConfigView? current;
-    private string auth = "device-code", tenant = "", ws = "", ds = "", clientId = "", secret = "", envPath = "/path/to/daxter.env";
+    private string envPath = "/path/to/daxter.env";
+    private string? saved;
 
-    protected override void OnInitialized()
+    private void DoSave()
     {
-        try
-        {
-            var c = Ui.Config();
-            current = new DaxterConfigView(c.AuthMode.ToString(), c.Workspace, c.Dataset, c.TenantId, c.ProdWorkspaces);
-            auth = c.AuthMode == Daxter.Core.Auth.AuthMode.ServicePrincipal ? "service-principal" : "device-code";
-            tenant = c.TenantId ?? "";
-            ws = c.Workspace ?? "";
-            ds = c.Dataset ?? "";
-        }
-        catch { /* no config yet */ }
+        try { saved = "Saved ✓ — " + State.Save(); }
+        catch (Exception ex) { saved = "Save failed: " + ex.Message; }
     }
 
-    private static string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "(none)" : v;
+    private bool IsSp => string.Equals(State.AuthMode, "service-principal", StringComparison.OrdinalIgnoreCase);
 
     private string EnvFile()
     {
-        var lines = new List<string> { $"DAXTER_AUTH_MODE={auth}" };
-        if (!string.IsNullOrWhiteSpace(tenant)) lines.Add($"DAXTER_TENANT_ID={tenant}");
-        if (auth == "service-principal")
+        var lines = new List<string> { $"DAXTER_AUTH_MODE={State.AuthMode}" };
+        if (!string.IsNullOrWhiteSpace(State.TenantId)) lines.Add($"DAXTER_TENANT_ID={State.TenantId}");
+        if (IsSp)
         {
-            lines.Add($"DAXTER_CLIENT_ID={clientId}");
-            lines.Add($"DAXTER_CLIENT_SECRET={secret}");
+            lines.Add($"DAXTER_CLIENT_ID={State.ClientId}");
+            lines.Add($"DAXTER_CLIENT_SECRET={State.ClientSecret}");
         }
-        if (!string.IsNullOrWhiteSpace(ws)) lines.Add($"DAXTER_WORKSPACE={ws}");
-        if (!string.IsNullOrWhiteSpace(ds)) lines.Add($"DAXTER_DATASET={ds}");
+        if (!string.IsNullOrWhiteSpace(State.Workspace)) lines.Add($"DAXTER_WORKSPACE={State.Workspace}");
+        if (!string.IsNullOrWhiteSpace(State.Dataset)) lines.Add($"DAXTER_DATASET={State.Dataset}");
+        if (!string.IsNullOrWhiteSpace(State.ProdWorkspaces)) lines.Add($"DAXTER_PROD_WORKSPACES={State.ProdWorkspaces}");
+        if (State.AllowWrites) lines.Add("DAXTER_MCP_ALLOW_WRITES=true");
         return string.Join("\n", lines);
     }
 
@@ -86,6 +82,4 @@
         "             \"ghcr.io/danlugo/daxter:latest\", \"mcp\"]\n" +
         "  }\n" +
         "}";
-
-    private sealed record DaxterConfigView(string AuthMode, string? Workspace, string? Dataset, string? TenantId, IReadOnlyCollection<string> ProdWorkspaces);
 }
