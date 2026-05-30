@@ -72,6 +72,7 @@
 else
 {
     <nav class="crumbs">
+        <button class="btn-sm back-btn" @onclick="GoBack" disabled="@(!CanGoBack)" title="Back to the previous view">← Back</button>
         <button class="link" @onclick="BrowseRoot">Workspaces</button>
         @if (!string.IsNullOrEmpty(workspace))
         {
@@ -183,6 +184,15 @@ else
     private bool busy;
     private IReadOnlyList<QueryEntry> history = Array.Empty<QueryEntry>();
 
+    // Browse navigation history (browser-style Back).
+    private readonly Stack<BrowseState> back = new();
+    private bool CanGoBack => back.Count > 0;
+
+    private sealed record BrowseState(
+        string Workspace, string Dataset, string? SelTable,
+        WsView WsView, ModelView ModelView, TableView TableView,
+        List<string> Datasets, List<string> ModelTables, QueryResult? Result, string? Error);
+
     private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
 
     // Deep-link from the "Frequent" sidebar: /explore?ws=..&ds=..&table=..
@@ -214,6 +224,7 @@ else
         if (key == appliedQuery) return;   // only apply a given deep-link once
         appliedQuery = key;
 
+        back.Clear();                      // fresh navigation context from the sidebar
         tab = Tab.Browse;
         if (workspaces.Count == 0) await LoadWorkspaces();
         workspace = Qws!;
@@ -238,18 +249,20 @@ else
         if (workspaces.Count == 0) await LoadWorkspaces();
     }
 
-    private void BrowseRoot() { workspace = ""; dataset = ""; selTable = null; result = null; }
+    private void BrowseRoot() { PushBack(); workspace = ""; dataset = ""; selTable = null; modelView = ModelView.None; result = null; }
 
     private async Task BrowseWorkspace()
     {
-        dataset = ""; selTable = null; wsView = WsView.Datasets; result = null;
+        PushBack();
+        dataset = ""; selTable = null; modelView = ModelView.None; wsView = WsView.Datasets; result = null;
         if (datasets.Count == 0 && !string.IsNullOrEmpty(workspace)) await OnWorkspaceChanged();
     }
 
-    private void BrowseDataset() { selTable = null; modelView = ModelView.None; result = null; }
+    private void BrowseDataset() { PushBack(); selTable = null; modelView = ModelView.None; result = null; }
 
     private async Task SelectWorkspace(string ws)
     {
+        PushBack();
         workspace = ws; selTable = null; wsView = WsView.Datasets;
         await OnWorkspaceChanged();
         result = null;
@@ -257,12 +270,14 @@ else
 
     private void SelectDataset(string ds)
     {
+        PushBack();
         dataset = ds; selTable = null; modelView = ModelView.None; result = null;
         Usage.Record(UsageStore.Dataset, ds, workspace);
     }
 
     private async Task SelectTable(string t)
     {
+        PushBack();
         selTable = t;
         Usage.Record(UsageStore.Table, t, $"{workspace}{Sep}{dataset}");
         await ShowMcode();   // show M code by default
@@ -303,24 +318,27 @@ else
     // ---- commands ----
 
     private Task BrowseDatasets() { wsView = WsView.Datasets; result = null; return Task.CompletedTask; }
-    private Task ShowReports() { wsView = WsView.Reports; return Show(() => Ui.ReportsAsync(workspace)); }
-    private Task ShowLineage() { wsView = WsView.Lineage; return Show(() => Ui.LineageAsync(workspace)); }
+    private Task ShowReports() { PushBack(); wsView = WsView.Reports; return Show(() => Ui.ReportsAsync(workspace)); }
+    private Task ShowLineage() { PushBack(); wsView = WsView.Lineage; return Show(() => Ui.LineageAsync(workspace)); }
 
     private async Task BrowseTables()
     {
+        PushBack();
         modelView = ModelView.Tables; result = null; error = null; busy = true; StateHasChanged();
         try { modelTables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
 
-    private Task ShowMeasures() => Show(() => Ui.MeasuresAsync(workspace, dataset));
-    private Task ShowParameters() => Show(() => Ui.ParametersAsync(workspace, dataset));
-    private Task ShowPartitions() => Show(() => Ui.PartitionsAsync(workspace, dataset));
-    private Task ShowRls() => Show(() => Ui.RlsAsync(workspace, dataset));
-    private Task ShowDatasources() => Show(() => Ui.DatasourcesAsync(workspace, dataset));
-    private Task ShowPermissions() => Show(() => Ui.PermissionsAsync(workspace, dataset));
-    private Task ShowRefreshHistory() => Show(() => Ui.RefreshHistoryAsync(workspace, dataset));
+    // Model commands push a back-state first, so Back returns to the dataset's command view.
+    private Task Cmd(Func<Task<QueryResult>> op) { PushBack(); return Show(op); }
+    private Task ShowMeasures() => Cmd(() => Ui.MeasuresAsync(workspace, dataset));
+    private Task ShowParameters() => Cmd(() => Ui.ParametersAsync(workspace, dataset));
+    private Task ShowPartitions() => Cmd(() => Ui.PartitionsAsync(workspace, dataset));
+    private Task ShowRls() => Cmd(() => Ui.RlsAsync(workspace, dataset));
+    private Task ShowDatasources() => Cmd(() => Ui.DatasourcesAsync(workspace, dataset));
+    private Task ShowPermissions() => Cmd(() => Ui.PermissionsAsync(workspace, dataset));
+    private Task ShowRefreshHistory() => Cmd(() => Ui.RefreshHistoryAsync(workspace, dataset));
     private async Task RunQuery()
     {
         await Show(() => Ui.QueryAsync(workspace, dataset, dax));
@@ -371,6 +389,22 @@ else
         try { result = await op(); }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
+    }
+
+    // ---- Back navigation ----
+
+    private void PushBack() => back.Push(new BrowseState(
+        workspace, dataset, selTable, wsView, modelView, tableView,
+        datasets, modelTables, result, error));
+
+    private void GoBack()
+    {
+        if (back.Count == 0) return;
+        var s = back.Pop();
+        workspace = s.Workspace; dataset = s.Dataset; selTable = s.SelTable;
+        wsView = s.WsView; modelView = s.ModelView; tableView = s.TableView;
+        datasets = s.Datasets; modelTables = s.ModelTables; result = s.Result; error = s.Error;
+        busy = false;
     }
 
     private static string? SingleCell(QueryResult r, string column)

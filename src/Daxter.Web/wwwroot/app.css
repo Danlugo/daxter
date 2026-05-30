@@ -111,7 +111,9 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 .link { background:none; border:0; color:var(--accent); cursor:pointer; text-decoration:underline; padding:0; font:inherit; }
 .link:disabled { opacity:.6; cursor:default; }
 .btn-sm.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-.crumbs { display:flex; align-items:center; gap:.5rem; margin:.8rem 0; font-size:.95rem; }
+.crumbs { display:flex; align-items:center; gap:.5rem; margin:.8rem 0; font-size:.95rem; flex-wrap:wrap; }
+.crumbs .back-btn { margin-right:.4rem; }
+.crumbs .back-btn:disabled { opacity:.45; cursor:default; }
 .crumbs .crumb-current { font-weight:600; }
 .nav-list { list-style:none; padding:0; margin:.5rem 0; border:1px solid var(--line); border-radius:8px; overflow:hidden; max-width:640px; }
 .nav-list li + li { border-top:1px solid var(--line); }

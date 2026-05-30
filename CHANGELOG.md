@@ -7,6 +7,11 @@ All notable changes to DAXter are documented here. The format follows
 ## [1.6.4] - 2026-05-29
 
 ### Added
+- **Back button in Browse.** The drill-down explorer now has a **← Back** that returns to the
+  exact previous view — from a table's M code back to the full **list of tables**, from a command
+  result back to the dataset's commands, and so on up the chain (browser-style history, not just
+  the breadcrumb's level jumps). Disabled at the top; reset when you deep-link in from the
+  Frequent sidebar.
 - **DAX query history.** Successful queries are remembered and listed as **Recent queries**
   under the query box on the Explore → DAX query tab. Click one to **re-run it** (re-applies
   its workspace/dataset + DAX); each row shows a single-line preview, its dataset, and how many
