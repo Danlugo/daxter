@@ -10,8 +10,14 @@ All notable changes to DAXter are documented here. The format follows
 - **DAX tab is now a Power BI Desktop-style workbench.** Three panes: a **Fields** tree on the
   **left** (every non-hidden table → its columns and measures, searchable; click a field to
   **insert its reference** — `'Table'[Column]` or `[Measure]` — into the query), the **query +
-  results** in the center, and **Recent queries** on the **right**. The fields load when you open
-  the DAX tab (or pick a dataset). Backed by a new `DaxterUi.ModelTreeAsync` (TMSCHEMA DMVs).
+  results** in the center, and **Recent queries** on the **right**. The Fields and Recent panes
+  are **collapsible** (×, with one-click reopen) and the query editor is full-width monospace.
+  The fields load when you open the DAX tab (or pick a dataset). Backed by a new
+  `DaxterUi.ModelTreeAsync` (TMSCHEMA DMVs).
+- **Console uses the full window width.** The content area no longer caps at 1000 px and centers
+  (which wasted most of a wide screen and squeezed the DAX results); it now fills the space next
+  to the sidebar, so grids and the DAX workbench are actually usable. Reading-width text still
+  caps for legibility.
 - **One-click "run it" actions in Explore.** Drill into a **table** → **Top 10 rows →** /
   **Top 100 rows →** buttons jump to the DAX tab pre-filled with `EVALUATE TOPN(n, 'Table')`
   and run it. **Measures** are now a **clickable list** that drills into a **measure detail**

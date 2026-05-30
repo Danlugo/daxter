@@ -38,7 +38,10 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .topbar nav a { color:#fff; text-decoration:none; opacity:.85; padding:.2rem .4rem; border-radius:4px; }
 .topbar nav a:hover, .topbar nav a.active { opacity:1; background:rgba(255,255,255,.18); }
 .shell { display:flex; align-items:flex-start; }
-.content { flex:1; min-width:0; max-width:1000px; margin:0 auto; padding:1.5rem 1.2rem; }
+/* Fill the space next to the sidebar — capping + centering wasted most of a wide screen. */
+.content { flex:1; min-width:0; padding:1.5rem 1.6rem; }
+/* Keep reading-heavy text from stretching absurdly wide, but let grids/workbench use the room. */
+.content > p.muted, .content > .card, .content > .form { max-width:900px; }
 .sidebar { flex:0 0 220px; width:220px; box-sizing:border-box; padding:1.1rem .8rem; border-right:1px solid var(--line); background:#fbfbfc; min-height:calc(100vh - 49px); position:sticky; top:0; }
 .sidebar .side-title { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em; color:#8c959f; margin-bottom:.7rem; }
 .side-empty { font-size:.8rem; color:#8c959f; line-height:1.4; }
@@ -51,10 +54,16 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 @media (max-width: 768px) { .sidebar { display:none; } }
 /* DAX tab: fields | query+results | recent */
 .dax-layout { display:flex; gap:1rem; align-items:flex-start; }
-.dax-main { flex:1; min-width:0; }
-.dax-objects { flex:0 0 230px; width:230px; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; padding:.6rem; max-height:72vh; overflow:auto; }
-.dax-recent { flex:0 0 250px; width:250px; box-sizing:border-box; }
-.dax-recent .hist-list { margin-top:.3rem; }
+.dax-main { flex:1 1 0; min-width:0; }
+.dax-objects { flex:0 0 240px; width:240px; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; padding:.5rem .6rem; max-height:78vh; overflow:auto; position:sticky; top:.5rem; }
+.dax-recent { flex:0 0 270px; width:270px; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; padding:.5rem .6rem; max-height:78vh; overflow:auto; position:sticky; top:.5rem; }
+.dax-recent .hist-list { margin-top:.3rem; border:0; }
+.pane-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.4rem; }
+.pane-x { border:0; background:none; color:#8c959f; cursor:pointer; font-size:1.05rem; line-height:1; padding:0 .2rem; }
+.pane-x:hover { color:var(--bad); }
+.dax-tools { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
+.dax-tools .dax-hint { margin-left:auto; }
+.dax-editor { width:100%; box-sizing:border-box; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.5; resize:vertical; }
 .obj-search { width:100%; min-width:0; box-sizing:border-box; margin-bottom:.5rem; }
 .obj-tree { font-size:.84rem; }
 .obj-table { margin-bottom:.05rem; }

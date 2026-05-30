@@ -53,84 +53,100 @@
 @if (tab == Tab.Query)
 {
     <div class="dax-layout">
-        <aside class="dax-objects">
-            <div class="side-title">Fields</div>
-            @if (string.IsNullOrEmpty(dataset))
-            {
-                <p class="side-empty">Pick a dataset to browse its tables, columns and measures.</p>
-            }
-            else if (objError is not null)
-            {
-                <p class="bad-text">@objError</p>
-                <button class="btn-sm" @onclick="LoadObjects">Retry</button>
-            }
-            else if (objLoading)
-            {
-                <p class="muted">Loading fields…</p>
-            }
-            else if (objects is null)
-            {
-                <button class="btn-sm" @onclick="LoadObjects">Load fields</button>
-            }
-            else
-            {
-                <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter fields…" autocomplete="off" />
-                <div class="obj-tree">
-                    @foreach (var t in FilteredTables())
-                    {
-                        <div class="obj-table">
-                            <button class="obj-tname" @onclick="() => ToggleTable(t.Table)" title="@t.Table — click to insert">
-                                <span class="chev">@(IsExpanded(t.Table) ? "▾" : "▸")</span>
-                                <span @onclick:stopPropagation="true" @onclick="() => InsertTable(t.Table)">@t.Table</span>
-                            </button>
-                            @if (IsExpanded(t.Table))
-                            {
-                                @foreach (var o in FilteredItems(t))
-                                {
-                                    <button class="obj-item @(o.IsMeasure ? "measure" : "column")"
-                                            @onclick="() => InsertRef(t.Table, o)" title="Insert reference">
-                                        <span class="obj-icon">@(o.IsMeasure ? "ƒ" : "▦")</span>@o.Name
-                                    </button>
-                                }
-                            }
-                        </div>
-                    }
+        @if (showFields)
+        {
+            <aside class="dax-objects">
+                <div class="pane-head">
+                    <span class="side-title">Fields</span>
+                    <button class="pane-x" @onclick="() => showFields = false" title="Hide fields">×</button>
                 </div>
-            }
-        </aside>
+                @if (string.IsNullOrEmpty(dataset))
+                {
+                    <p class="side-empty">Pick a dataset to browse its tables, columns and measures.</p>
+                }
+                else if (objError is not null)
+                {
+                    <p class="bad-text">@objError</p>
+                    <button class="btn-sm" @onclick="LoadObjects">Retry</button>
+                }
+                else if (objLoading)
+                {
+                    <p class="muted">Loading fields…</p>
+                }
+                else if (objects is null)
+                {
+                    <button class="btn-sm" @onclick="LoadObjects">Load fields</button>
+                }
+                else
+                {
+                    <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter fields…" autocomplete="off" />
+                    <div class="obj-tree">
+                        @foreach (var t in FilteredTables())
+                        {
+                            <div class="obj-table">
+                                <button class="obj-tname" @onclick="() => ToggleTable(t.Table)" title="@t.Table — click to insert">
+                                    <span class="chev">@(IsExpanded(t.Table) ? "▾" : "▸")</span>
+                                    <span @onclick:stopPropagation="true" @onclick="() => InsertTable(t.Table)">@t.Table</span>
+                                </button>
+                                @if (IsExpanded(t.Table))
+                                {
+                                    @foreach (var o in FilteredItems(t))
+                                    {
+                                        <button class="obj-item @(o.IsMeasure ? "measure" : "column")"
+                                                @onclick="() => InsertRef(t.Table, o)" title="Insert reference">
+                                            <span class="obj-icon">@(o.IsMeasure ? "ƒ" : "▦")</span>@o.Name
+                                        </button>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </aside>
+        }
 
         <div class="dax-main">
-            <div class="query">
-                <textarea @bind="dax" rows="6" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
-                <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
+            <div class="dax-tools">
+                @if (!showFields) { <button class="btn-sm" @onclick="() => showFields = true" title="Show fields">▸ Fields</button> }
+                <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">▶ Run DAX</button>
+                <span class="muted dax-hint">Tip: click a field on the left to insert it.</span>
+                @if (!showRecent) { <button class="btn-sm" @onclick="() => showRecent = true" title="Show recent queries">Recent ◂</button> }
             </div>
+            <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="7"
+                      placeholder="EVALUATE TOPN(10, 'Table')" spellcheck="false"></textarea>
             @if (busy) { <p class="muted">Running…</p> }
             <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
         </div>
 
-        <aside class="dax-recent">
-            <div class="side-title">Recent queries</div>
-            @if (history.Count == 0)
-            {
-                <p class="side-empty">Queries you run show up here.</p>
-            }
-            else
-            {
-                <button class="link" @onclick="ClearHistory">clear all</button>
-                <ul class="hist-list">
-                    @foreach (var h in history)
-                    {
-                        <li class="hist-item">
-                            <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
-                                <span class="hist-dax">@Preview(h.Dax)</span>
-                                <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
-                            </button>
-                            <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
-                        </li>
-                    }
-                </ul>
-            }
-        </aside>
+        @if (showRecent)
+        {
+            <aside class="dax-recent">
+                <div class="pane-head">
+                    <span class="side-title">Recent queries</span>
+                    <button class="pane-x" @onclick="() => showRecent = false" title="Hide recent">×</button>
+                </div>
+                @if (history.Count == 0)
+                {
+                    <p class="side-empty">Queries you run show up here.</p>
+                }
+                else
+                {
+                    <button class="link" @onclick="ClearHistory">clear all</button>
+                    <ul class="hist-list">
+                        @foreach (var h in history)
+                        {
+                            <li class="hist-item">
+                                <button class="hist-run" @onclick="() => RunHistory(h)" title="@h.Dax — click to run">
+                                    <span class="hist-dax">@Preview(h.Dax)</span>
+                                    <span class="hist-ctx">@(string.IsNullOrEmpty(h.Dataset) ? h.Workspace : h.Dataset) · @(h.Count)×</span>
+                                </button>
+                                <button class="hist-del" @onclick="() => RemoveHistory(h)" title="Remove">×</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </aside>
+        }
     </div>
 }
 else
@@ -290,6 +306,8 @@ else
     private string? objError;
     private readonly HashSet<string> expandedTables = new();
     private string objSearch = "";
+    private bool showFields = true;
+    private bool showRecent = true;
 
     // Browse navigation history (browser-style Back).
     private readonly Stack<BrowseState> back = new();
