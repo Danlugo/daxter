@@ -49,8 +49,9 @@
                 <div class="side-h">Datasets</div>
                 @foreach (var d in dsTop)
                 {
-                    <a class="side-item" href="@DsLink(d)" title="@($"{d.Name} — {d.Parent}")">
-                        <span class="side-name">@d.Name</span><span class="side-count">@d.Count</span>
+                    <a class="side-item" href="@DsLink(d)" title="@($"{d.Name} — in workspace “{d.Parent}”")">
+                        <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@d.Parent</small></span>
+                        <span class="side-count">@d.Count</span>
                     </a>
                 }
             </div>
@@ -62,8 +63,9 @@
                 <div class="side-h">Tables</div>
                 @foreach (var t in tblTop)
                 {
-                    <a class="side-item" href="@TblLink(t)" title="@t.Name">
-                        <span class="side-name">@t.Name</span><span class="side-count">@t.Count</span>
+                    <a class="side-item" href="@TblLink(t)" title="@TblTitle(t)">
+                        <span class="side-name"><span class="nm">@t.Name</span><small class="side-sub">@TblDs(t)</small></span>
+                        <span class="side-count">@t.Count</span>
                     </a>
                 }
             </div>
@@ -135,12 +137,13 @@
         => $"{LinkBase}?ws={Uri.EscapeDataString(d.Parent ?? "")}&ds={Uri.EscapeDataString(d.Name)}";
 
     private string TblLink(UsageItem t)
-    {
-        var parts = (t.Parent ?? "").Split(Sep);
-        var ws = parts.Length > 0 ? parts[0] : "";
-        var ds = parts.Length > 1 ? parts[1] : "";
-        return $"{LinkBase}?ws={Uri.EscapeDataString(ws)}&ds={Uri.EscapeDataString(ds)}&table={Uri.EscapeDataString(t.Name)}";
-    }
+        => $"{LinkBase}?ws={Uri.EscapeDataString(TblWs(t))}&ds={Uri.EscapeDataString(TblDs(t))}&table={Uri.EscapeDataString(t.Name)}";
+
+    // A table's Parent is "workspace<sep>dataset" — different models often reuse table names,
+    // so the dataset (and workspace) is what disambiguates them.
+    private static string TblWs(UsageItem t) { var p = (t.Parent ?? "").Split(Sep); return p.Length > 0 ? p[0] : ""; }
+    private static string TblDs(UsageItem t) { var p = (t.Parent ?? "").Split(Sep); return p.Length > 1 ? p[1] : ""; }
+    private static string TblTitle(UsageItem t) => $"{t.Name} — in dataset “{TblDs(t)}” (workspace “{TblWs(t)}”)";
 
     public void Dispose()
     {

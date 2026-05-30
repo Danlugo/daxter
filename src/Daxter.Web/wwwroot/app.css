@@ -49,7 +49,9 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .side-h { font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:#656d76; margin:.2rem 0 .35rem; }
 .side-item { display:flex; justify-content:space-between; align-items:center; gap:.4rem; padding:.32rem .45rem; border-radius:6px; color:#1f2328; text-decoration:none; font-size:.84rem; }
 .side-item:hover { background:#eef1f4; }
-.side-item .side-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.side-item .side-name { display:flex; flex-direction:column; min-width:0; overflow:hidden; }
+.side-item .side-name .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.side-sub { font-size:.68rem; color:#8c959f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .side-count { flex:0 0 auto; font-size:.68rem; color:#656d76; background:#eef1f4; border-radius:10px; padding:0 .42rem; line-height:1.5; }
 @media (max-width: 768px) { .sidebar { display:none; } }
 /* DAX tab: fields | query+results | recent */

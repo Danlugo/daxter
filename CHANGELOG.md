@@ -4,6 +4,15 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2026-05-30
+
+### Fixed
+- **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse
+  table names across datasets, so the Frequent list couldn't tell two `FACT - Sales` apart. Each
+  table now shows its **dataset** as a subtitle (and each dataset its **workspace**), plus a hover
+  **tooltip** with the full context (e.g. *"FACT - Sales — in dataset 'Sales Brand' (workspace
+  'Data Hub - Dev')"*).
+
 ## [1.6.7] - 2026-05-30
 
 ### Added
