@@ -5,15 +5,34 @@
 ![.NET 8](https://img.shields.io/badge/.NET-8.0%20LTS-512BD4)
 ![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED)
 
-A portable, **Docker-only** CLI for the **Power BI Service**. Query, document, and
-operate semantic models on a Premium / PPU / Fabric XMLA endpoint from macOS, Linux, or
-CI — no Windows, no local .NET install, no Analysis Services tooling. Think *psql for a
-Power BI model*, shipped as a single container image you can hand to anyone.
+**Ask Claude about your Power BI models — or query them from your terminal.** DAXter is a
+Docker-only **CLI and MCP server** for the Power BI Service: run DAX/MDX/DMV, inspect model
+metadata, refresh, and browse workspaces/reports — over XMLA + REST, from any machine with
+Docker (macOS, Linux, Windows). No Windows-only tooling, no .NET install. Think *psql for a
+Power BI model*, in a single container image.
 
-**Why it exists:** Power BI's pro tooling (Tabular Editor, DAX Studio, SSMS) is
-Windows-only, and ADOMD.NET's interactive sign-in is too. DAXter acquires an Entra ID
-token via MSAL and injects it into the XMLA connection — the supported cross-platform
-path — so Mac/Linux users and pipelines get programmatic model access.
+## Use it in Claude Desktop
+
+The easiest way to use DAXter is as an **MCP server** — then you just **ask Claude** about
+your Power BI in plain language.
+
+**You need:** Docker Desktop running, and a Power BI account (you sign in **as yourself** —
+no service principal required to start).
+
+**Set it up — let Claude do it.** Point **Claude Code** (which can run commands; a plain
+Claude Desktop *chat* can't execute the steps) at the setup guide:
+
+> *"Set up DAXter for Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md"*
+
+It auto-pulls the public image and merges the `daxter` server into your Claude Desktop config
+(no build, no credentials to obtain). Then **fully quit & reopen Claude Desktop** and, in a chat:
+
+1. **"Sign in to Power BI"** → Claude shows a URL + code; sign in as yourself.
+2. **"List my workspaces"** → pick one as your default.
+3. Ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
+
+Full walkthrough (Windows notes, multi-client, service-principal automation) is in
+**[`SETUP.md`](SETUP.md)**; a prompt per tool in [`examples/mcp.md`](examples/mcp.md).
 
 **What it does today**
 
@@ -29,17 +48,6 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
-
-> **Setting up on a new machine?** Follow **[`SETUP.md`](SETUP.md)** — or **let Claude do it**.
-> Point **Claude Code** (which can run commands; a plain Claude Desktop chat can't execute the
-> steps) at it:
->
-> > *"Set up DAXter for Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md"*
->
-> It pulls the public image, creates the env file, and merges the `daxter` MCP server into your
-> Claude Desktop config. You provide three things: **Docker running**, your **service-principal
-> credentials** (tenant/client/secret + workspace — not in the repo), and **permission** to edit
-> the Desktop config. Then quit & reopen Claude Desktop.
 
 ## Examples
 
