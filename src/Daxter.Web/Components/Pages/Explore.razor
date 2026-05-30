@@ -252,7 +252,7 @@ else
         if (!string.IsNullOrEmpty(Qds))
         {
             dataset = Qds!;
-            Usage.Record(UsageStore.Dataset, dataset, workspace);
+            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext);
             if (!string.IsNullOrEmpty(Qtable))
             {
                 await SelectTable(Qtable!); // drills in + shows M code + records the table
@@ -291,14 +291,14 @@ else
     {
         PushBack();
         dataset = ds; selTable = null; modelView = ModelView.None; result = null;
-        Usage.Record(UsageStore.Dataset, ds, workspace);
+        Usage.Record(UsageStore.Dataset, ds, workspace, UsageStore.ExploreContext);
     }
 
     private async Task SelectTable(string t)
     {
         PushBack();
         selTable = t;
-        Usage.Record(UsageStore.Table, t, $"{workspace}{Sep}{dataset}");
+        Usage.Record(UsageStore.Table, t, $"{workspace}{Sep}{dataset}", UsageStore.ExploreContext);
         await ShowMcode();   // show M code by default
     }
 
@@ -332,7 +332,7 @@ else
         try
         {
             datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
-            Usage.Record(UsageStore.Workspace, workspace); // valid workspace (it resolved)
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ExploreContext); // valid workspace (it resolved)
         }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
@@ -368,7 +368,7 @@ else
         if (error is null)
         {
             if (!string.IsNullOrEmpty(dataset))
-                Usage.Record(UsageStore.Dataset, dataset, workspace); // dataset proven valid by a successful query
+                Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext); // dataset proven valid by a successful query
             History.Record(dax, workspace, dataset);                  // remember the query for one-click re-run
             history = History.Recent(10);
         }

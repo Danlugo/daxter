@@ -13,7 +13,8 @@ public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled }
 
 /// <summary>What a refresh job targets. Table/Partition are null where not applicable.</summary>
 public sealed record RefreshSpec(
-    RefreshKind Kind, string Workspace, string Dataset, string? Table, string? Partition, PartitionOrder Order);
+    RefreshKind Kind, string Workspace, string Dataset, string? Table, string? Partition,
+    PartitionOrder Order, RefreshType Type = RefreshType.Full);
 
 /// <summary>One timestamped step in a job's activity log.</summary>
 public sealed record JobEvent(DateTimeOffset Time, string Message);
@@ -86,8 +87,8 @@ public sealed class JobService
         _history = history;
     }
 
-    /// <summary>History signature: same kind+dataset+table pool together (partition name ignored).</summary>
-    private static string Sig(RefreshSpec s) => $"{s.Kind}|{s.Workspace}|{s.Dataset}|{s.Table}";
+    /// <summary>History signature: same kind+dataset+table+type pool together (partition name ignored).</summary>
+    private static string Sig(RefreshSpec s) => $"{s.Kind}|{s.Workspace}|{s.Dataset}|{s.Table}|{s.Type}";
 
     /// <summary>Estimated duration (seconds) for a spec, from past runs; null if none yet.</summary>
     public double? EstimateSeconds(RefreshSpec spec) => _history.EstimateSeconds(Sig(spec));
@@ -288,10 +289,10 @@ public sealed class JobService
             var maint = new MaintenanceService(session, spec.Dataset);
             var tmsl = spec.Kind switch
             {
-                RefreshKind.Model => maint.BuildModelRefresh(RefreshType.Full),
-                RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, RefreshType.Full),
-                RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, RefreshType.Full),
-                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, RefreshType.Full),
+                RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
+                RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
+                RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
+                RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, spec.Type),
                 _ => throw new DaxterException("Unknown refresh kind."),
             };
 
@@ -306,12 +307,16 @@ public sealed class JobService
         }
     }
 
-    private static string TitleFor(RefreshSpec s) => s.Kind switch
+    private static string TitleFor(RefreshSpec s)
     {
-        RefreshKind.Model => $"Refresh model · {s.Dataset}",
-        RefreshKind.Table => $"Refresh table · {s.Table}",
-        RefreshKind.Partition => $"Refresh partition · {s.Table}[{s.Partition}]",
-        RefreshKind.AllPartitions => $"Refresh all partitions · {s.Table} ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")})",
-        _ => "Refresh",
-    };
+        var t = s.Type == RefreshType.Full ? "" : $" [{s.Type}]";
+        return s.Kind switch
+        {
+            RefreshKind.Model => $"Refresh model · {s.Dataset}{t}",
+            RefreshKind.Table => $"Refresh table · {s.Table}{t}",
+            RefreshKind.Partition => $"Refresh partition · {s.Table}[{s.Partition}]{t}",
+            RefreshKind.AllPartitions => $"Refresh all partitions · {s.Table} ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")}){t}",
+            _ => "Refresh",
+        };
+    }
 }

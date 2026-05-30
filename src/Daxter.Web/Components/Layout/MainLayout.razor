@@ -3,6 +3,7 @@
 @inject VersionService Version
 @inject UsageStore Usage
 @inject JobService Jobs
+@inject NavigationManager Nav
 
 <header class="topbar">
     <span class="brand">DAXter <small>Console @Version.Current</small></span>
@@ -18,11 +19,15 @@
 
 <div class="shell">
     <aside class="sidebar">
-        <div class="side-title">Frequent</div>
+        <div class="side-title">Frequent@(context is null ? "" : context == UsageStore.RefreshContext ? " · Refresh" : " · Explore")</div>
 
-        @if (wsTop.Count == 0 && dsTop.Count == 0 && tblTop.Count == 0)
+        @if (context is null)
         {
-            <p class="side-empty">Your most-used workspaces, datasets, and tables show up here as you browse.</p>
+            <p class="side-empty">Open <a href="explore">Explore</a> or <a href="refresh">Refresh</a> — each page keeps its own most-used shortcuts.</p>
+        }
+        else if (wsTop.Count == 0 && dsTop.Count == 0 && tblTop.Count == 0)
+        {
+            <p class="side-empty">Your most-used workspaces, datasets, and tables for this page show up here as you use it.</p>
         }
 
         @if (wsTop.Count > 0)
@@ -82,40 +87,65 @@
     private IReadOnlyList<UsageItem> wsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> dsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> tblTop = Array.Empty<UsageItem>();
+    private string? context;
 
     protected override void OnInitialized()
     {
         Usage.Changed += OnUsageChanged;
-        Jobs.Changed += OnUsageChanged; // refresh the Jobs nav badge
+        Jobs.Changed += OnUsageChanged;          // refresh the Jobs nav count
+        Nav.LocationChanged += OnLocationChanged; // sidebar is per-page
         Reload();
+    }
+
+    // The Frequent list is page-scoped: Explore and Refresh each keep their own.
+    private string? ContextFor(string uri)
+    {
+        var path = Nav.ToBaseRelativePath(uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        return path switch
+        {
+            "explore" => UsageStore.ExploreContext,
+            "refresh" => UsageStore.RefreshContext,
+            _ => null,
+        };
     }
 
     private void Reload()
     {
-        wsTop = Usage.Top(UsageStore.Workspace, 6);
-        dsTop = Usage.Top(UsageStore.Dataset, 6);
-        tblTop = Usage.Top(UsageStore.Table, 6);
+        context = ContextFor(Nav.Uri);
+        if (context is null)
+        {
+            wsTop = dsTop = tblTop = Array.Empty<UsageItem>();
+            return;
+        }
+        wsTop = Usage.Top(UsageStore.Workspace, 6, context);
+        dsTop = Usage.Top(UsageStore.Dataset, 6, context);
+        tblTop = Usage.Top(UsageStore.Table, 6, context);
     }
 
     private void OnUsageChanged() => InvokeAsync(() => { Reload(); StateHasChanged(); });
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => InvokeAsync(() => { Reload(); StateHasChanged(); });
 
-    private static string WsLink(UsageItem w)
-        => $"explore?ws={Uri.EscapeDataString(w.Name)}";
+    private string LinkBase => context ?? UsageStore.ExploreContext;
 
-    private static string DsLink(UsageItem d)
-        => $"explore?ws={Uri.EscapeDataString(d.Parent ?? "")}&ds={Uri.EscapeDataString(d.Name)}";
+    private string WsLink(UsageItem w)
+        => $"{LinkBase}?ws={Uri.EscapeDataString(w.Name)}";
 
-    private static string TblLink(UsageItem t)
+    private string DsLink(UsageItem d)
+        => $"{LinkBase}?ws={Uri.EscapeDataString(d.Parent ?? "")}&ds={Uri.EscapeDataString(d.Name)}";
+
+    private string TblLink(UsageItem t)
     {
         var parts = (t.Parent ?? "").Split(Sep);
         var ws = parts.Length > 0 ? parts[0] : "";
         var ds = parts.Length > 1 ? parts[1] : "";
-        return $"explore?ws={Uri.EscapeDataString(ws)}&ds={Uri.EscapeDataString(ds)}&table={Uri.EscapeDataString(t.Name)}";
+        return $"{LinkBase}?ws={Uri.EscapeDataString(ws)}&ds={Uri.EscapeDataString(ds)}&table={Uri.EscapeDataString(t.Name)}";
     }
 
     public void Dispose()
     {
         Usage.Changed -= OnUsageChanged;
         Jobs.Changed -= OnUsageChanged;
+        Nav.LocationChanged -= OnLocationChanged;
     }
 }

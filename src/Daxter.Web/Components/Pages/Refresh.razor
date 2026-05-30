@@ -1,6 +1,7 @@
 @page "/refresh"
 @inject DaxterUi Ui
 @inject JobService Jobs
+@inject UsageStore Usage
 @implements IDisposable
 @using Daxter.Core.Maintenance
 
@@ -69,6 +70,18 @@ else
         <button class="btn-sm @(scope == Scope.Partitions ? "active" : "")" @onclick="() => SetScope(Scope.Partitions)">Partitions</button>
     </div>
 
+    <div class="form" style="max-width:420px;">
+        <label>Processing type
+            <select @bind="refreshType" @bind:after="() => pending = null">
+                <option value="@RefreshType.Full">Full — load data &amp; recalculate (default)</option>
+                <option value="@RefreshType.Automatic">Automatic — refresh what changed</option>
+                <option value="@RefreshType.Calculate">Calculate — recalc formulas only (no data load)</option>
+                <option value="@RefreshType.DataOnly">Data only — load data, skip recalculation</option>
+                <option value="@RefreshType.ClearValues">Clear values — empty the target</option>
+            </select>
+        </label>
+    </div>
+
     @if (scope == Scope.Full)
     {
         <p class="muted">Refreshes <strong>every table</strong> in '@dataset' (TMSL <code>full</code>).</p>
@@ -86,21 +99,38 @@ else
 
         @if (scope == Scope.Partitions && !string.IsNullOrEmpty(selTable))
         {
-            <div class="cmd-group" style="margin-top:.6rem;">
-                <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => partMode = PartMode.AllNewest">All — newest→oldest</button>
-                <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => partMode = PartMode.AllOldest">All — oldest→newest</button>
-                <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => partMode = PartMode.Single">A single partition</button>
-            </div>
-            @if (partMode == PartMode.Single)
+            @if (busy)
             {
-                <div class="form" style="max-width:420px;">
-                    <label>Partition
-                        <select @bind="selPartition">
-                            <option value="">— select a partition —</option>
-                            @foreach (var p in partitions) { <option value="@p">@p</option> }
-                        </select>
-                    </label>
+                <p class="muted">Loading partitions…</p>
+            }
+            else if (partitions.Count == 0)
+            {
+                <p class="muted">This table has no partitions to refresh.</p>
+            }
+            else if (partitions.Count == 1)
+            {
+                <p class="muted">This table has a <strong>single partition</strong>
+                    (<code>@partitions[0]</code>) — it will be refreshed.</p>
+            }
+            else
+            {
+                <p class="muted">@partitions.Count partitions. Refresh them <strong>in order</strong>, or pick one:</p>
+                <div class="cmd-group">
+                    <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => partMode = PartMode.AllNewest">All — newest→oldest</button>
+                    <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => partMode = PartMode.AllOldest">All — oldest→newest</button>
+                    <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => partMode = PartMode.Single">A single partition</button>
                 </div>
+                @if (partMode == PartMode.Single)
+                {
+                    <div class="form" style="max-width:420px;">
+                        <label>Partition
+                            <select @bind="selPartition">
+                                <option value="">— select a partition —</option>
+                                @foreach (var p in partitions) { <option value="@p">@p</option> }
+                            </select>
+                        </label>
+                    </div>
+                }
             }
         }
     }
@@ -152,6 +182,8 @@ else
 }
 
 @code {
+    private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
+
     private enum Scope { Full, Table, Partitions }
     private enum PartMode { AllNewest, AllOldest, Single }
 
@@ -164,6 +196,7 @@ else
     private string workspace = "", dataset = "", selTable = "", selPartition = "";
     private Scope scope = Scope.Full;
     private PartMode partMode = PartMode.AllNewest;
+    private RefreshType refreshType = RefreshType.Full;
     private RefreshSpec? pending;
     private string? jobMsg, error;
     private bool jobMsgOk, busy;
@@ -174,7 +207,8 @@ else
     {
         Scope.Full => true,
         Scope.Table => !string.IsNullOrEmpty(selTable),
-        Scope.Partitions => !string.IsNullOrEmpty(selTable) && (partMode != PartMode.Single || !string.IsNullOrEmpty(selPartition)),
+        Scope.Partitions => !string.IsNullOrEmpty(selTable) && partitions.Count > 0
+            && (partMode != PartMode.Single || !string.IsNullOrEmpty(selPartition)),
         _ => false,
     };
 
@@ -218,7 +252,11 @@ else
         datasets = new(); dataset = ""; ResetSelection();
         if (string.IsNullOrEmpty(workspace)) return;
         busy = true; error = null;
-        try { datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name"); }
+        try
+        {
+            datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.RefreshContext);
+        }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
@@ -228,22 +266,37 @@ else
         ResetSelection();
         if (string.IsNullOrEmpty(dataset) || !Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
         busy = true; error = null;
-        try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
+        try
+        {
+            tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table");
+            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.RefreshContext);
+        }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
 
     private async Task OnTableChanged()
     {
-        selPartition = ""; partitions = new(); pending = null;
+        selPartition = ""; partitions = new(); pending = null; partMode = PartMode.AllNewest;
+        if (!string.IsNullOrEmpty(selTable))
+            Usage.Record(UsageStore.Table, selTable, $"{workspace}{Sep}{dataset}", UsageStore.RefreshContext);
         if (scope != Scope.Partitions || string.IsNullOrEmpty(selTable)) return;
         busy = true; error = null;
-        try { partitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable), "Name"); }
+        try
+        {
+            partitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable), "Name");
+            // Single-partition tables: no "in order" choice — just refresh that partition.
+            if (partitions.Count == 1) { partMode = PartMode.Single; selPartition = partitions[0]; }
+        }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
     }
 
-    private void SetScope(Scope s) { scope = s; pending = null; }
+    private async Task SetScope(Scope s)
+    {
+        scope = s; pending = null;
+        if (s == Scope.Partitions && !string.IsNullOrEmpty(selTable)) await OnTableChanged();
+    }
     private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; }
 
     private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }
@@ -254,14 +307,14 @@ else
 
     private RefreshSpec BuildSpec() => scope switch
     {
-        Scope.Full => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst),
-        Scope.Table => new RefreshSpec(RefreshKind.Table, workspace, dataset, selTable, null, PartitionOrder.NewestFirst),
+        Scope.Full => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst, refreshType),
+        Scope.Table => new RefreshSpec(RefreshKind.Table, workspace, dataset, selTable, null, PartitionOrder.NewestFirst, refreshType),
         Scope.Partitions when partMode == PartMode.Single
-            => new RefreshSpec(RefreshKind.Partition, workspace, dataset, selTable, selPartition, PartitionOrder.NewestFirst),
+            => new RefreshSpec(RefreshKind.Partition, workspace, dataset, selTable, selPartition, PartitionOrder.NewestFirst, refreshType),
         Scope.Partitions
             => new RefreshSpec(RefreshKind.AllPartitions, workspace, dataset, selTable, null,
-                partMode == PartMode.AllOldest ? PartitionOrder.OldestFirst : PartitionOrder.NewestFirst),
-        _ => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst),
+                partMode == PartMode.AllOldest ? PartitionOrder.OldestFirst : PartitionOrder.NewestFirst, refreshType),
+        _ => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst, refreshType),
     };
 
     private void ConfirmRefresh()
@@ -281,14 +334,18 @@ else
         finally { pending = null; }
     }
 
-    private static string Summary(RefreshSpec s) => s.Kind switch
+    private static string Summary(RefreshSpec s)
     {
-        RefreshKind.Model => "the full model",
-        RefreshKind.Table => $"table '{s.Table}'",
-        RefreshKind.Partition => $"partition '{s.Partition}' of '{s.Table}'",
-        RefreshKind.AllPartitions => $"all partitions of '{s.Table}' ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")})",
-        _ => "the model",
-    };
+        var what = s.Kind switch
+        {
+            RefreshKind.Model => "the whole model",
+            RefreshKind.Table => $"table '{s.Table}'",
+            RefreshKind.Partition => $"partition '{s.Partition}' of '{s.Table}'",
+            RefreshKind.AllPartitions => $"all partitions of '{s.Table}' ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")})",
+            _ => "the model",
+        };
+        return $"{what} — {s.Type} processing";
+    }
 
     private static string Fmt(TimeSpan? d)
         => d is null ? "" : d.Value.TotalSeconds < 1 ? "<1s" : $"{(int)d.Value.TotalSeconds}s";

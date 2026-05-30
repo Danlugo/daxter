@@ -4,7 +4,7 @@ namespace Daxter.Web.Services;
 
 /// <summary>One tracked item and how often it's been opened. Tables carry their
 /// <c>workspacedataset</c> in <see cref="Parent"/>; datasets carry their workspace.</summary>
-public sealed record UsageItem(string Kind, string Name, string? Parent, int Count, DateTimeOffset LastUsed);
+public sealed record UsageItem(string Kind, string Name, string? Parent, int Count, DateTimeOffset LastUsed, string Context = "");
 
 /// <summary>
 /// Tracks how often each workspace / dataset / table is opened so the console can surface a
@@ -17,6 +17,10 @@ public sealed class UsageStore
     public const string Workspace = "workspace";
     public const string Dataset = "dataset";
     public const string Table = "table";
+
+    // Page contexts (each page keeps its own Frequent list).
+    public const string ExploreContext = "explore";
+    public const string RefreshContext = "refresh";
 
     private const int MaxItems = 500;
 
@@ -31,8 +35,8 @@ public sealed class UsageStore
 
     public UsageStore() => _items = Load();
 
-    /// <summary>Records one open of a workspace/dataset/table (no-op for blank names).</summary>
-    public void Record(string kind, string name, string? parent = null)
+    /// <summary>Records one open of a workspace/dataset/table within a page context (no-op for blank names).</summary>
+    public void Record(string kind, string name, string? parent = null, string context = "")
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
@@ -40,7 +44,7 @@ public sealed class UsageStore
         lock (_gate)
         {
             var idx = _items.FindIndex(i =>
-                i.Kind == kind && i.Name == name && i.Parent == parent);
+                i.Kind == kind && i.Name == name && i.Parent == parent && i.Context == context);
 
             if (idx >= 0)
             {
@@ -48,7 +52,7 @@ public sealed class UsageStore
             }
             else
             {
-                _items.Add(new UsageItem(kind, name, parent, 1, DateTimeOffset.Now));
+                _items.Add(new UsageItem(kind, name, parent, 1, DateTimeOffset.Now, context));
                 if (_items.Count > MaxItems)
                 {
                     // Drop the least useful (lowest count, then oldest).
@@ -63,13 +67,13 @@ public sealed class UsageStore
         Changed?.Invoke();
     }
 
-    /// <summary>The <paramref name="n"/> most-used items of a kind (by count, then recency).</summary>
-    public IReadOnlyList<UsageItem> Top(string kind, int n)
+    /// <summary>The <paramref name="n"/> most-used items of a kind within a page context.</summary>
+    public IReadOnlyList<UsageItem> Top(string kind, int n, string context)
     {
         lock (_gate)
         {
             return _items
-                .Where(i => i.Kind == kind)
+                .Where(i => i.Kind == kind && i.Context == context)
                 .OrderByDescending(i => i.Count).ThenByDescending(i => i.LastUsed)
                 .Take(n)
                 .ToList();

@@ -16,7 +16,10 @@ All notable changes to DAXter are documented here. The format follows
 ### Added
 - **Dedicated Refresh page** (`/refresh`). Pick a workspace + dataset, then choose **what to
   refresh** — the **full model**, a **table**, or **partitions** (all **in order**
-  newest→oldest / oldest→newest, or a **single** partition) — and **confirm** before it runs.
+  newest→oldest / oldest→newest, or a **single** partition) — a **processing type** (Full /
+  Automatic / **Calculate** / Data only / Clear values) — and **confirm** before it runs. The
+  partition options are **table-aware**: a table with one partition just refreshes it (no
+  "in order" choice); the order options appear only when a table has multiple partitions.
   A **"Refreshing…"** banner shows while a refresh is in progress for the dataset, and a
   per-dataset job tracker (plus the **Jobs** page) lets you **cancel** and **see details**
   (status, duration, target, error). Refreshes deep-link from Explore (a dataset or table →
@@ -44,12 +47,12 @@ All notable changes to DAXter are documented here. The format follows
   its workspace/dataset + DAX); each row shows a single-line preview, its dataset, and how many
   times you've run it. Remove individual entries (×) or **clear all**. Persisted to
   `~/.daxter/query-history.json` on the mounted volume (de-duped, newest-first, last 100).
-- **"Frequent" sidebar.** A left rail across the console lists your **most-used workspaces,
-  datasets, and tables** (by open count) so you don't have to search for the same ones every
-  time. Click one to jump straight into Explore at that level (deep-linked via the query
-  string — a table even opens to its M code). Usage is tracked in a persisted `UsageStore`
-  (`~/.daxter/usage.json` on the mounted volume) and only records targets that actually
-  resolved, so typos don't pollute the list.
+- **"Frequent" sidebar — per page.** A left rail lists your **most-used workspaces, datasets,
+  and tables** (by open count). It's **scoped to the current page**: Explore has its own
+  Frequent set and Refresh has its own, and clicking an item deep-links into *that* page at the
+  right level (a table even opens to its M code on Explore, or preselected on Refresh). Usage is
+  tracked per page-context in a persisted `UsageStore` (`~/.daxter/usage.json` on the mounted
+  volume) and only records targets that actually resolved, so typos don't pollute the list.
 - **Version awareness + update check.** The image is stamped with its version at build time
   (`DAXTER_VERSION`, from the git tag); the web console shows it in the header, and the Status
   page has a **Version & updates** card that checks GitHub `releases/latest` on demand. If a
