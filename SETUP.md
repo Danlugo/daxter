@@ -32,7 +32,8 @@ shell commands and edit the config file), or a person can do it manually.
 
 ## 0. Prerequisites
 
-- **Docker Desktop** installed and **running**.
+- **Docker Desktop** installed and **running** — *running*, not just installed; you'll verify
+  this with `docker info` in step 1 before pulling anything.
 - **python3** (used only for the safe config merge in step 3). `git` only if you build from source.
 - A **Power BI account** with access to a Premium/PPU/Fabric workspace — you'll **sign in as
   yourself** (default). *(For automation/CI you can use a service principal instead — see
@@ -40,7 +41,22 @@ shell commands and edit the config file), or a person can do it manually.
 
 ## 1. Get the image
 
-The image is **public on GHCR**, so you can pull it directly — no login, no build:
+**First, verify the Docker daemon is actually running** — *installed ≠ running*, and a stopped
+daemon is the #1 cause of the failures below. Don't pull or run anything until this passes:
+
+```bash
+docker info >/dev/null 2>&1 \
+  && echo "Docker is running ✓ — continue" \
+  || echo "Docker is NOT running ✗ — open Docker Desktop, wait until it shows 'Running', then re-run this"
+```
+
+If it reports **not running**: launch **Docker Desktop** (Windows/macOS) or start the engine
+(`sudo systemctl start docker` on Linux), wait until the whale icon stops animating / the
+status reads **Running**, then re-run the check. Every `docker` command in this guide (pull,
+`run`, and the MCP server Claude Desktop launches) needs the daemon up — if it's down, the
+container never starts and `http://localhost:8080` (or the MCP tools) silently won't respond.
+
+Once the check passes, the image is **public on GHCR**, so you can pull it directly — no login, no build:
 
 ```bash
 docker pull ghcr.io/danlugo/daxter:latest
@@ -198,7 +214,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 
 ## Agent checklist
 
-- [ ] Docker running
+- [ ] Docker daemon running — `docker info` succeeds (step 1) **before** any pull/run
 - [ ] env file created (device-code: just `DAXTER_AUTH_MODE=device-code` + optional tenant id),
       any set values are real (GUID tenant id, no `<>`/quotes/spaces), edited in a normal editor
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
