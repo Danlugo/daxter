@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
@@ -8,13 +10,13 @@ using Microsoft.Extensions.Logging;
 
 namespace Daxter.Web.Services;
 
-public enum RefreshKind { Model, Table, Partition, AllPartitions }
-public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled }
+public enum RefreshKind { Model, Table, Partition, AllPartitions, SomePartitions }
+public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled, Interrupted }
 
 /// <summary>What a refresh job targets. Table/Partition are null where not applicable.</summary>
 public sealed record RefreshSpec(
     RefreshKind Kind, string Workspace, string Dataset, string? Table, string? Partition,
-    PartitionOrder Order, RefreshType Type = RefreshType.Full);
+    PartitionOrder Order, RefreshType Type = RefreshType.Full, IReadOnlyList<string>? Partitions = null);
 
 /// <summary>One timestamped step in a job's activity log.</summary>
 public sealed record JobEvent(DateTimeOffset Time, string Message);
@@ -26,14 +28,14 @@ public sealed class Job
     public required string Title { get; init; }
     public required RefreshSpec Spec { get; init; }
     public JobStatus Status { get; set; } = JobStatus.Queued;
-    public DateTimeOffset Created { get; } = DateTimeOffset.Now;
+    public DateTimeOffset Created { get; init; } = DateTimeOffset.Now;
     public DateTimeOffset? Started { get; set; }
     public DateTimeOffset? Finished { get; set; }
     public string? Error { get; set; }
 
-    // Cancellation: the live session is aborted (disposed) to stop a running refresh.
-    internal IDisposable? Session { get; set; }
-    internal bool CancelRequested { get; set; }
+    // Cancellation: the live session is aborted (disposed) to stop a running refresh. Runtime-only.
+    [JsonIgnore] internal IDisposable? Session { get; set; }
+    [JsonIgnore] internal bool CancelRequested { get; set; }
 
     /// <summary>Timestamped activity log (Queued → Started → Connecting → Executing → Done/…).</summary>
     public List<JobEvent> Events { get; } = new();
@@ -44,11 +46,11 @@ public sealed class Job
     /// <summary>Estimated total seconds from history (set at enqueue); null if no history yet.</summary>
     public double? EstimateSeconds { get; set; }
 
-    public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
-    public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
+    [JsonIgnore] public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
+    [JsonIgnore] public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
 
     /// <summary>0..0.99 progress while running, from elapsed vs estimate; null if no estimate.</summary>
-    public double? Progress
+    [JsonIgnore] public double? Progress
     {
         get
         {
@@ -80,11 +82,64 @@ public sealed class JobService
 
     public event Action? Changed;
 
+    private static string StorePath => Path.Combine(
+        Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath(), ".daxter", "jobs.json");
+
     public JobService(ConfigState state, ILogger<JobService> log, JobHistoryStore history)
     {
         _state = state;
         _log = log;
         _history = history;
+        LoadPersisted();
+    }
+
+    private void LoadPersisted()
+    {
+        try
+        {
+            if (!File.Exists(StorePath)) return;
+            var loaded = JsonSerializer.Deserialize<List<Job>>(File.ReadAllText(StorePath));
+            if (loaded is null) return;
+
+            foreach (var j in loaded)
+            {
+                // Queued/Running jobs can't survive a restart — the worker is gone. Mark them
+                // Interrupted (don't auto-resume a write) so the record is kept but accurate.
+                if (j.Status is JobStatus.Queued or JobStatus.Running)
+                {
+                    j.Status = JobStatus.Interrupted;
+                    j.Finished ??= j.Started ?? j.Created;
+                    j.Step = "Interrupted by restart";
+                }
+                _jobs.Add(j);
+            }
+            _nextId = (_jobs.Count > 0 ? _jobs.Max(j => j.Id) : 0) + 1;
+        }
+        catch
+        {
+            // Best-effort: corrupt file shouldn't break the app.
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
+            List<Job> snapshot;
+            lock (_gate) snapshot = _jobs.ToList();
+            File.WriteAllText(StorePath, JsonSerializer.Serialize(snapshot));
+        }
+        catch
+        {
+            // Best-effort persistence; never let it break a refresh.
+        }
+    }
+
+    private void NotifyChanged()
+    {
+        Save();
+        Changed?.Invoke();
     }
 
     /// <summary>History signature: same kind+dataset+table+type pool together (partition name ignored).</summary>
@@ -137,7 +192,7 @@ public sealed class JobService
         AddEvent(job, "Queued");
         _log.LogInformation("Queued job #{Id}: {Title}", job.Id, job.Title);
         EnsureWorker();
-        Changed?.Invoke();
+        NotifyChanged();
         return job;
     }
 
@@ -201,14 +256,14 @@ public sealed class JobService
             try { session.Dispose(); } catch { /* aborting the running command */ }
         }
 
-        Changed?.Invoke();
+        NotifyChanged();
     }
 
     /// <summary>Removes finished (succeeded/failed/canceled) jobs from the list.</summary>
     public void ClearFinished()
     {
         lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Canceled);
-        Changed?.Invoke();
+        NotifyChanged();
     }
 
     private void EnsureWorker()
@@ -234,7 +289,7 @@ public sealed class JobService
                 job.Started = DateTimeOffset.Now;
                 AddEvent(job, "Started");
                 _log.LogInformation("Running job #{Id}: {Title}", job.Id, job.Title);
-                Changed?.Invoke();
+                NotifyChanged();
 
                 try
                 {
@@ -260,7 +315,7 @@ public sealed class JobService
                 finally
                 {
                     job.Finished = DateTimeOffset.Now;
-                    Changed?.Invoke();
+                    NotifyChanged();
                 }
             }
         }
@@ -280,7 +335,7 @@ public sealed class JobService
         var factory = new AdomdXmlaSessionFactory(cfg, provider);
 
         AddEvent(job, "Connecting to the model…");
-        Changed?.Invoke();
+        NotifyChanged();
         var session = await factory.CreateAsync();
         lock (_gate) job.Session = session;   // so Cancel can abort the running command
 
@@ -293,11 +348,12 @@ public sealed class JobService
                 RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
                 RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
                 RefreshKind.AllPartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Order, spec.Type, maxParallelism: 1),
+                RefreshKind.SomePartitions => maint.BuildPartitionsRefresh(spec.Table!, spec.Partitions!, spec.Type, maxParallelism: 1),
                 _ => throw new DaxterException("Unknown refresh kind."),
             };
 
             AddEvent(job, "Processing (TMSL refresh)…");
-            Changed?.Invoke();
+            NotifyChanged();
             maint.Execute(tmsl);
         }
         finally
@@ -316,6 +372,7 @@ public sealed class JobService
             RefreshKind.Table => $"Refresh table · {s.Table}{t}",
             RefreshKind.Partition => $"Refresh partition · {s.Table}[{s.Partition}]{t}",
             RefreshKind.AllPartitions => $"Refresh all partitions · {s.Table} ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")}){t}",
+            RefreshKind.SomePartitions => $"Refresh {s.Partitions?.Count ?? 0} partitions · {s.Table}{t}",
             _ => "Refresh",
         };
     }

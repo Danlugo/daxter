@@ -130,27 +130,33 @@ else
             }
             else
             {
-                <p class="muted">@partitions.Count partitions. Refresh them <strong>in order</strong>, or pick one:</p>
+                <p class="muted">@partitions.Count partitions. Refresh them all <strong>in order</strong>, or pick the ones you want:</p>
                 <div class="cmd-group">
                     <button class="btn-sm @(partMode == PartMode.AllNewest ? "active" : "")" @onclick="() => SetPartMode(PartMode.AllNewest)">All — newest→oldest</button>
                     <button class="btn-sm @(partMode == PartMode.AllOldest ? "active" : "")" @onclick="() => SetPartMode(PartMode.AllOldest)">All — oldest→newest</button>
-                    <button class="btn-sm @(partMode == PartMode.Single ? "active" : "")" @onclick="() => SetPartMode(PartMode.Single)">A single partition</button>
+                    <button class="btn-sm @(partMode == PartMode.Pick ? "active" : "")" @onclick="() => SetPartMode(PartMode.Pick)">Pick partitions…</button>
                 </div>
-                @if (partMode == PartMode.Single)
+                @if (partMode == PartMode.Pick)
                 {
-                    <div class="form" style="max-width:420px;">
-                        <label>Partition
-                            <select @bind="selPartition">
-                                <option value="">— select a partition —</option>
-                                @foreach (var p in partitions) { <option value="@p">@p</option> }
-                            </select>
-                        </label>
+                    <div class="cmd-group">
+                        <button class="link" @onclick="SelectAllPartitions">select all</button>
+                        <button class="link" @onclick="SelectNoPartitions">clear</button>
+                        <span class="muted">@selectedPartitions.Count of @partitions.Count selected</span>
+                    </div>
+                    <div class="pick-list">
+                        @foreach (var p in partitions)
+                        {
+                            <label class="pick-item">
+                                <input type="checkbox" checked="@selectedPartitions.Contains(p)"
+                                       @onchange="e => TogglePartition(p, (bool)e.Value!)" /> <span>@p</span>
+                            </label>
+                        }
                     </div>
                 }
-                else
+                @if ((partMode != PartMode.Pick && partitions.Count > 0) || (partMode == PartMode.Pick && selectedPartitions.Count > 0))
                 {
                     <div class="order-preview">
-                        <div class="side-h">Processing order — @OrderedPartitions().Count partitions, one at a time</div>
+                        <div class="side-h">Processing order — @OrderedPartitions().Count partition(s), one at a time</div>
                         <ol class="order-list">
                             @foreach (var p in OrderedPartitions()) { <li>@p</li> }
                         </ol>
@@ -169,7 +175,7 @@ else
         <div class="card confirm">
             <p><strong>Confirm refresh</strong></p>
             <p>You're about to refresh: <strong>@Summary(pending)</strong> on '<strong>@dataset</strong>'.</p>
-            @if (pending.Kind == RefreshKind.AllPartitions)
+            @if (pending.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions)
             {
                 <p class="muted">Partitions process one at a time, in this order:</p>
                 <ol class="order-list">@foreach (var p in OrderedPartitions()) { <li>@p</li> }</ol>
@@ -215,7 +221,7 @@ else
     private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
 
     private enum Scope { Full, Table, Partitions }
-    private enum PartMode { AllNewest, AllOldest, Single }
+    private enum PartMode { AllNewest, AllOldest, Pick }
     private enum RefTab { New, History }
 
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
@@ -224,7 +230,8 @@ else
     private string? appliedQuery;
 
     private List<string> workspaces = new(), datasets = new(), tables = new(), partitions = new();
-    private string workspace = "", dataset = "", selTable = "", selPartition = "";
+    private string workspace = "", dataset = "", selTable = "";
+    private HashSet<string> selectedPartitions = new();
     private Scope scope = Scope.Full;
     private PartMode partMode = PartMode.AllNewest;
     private RefreshType refreshType = RefreshType.Full;
@@ -244,7 +251,7 @@ else
         Scope.Full => true,
         Scope.Table => !string.IsNullOrEmpty(selTable),
         Scope.Partitions => !string.IsNullOrEmpty(selTable) && partitions.Count > 0
-            && (partMode != PartMode.Single || !string.IsNullOrEmpty(selPartition)),
+            && (partMode != PartMode.Pick || selectedPartitions.Count > 0),
         _ => false,
     };
 
@@ -330,7 +337,7 @@ else
 
     private async Task OnTableChanged()
     {
-        selPartition = ""; partitions = new(); pending = null; partMode = PartMode.AllNewest;
+        partitions = new(); selectedPartitions = new(); pending = null; partMode = PartMode.AllNewest;
         if (!string.IsNullOrEmpty(selTable))
             Usage.Record(UsageStore.Table, selTable, $"{workspace}{Sep}{dataset}", UsageStore.RefreshContext);
         if (scope != Scope.Partitions || string.IsNullOrEmpty(selTable)) return;
@@ -338,8 +345,8 @@ else
         try
         {
             partitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable), "Name");
-            // Single-partition tables: no "in order" choice — just refresh that partition.
-            if (partitions.Count == 1) { partMode = PartMode.Single; selPartition = partitions[0]; }
+            // Single-partition tables: no "in order" choice — just refresh that one.
+            if (partitions.Count == 1) { partMode = PartMode.Pick; selectedPartitions = new(partitions); }
         }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
@@ -353,12 +360,25 @@ else
 
     private void SetPartMode(PartMode m) { partMode = m; pending = null; }
 
-    // Partitions in the exact order they'll be processed (matches MaintenanceService: Ordinal sort).
+    private void TogglePartition(string p, bool on)
+    {
+        if (on) selectedPartitions.Add(p); else selectedPartitions.Remove(p);
+        pending = null;
+    }
+    private void SelectAllPartitions() { selectedPartitions = new(partitions); pending = null; }
+    private void SelectNoPartitions() { selectedPartitions.Clear(); pending = null; }
+
+    // The partitions to process, in the exact order (matches MaintenanceService: Ordinal sort).
     private List<string> OrderedPartitions()
-        => (partMode == PartMode.AllOldest
-                ? partitions.OrderBy(p => p, StringComparer.Ordinal)
-                : partitions.OrderByDescending(p => p, StringComparer.Ordinal)).ToList();
-    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selPartition = ""; scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; }
+    {
+        IEnumerable<string> src = partMode == PartMode.Pick
+            ? partitions.Where(selectedPartitions.Contains)
+            : partitions;
+        return (partMode == PartMode.AllOldest
+                ? src.OrderBy(p => p, StringComparer.Ordinal)
+                : src.OrderByDescending(p => p, StringComparer.Ordinal)).ToList();
+    }
+    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selectedPartitions = new(); scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; }
 
     private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }
     private async Task OnWorkspaceChangedClear() { workspace = ""; await OnWorkspaceChanged(); }
@@ -370,8 +390,9 @@ else
     {
         Scope.Full => new RefreshSpec(RefreshKind.Model, workspace, dataset, null, null, PartitionOrder.NewestFirst, refreshType),
         Scope.Table => new RefreshSpec(RefreshKind.Table, workspace, dataset, selTable, null, PartitionOrder.NewestFirst, refreshType),
-        Scope.Partitions when partMode == PartMode.Single
-            => new RefreshSpec(RefreshKind.Partition, workspace, dataset, selTable, selPartition, PartitionOrder.NewestFirst, refreshType),
+        Scope.Partitions when partMode == PartMode.Pick
+            => new RefreshSpec(RefreshKind.SomePartitions, workspace, dataset, selTable, null,
+                PartitionOrder.NewestFirst, refreshType, OrderedPartitions()),
         Scope.Partitions
             => new RefreshSpec(RefreshKind.AllPartitions, workspace, dataset, selTable, null,
                 partMode == PartMode.AllOldest ? PartitionOrder.OldestFirst : PartitionOrder.NewestFirst, refreshType),
@@ -402,6 +423,7 @@ else
             RefreshKind.Model => "the whole model",
             RefreshKind.Table => $"table '{s.Table}'",
             RefreshKind.Partition => $"partition '{s.Partition}' of '{s.Table}'",
+            RefreshKind.SomePartitions => $"{s.Partitions?.Count ?? 0} selected partition(s) of '{s.Table}'",
             RefreshKind.AllPartitions => $"all partitions of '{s.Table}' ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")})",
             _ => "the model",
         };

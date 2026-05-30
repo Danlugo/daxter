@@ -20,11 +20,17 @@ All notable changes to DAXter are documented here. The format follows
   Automatic / **Calculate** / Data only / Clear values) — and **confirm** before it runs. The
   partition options are **table-aware**: a table with one partition just refreshes it (no
   "in order" choice); the order options appear only when a table has multiple partitions.
-  When you choose **all partitions in order**, the page shows the **exact ordered list** of
-  partitions (and the confirmation repeats it), and the refresh now **truly processes them in
-  that order** — the TMSL is wrapped in a `Sequence` with `maxParallelism: 1` (a plain refresh
-  runs partitions in parallel). `MaintenanceService.BuildPartitionsRefresh` gained an optional
-  `maxParallelism`.
+  Partitions can be refreshed three ways: **all** (in order), or **Pick partitions…** to
+  check **one or more** specific partitions (select-all / clear helpers). Whichever you choose,
+  the page shows the **exact ordered list** of partitions to process (the confirmation repeats
+  it), and the refresh **truly processes them in that order** — the TMSL is wrapped in a
+  `Sequence` with `maxParallelism: 1` (a plain refresh runs partitions in parallel).
+  `MaintenanceService.BuildPartitionsRefresh` gained an optional `maxParallelism` and an
+  explicit-partition-set overload.
+- **Jobs survive a redeploy.** The job list is persisted to `~/.daxter/jobs.json` on the mounted
+  volume, so restarting/upgrading the container keeps the refresh history. Jobs that were
+  queued or running when the container stopped are reconciled to **Interrupted** on load (a
+  write is never silently auto-resumed). Duration history (for ETAs) was already persisted.
   The page is **tabbed** — **New refresh** and **History**: picking a workspace+dataset loads
   the dataset's **refresh history** (read-only — works even for PROD or with writes off).
   The Jobs page now offers a **← Back to Refresh** link (keeping the workspace/dataset) when you

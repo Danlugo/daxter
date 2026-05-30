@@ -58,6 +58,21 @@ public sealed class MaintenanceService
         return RefreshTmsl(type, objects, maxParallelism);
     }
 
+    /// <summary>
+    /// TMSL to refresh a specific set of partitions of a table, in the given order. With
+    /// <paramref name="maxParallelism"/> = 1 they process strictly in that order.
+    /// </summary>
+    public string BuildPartitionsRefresh(string table, IReadOnlyList<string> partitions, RefreshType type, int? maxParallelism = null)
+    {
+        if (partitions is null || partitions.Count == 0)
+        {
+            throw new DaxterException("No partitions specified.");
+        }
+
+        var objects = partitions.Select(p => Target(_database, table, p)).ToList();
+        return RefreshTmsl(type, objects, maxParallelism);
+    }
+
     /// <summary>Partition names of a table in refresh order (newest- or oldest-first), Ordinal-sorted.</summary>
     public IReadOnlyList<string> OrderedPartitionNames(string table, PartitionOrder order)
     {
