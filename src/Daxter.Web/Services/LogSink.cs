@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Daxter.Core.Diagnostics;
 using Microsoft.Extensions.Logging;
 
 namespace Daxter.Web.Services;
@@ -87,7 +88,8 @@ public sealed class LogSinkLoggerProvider(LogSink sink) : ILoggerProvider
             if (!IsEnabled(logLevel)) return;
             var message = formatter(state, exception);
             if (exception is not null) message += $" — {exception.GetType().Name}: {exception.Message}";
-            sink.Add(new LogEntry(DateTimeOffset.Now, logLevel, category, message));
+            // Defense-in-depth: never let a credential/token reach the in-app log.
+            sink.Add(new LogEntry(DateTimeOffset.Now, logLevel, category, SecretRedactor.Redact(message)));
         }
     }
 }

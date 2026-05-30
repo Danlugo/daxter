@@ -6,6 +6,14 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [1.6.3] - 2026-05-29
 
+### Security
+- **Logs are redacted.** Every line captured by the in-app log passes through a tested
+  `SecretRedactor` that masks JWT/OAuth access tokens, `Bearer` headers, and keyed secrets
+  (`password=`, `client_secret=`, `access_token=`, `api_key=`, …). DAXter already injects tokens
+  out-of-band (never in connection strings) and never logs DAX text, cell values, or the client
+  secret — the redactor is a defense-in-depth net so a third-party exception message can't leak
+  one either. (14 redactor tests.)
+
 ### Added
 - **Logs page** in the web console — recent console activity in-app: every operation with its
   row count and timing (e.g. `datasets [Data Hub] → 94 rows in 887 ms`), sign-in, health checks,
