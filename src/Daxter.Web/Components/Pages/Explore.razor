@@ -11,14 +11,27 @@
 <div class="row">
     <div>
         <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
-        <input class="combo" list="ws-list" @bind="workspace" @bind:after="OnWorkspaceChanged"
-               placeholder="type to search…" autocomplete="off" />
+        <div class="combo-wrap">
+            <input class="combo" list="ws-list" @bind="workspace" @bind:after="OnWorkspaceChanged"
+                   placeholder="type to search…" autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(workspace))
+            {
+                <button class="combo-clear" @onclick="ClearWorkspace" title="Clear — pick another workspace">×</button>
+            }
+        </div>
         <datalist id="ws-list">@foreach (var w in workspaces) { <option value="@w"></option> }</datalist>
         <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
     </div>
     <div>
         <label>Dataset <span class="muted">(@datasets.Count)</span></label>
-        <input class="combo" list="ds-list" @bind="dataset" placeholder="type to search…" autocomplete="off" />
+        <div class="combo-wrap">
+            <input class="combo" list="ds-list" @bind="dataset" placeholder="type to search…"
+                   autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(dataset))
+            {
+                <button class="combo-clear" @onclick="ClearDataset" title="Clear — pick another dataset">×</button>
+            }
+        </div>
         <datalist id="ds-list">@foreach (var d in datasets) { <option value="@d"></option> }</datalist>
     </div>
 </div>
@@ -292,6 +305,10 @@ else
         await OnWorkspaceChanged();
         if (!string.IsNullOrEmpty(defaultDataset)) dataset = defaultDataset!;
     }
+
+    // Clear the combo so its full datalist shows again (native datalist filters to the current value).
+    private async Task ClearWorkspace() { workspace = ""; await OnWorkspaceChanged(); } // also clears datasets/dataset
+    private void ClearDataset() => dataset = "";
 
     private async Task LoadWorkspaces()
     {

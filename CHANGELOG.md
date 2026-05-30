@@ -6,6 +6,13 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [1.6.4] - 2026-05-29
 
+### Fixed
+- **Workspace/Dataset pickers couldn't show other values once selected.** A native `<datalist>`
+  filters its suggestions to substrings of the current input, so a full value hid every other
+  option. Each picker now has a **clear (×) button** (one click empties it and shows the full
+  list again — clearing the workspace also resets the dataset) and **selects its text on focus**
+  so you can immediately type a new search.
+
 ### Added
 - **Back button in Browse.** The drill-down explorer now has a **← Back** that returns to the
   exact previous view — from a table's M code back to the full **list of tables**, from a command
