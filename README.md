@@ -159,7 +159,10 @@ the MCP tools.
 **Device code (default, interactive).** `daxter login` prints a URL and code; open it in
 any browser and sign in. The token is cached in the `daxter-tokens` volume, so subsequent
 runs are silent until it expires. Requires an app registration with **public client flows
-enabled** (set `DAXTER_CLIENT_ID`, or rely on the built-in default).
+enabled** (set `DAXTER_CLIENT_ID`, or rely on the built-in default). Use this to run **as
+yourself** for operations that need *your* user permissions rather than the SP's — e.g.
+**gateway names** (only returned for gateways the caller administers). See the device-code
+example in [`examples/cli.md`](examples/cli.md#authenticate).
 
 **Service principal (automation).** Set `DAXTER_AUTH_MODE=service-principal` plus
 `DAXTER_TENANT_ID`, `DAXTER_CLIENT_ID`, `DAXTER_CLIENT_SECRET`. The tenant admin must

@@ -11,10 +11,30 @@ works too. All commands accept connection options — `--workspace/-w`, `--datas
 
 ## Authenticate
 
+Two modes, set via `DAXTER_AUTH_MODE` (or `--auth`):
+
+**Service principal** (automation / headless) — set `DAXTER_TENANT_ID`/`DAXTER_CLIENT_ID`/
+`DAXTER_CLIENT_SECRET` in `.env`. Best for the MCP server and CI.
+
+**Device code** (interactive, as *yourself*) — useful for operations that need **your** user
+permissions rather than the SP's. For example, gateway **names** are only returned for
+gateways the caller administers, so sign in as yourself (a gateway admin) to see them:
+
 ```bash
-./bin/daxter login                      # interactive device-code sign-in (token cached)
-# service principal: set DAXTER_AUTH_MODE=service-principal + tenant/client/secret in .env
+# Sign in once as yourself; token cached in a (separate) volume:
+docker run --rm \
+  -e DAXTER_AUTH_MODE=device-code \
+  -e DAXTER_TENANT_ID=<tenant-guid> \
+  -e DAXTER_WORKSPACE="<a workspace>" \
+  -v daxter-user-tokens:/home/daxter/.daxter \
+  ghcr.io/danlugo/daxter:latest ws gateways
+# → prints a code; open https://login.microsoft.com/device, enter it, sign in.
+# Subsequent commands with the same volume reuse the cached token silently.
 ```
+
+Uses a built-in public client by default; set `DAXTER_CLIENT_ID` to your own public-client
+app registration if your tenant requires one. (With the `./bin/daxter` wrapper and a
+device-code `.env`, this is just `./bin/daxter login` then `./bin/daxter ws gateways`.)
 
 ## Environments (one SP, workspace per env)
 
@@ -80,9 +100,15 @@ Mutating commands print the exact TMSL/REST call and refuse to run without `--ye
 ./bin/daxter ws lineage                          # report → dataset
 ./bin/daxter ws permissions                      # workspace users
 ./bin/daxter ws permissions --dataset "Retail Model"   # dataset users (who has access)
-./bin/daxter ws gateways                         # gateways (needs gateway-admin)
-./bin/daxter ws datasources --dataset "Retail Model"   # datasource + gateway binding
+./bin/daxter ws gateways                         # gateways you administer (see note below)
+./bin/daxter ws datasources --dataset "Retail Model"   # datasource + gateway binding (server/db/path + gatewayId)
 ```
+
+> **Gateway names:** `ws gateways` only returns gateways the **caller administers**, and
+> `ws datasources` gives a dataset's `gatewayId` (not its name). A service principal usually
+> administers no gateways, so it sees none. To get names, run **device-code as a user who
+> administers the gateway** (see [Authenticate](#authenticate)), be added as an admin of that
+> gateway, or look it up in *Manage connections and gateways* in the Power BI portal.
 
 ## RLS testing (impersonation)
 
