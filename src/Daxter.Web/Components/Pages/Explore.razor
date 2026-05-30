@@ -32,7 +32,7 @@
 
 <div class="tabs">
     <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="@(() => tab = Tab.Query)">DAX query</button>
-    <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="@(() => tab = Tab.Browse)">Browse</button>
+    <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="EnterBrowse">Browse</button>
 </div>
 
 @if (tab == Tab.Query)
@@ -44,32 +44,64 @@
 }
 else
 {
-    <div class="cmd-group">
-        <span class="cmd-label">Workspace</span>
-        <button class="btn-sm" @onclick="ShowDatasets" disabled="@(!HasWorkspace)">Datasets</button>
-        <button class="btn-sm" @onclick="ShowReports" disabled="@(!HasWorkspace)">Reports</button>
-        <button class="btn-sm" @onclick="ShowLineage" disabled="@(!HasWorkspace)">Lineage</button>
-    </div>
-    <div class="cmd-group">
-        <span class="cmd-label">Model</span>
-        <button class="btn-sm" @onclick="ShowTables" disabled="@(!HasDataset)">Tables</button>
-        <button class="btn-sm" @onclick="ShowMeasures" disabled="@(!HasDataset)">Measures</button>
-        <button class="btn-sm" @onclick="ShowParameters" disabled="@(!HasDataset)">Parameters</button>
-        <button class="btn-sm" @onclick="ShowPartitions" disabled="@(!HasDataset)">Partitions</button>
-        <button class="btn-sm" @onclick="ShowRls" disabled="@(!HasDataset)">RLS</button>
-        <button class="btn-sm" @onclick="ShowDatasources" disabled="@(!HasDataset)">Datasources</button>
-        <button class="btn-sm" @onclick="ShowPermissions" disabled="@(!HasDataset)">Permissions</button>
-        <button class="btn-sm" @onclick="ShowRefreshHistory" disabled="@(!HasDataset)">Refresh history</button>
-        <button class="btn" @onclick="GoToQuery" disabled="@(!HasDataset)">Run DAX →</button>
-    </div>
+    <nav class="crumbs">
+        <button class="link" @onclick="BrowseRoot">Workspaces</button>
+        @if (!string.IsNullOrEmpty(workspace))
+        {
+            <span>›</span><button class="link" @onclick="BrowseWorkspace">@workspace</button>
+        }
+        @if (!string.IsNullOrEmpty(dataset))
+        {
+            <span>›</span><span class="crumb-current">@dataset</span>
+        }
+    </nav>
+
+    @if (string.IsNullOrEmpty(workspace))
+    {
+        <ClickableList Items="workspaces" OnSelect="SelectWorkspace"
+                       Empty="@(busy ? "Loading…" : "No workspaces — click Load.")" />
+    }
+    else if (string.IsNullOrEmpty(dataset))
+    {
+        <div class="cmd-group">
+            <button class="btn-sm @(wsView == WsView.Datasets ? "active" : "")" @onclick="BrowseDatasets">Datasets</button>
+            <button class="btn-sm @(wsView == WsView.Reports ? "active" : "")" @onclick="ShowReports">Reports</button>
+            <button class="btn-sm @(wsView == WsView.Lineage ? "active" : "")" @onclick="ShowLineage">Lineage</button>
+        </div>
+        @if (wsView == WsView.Datasets)
+        {
+            <ClickableList Items="datasets" OnSelect="SelectDataset"
+                           Empty="@(busy ? "Loading…" : "No datasets in this workspace.")" />
+        }
+    }
+    else
+    {
+        <div class="cmd-group">
+            <button class="btn-sm" @onclick="ShowTables">Tables</button>
+            <button class="btn-sm" @onclick="ShowMeasures">Measures</button>
+            <button class="btn-sm" @onclick="ShowParameters">Parameters</button>
+            <button class="btn-sm" @onclick="ShowPartitions">Partitions</button>
+            <button class="btn-sm" @onclick="ShowRls">RLS</button>
+            <button class="btn-sm" @onclick="ShowDatasources">Datasources</button>
+            <button class="btn-sm" @onclick="ShowPermissions">Permissions</button>
+            <button class="btn-sm" @onclick="ShowRefreshHistory">Refresh history</button>
+            <button class="btn" @onclick="GoToQuery">Run DAX →</button>
+        </div>
+    }
 }
 
 @if (busy) { <p class="muted">Running…</p> }
-<ResultGrid Result="result" Error="@error" Empty="Load workspaces, pick a model, then run a command." />
+@if (ShowResultArea)
+{
+    <ResultGrid Result="result" Error="@error" Empty="Pick a command above." />
+}
 
 @code {
     private enum Tab { Query, Browse }
+    private enum WsView { Datasets, Reports, Lineage }
+
     private Tab tab = Tab.Query;
+    private WsView wsView = WsView.Datasets;
 
     private List<string> workspaces = new();
     private List<string> datasets = new();
@@ -82,6 +114,12 @@ else
     private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
     private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
 
+    // Result grid shows for: the DAX tab; or in Browse when a dataset/command or reports/lineage is active.
+    private bool ShowResultArea =>
+        tab == Tab.Query
+        || !string.IsNullOrEmpty(dataset)
+        || (!string.IsNullOrEmpty(workspace) && wsView != WsView.Datasets);
+
     protected override void OnInitialized()
     {
         try
@@ -93,15 +131,43 @@ else
         catch { /* no default configured */ }
     }
 
+    // ---- navigation ----
+
+    private async Task EnterBrowse()
+    {
+        tab = Tab.Browse;
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    private void BrowseRoot() { workspace = ""; dataset = ""; result = null; }
+
+    private async Task BrowseWorkspace()
+    {
+        dataset = "";
+        wsView = WsView.Datasets;
+        result = null;
+        if (datasets.Count == 0 && !string.IsNullOrEmpty(workspace)) await OnWorkspaceChanged();
+    }
+
+    private async Task SelectWorkspace(string ws)
+    {
+        workspace = ws;
+        wsView = WsView.Datasets;
+        await OnWorkspaceChanged();   // loads datasets, clears dataset + result handled below
+        result = null;
+    }
+
+    private void SelectDataset(string ds) { dataset = ds; result = null; }
+
+    private void GoToQuery() => tab = Tab.Query;
+
     private async Task LoadDefault()
     {
         if (string.IsNullOrEmpty(defaultWorkspace)) return;
         workspace = defaultWorkspace;
-        await OnWorkspaceChanged();                 // loads datasets, clears dataset
+        await OnWorkspaceChanged();
         if (!string.IsNullOrEmpty(defaultDataset)) dataset = defaultDataset!;
     }
-
-    private void GoToQuery() => tab = Tab.Query;
 
     private async Task LoadWorkspaces()
     {
@@ -122,9 +188,11 @@ else
         finally { busy = false; }
     }
 
-    private Task ShowDatasets() => Show(() => Ui.DatasetsAsync(workspace));
-    private Task ShowReports() => Show(() => Ui.ReportsAsync(workspace));
-    private Task ShowLineage() => Show(() => Ui.LineageAsync(workspace));
+    // ---- commands ----
+
+    private Task BrowseDatasets() { wsView = WsView.Datasets; result = null; return Task.CompletedTask; }
+    private Task ShowReports() { wsView = WsView.Reports; return Show(() => Ui.ReportsAsync(workspace)); }
+    private Task ShowLineage() { wsView = WsView.Lineage; return Show(() => Ui.LineageAsync(workspace)); }
     private Task ShowTables() => Show(() => Ui.TablesAsync(workspace, dataset));
     private Task ShowMeasures() => Show(() => Ui.MeasuresAsync(workspace, dataset));
     private Task ShowParameters() => Show(() => Ui.ParametersAsync(workspace, dataset));

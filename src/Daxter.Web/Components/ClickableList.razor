@@ -1,0 +1,19 @@
+@if (Items is null || Items.Count == 0)
+{
+    <p class="muted">@(Empty ?? "Nothing here.")</p>
+}
+else
+{
+    <ul class="nav-list">
+        @foreach (var item in Items)
+        {
+            <li><button class="nav-item" @onclick="() => OnSelect.InvokeAsync(item)">@item <span class="chev">›</span></button></li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter] public List<string>? Items { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+    [Parameter] public string? Empty { get; set; }
+}

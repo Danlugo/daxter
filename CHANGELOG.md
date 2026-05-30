@@ -9,10 +9,11 @@ All notable changes to DAXter are documented here. The format follows
 ### Added
 - Explore page: the **Workspace and Dataset pickers are now searchable** (type-to-filter via
   an input + `<datalist>`), which matters with ~dozens of workspaces.
-- Explore is now **tabbed** — **DAX query** and **Browse**. Browse runs the workspace commands
-  (datasets, reports, lineage) and model commands (tables, measures, parameters, partitions,
-  RLS, datasources, permissions, refresh history); a **Run DAX →** button jumps to the query
-  tab with the selected workspace/dataset already filled in.
+- Explore is now **tabbed** — **DAX query** and **Browse**. Browse is a **drill-down explorer**:
+  start from zero, click **Workspaces** → a workspace → **Datasets** → a dataset → run any model
+  command (tables, measures, parameters, partitions, RLS, datasources, permissions, refresh
+  history) or workspace command (reports, lineage), with **breadcrumb** navigation back up. A
+  **Run DAX →** button jumps to the query tab with the drilled-into workspace/dataset filled in.
 - A **"Load default"** link appears when the server has a default workspace/dataset
   (`DAXTER_WORKSPACE`/`DAXTER_DATASET`) — one click fills them in.
 
