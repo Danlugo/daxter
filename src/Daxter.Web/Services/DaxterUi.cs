@@ -124,6 +124,12 @@ public sealed class DaxterUi
     public Task<QueryResult> RlsAsync(string ws, string ds, CancellationToken ct = default)
         => XmlaAsync(ws, ds, s => new ModelMetadataService(s).Roles(), ct);
 
+    public Task<QueryResult> McodeAsync(string ws, string ds, string table, CancellationToken ct = default)
+        => XmlaAsync(ws, ds, s => new ModelMetadataService(s).MCode(table), ct);
+
+    public Task<QueryResult> TablePartitionsAsync(string ws, string ds, string table, CancellationToken ct = default)
+        => XmlaAsync(ws, ds, s => new ModelMetadataService(s).Partitions(table), ct);
+
     public async Task<QueryResult> ReportsAsync(string ws, CancellationToken ct = default)
     {
         using var rest = new PowerBiRestClient(Provider(Config()));

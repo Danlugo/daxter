@@ -14,6 +14,9 @@ All notable changes to DAXter are documented here. The format follows
   command (tables, measures, parameters, partitions, RLS, datasources, permissions, refresh
   history) or workspace command (reports, lineage), with **breadcrumb** navigation back up. A
   **Run DAX →** button jumps to the query tab with the drilled-into workspace/dataset filled in.
+- Browse drill-down now extends to **tables**: **Tables** lists the model's tables as a clickable
+  list; clicking a table shows its **Power Query (M) code** (rendered as a formatted code block)
+  and its **partitions**, with a fourth breadcrumb level (`Workspaces › ws › ds › table`).
 - A **"Load default"** link appears when the server has a default workspace/dataset
   (`DAXTER_WORKSPACE`/`DAXTER_DATASET`) — one click fills them in.
 - **Editable Configure page** — change auth mode, tenant, default workspace/dataset, prod

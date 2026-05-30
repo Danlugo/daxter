@@ -41,6 +41,8 @@
         <textarea @bind="dax" rows="4" placeholder="EVALUATE TOPN(10, 'Table')"></textarea>
         <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">Run DAX</button>
     </div>
+    @if (busy) { <p class="muted">Running…</p> }
+    <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
 }
 else
 {
@@ -52,7 +54,13 @@ else
         }
         @if (!string.IsNullOrEmpty(dataset))
         {
-            <span>›</span><span class="crumb-current">@dataset</span>
+            <span>›</span>
+            @if (!string.IsNullOrEmpty(selTable)) { <button class="link" @onclick="BrowseDataset">@dataset</button> }
+            else { <span class="crumb-current">@dataset</span> }
+        }
+        @if (!string.IsNullOrEmpty(selTable))
+        {
+            <span>›</span><span class="crumb-current">@selTable</span>
         }
     </nav>
 
@@ -73,11 +81,16 @@ else
             <ClickableList Items="datasets" OnSelect="SelectDataset"
                            Empty="@(busy ? "Loading…" : "No datasets in this workspace.")" />
         }
+        else
+        {
+            @if (busy) { <p class="muted">Running…</p> }
+            <ResultGrid Result="result" Error="@error" />
+        }
     }
-    else
+    else if (string.IsNullOrEmpty(selTable))
     {
         <div class="cmd-group">
-            <button class="btn-sm" @onclick="ShowTables">Tables</button>
+            <button class="btn-sm @(modelView == ModelView.Tables ? "active" : "")" @onclick="BrowseTables">Tables</button>
             <button class="btn-sm" @onclick="ShowMeasures">Measures</button>
             <button class="btn-sm" @onclick="ShowParameters">Parameters</button>
             <button class="btn-sm" @onclick="ShowPartitions">Partitions</button>
@@ -87,25 +100,55 @@ else
             <button class="btn-sm" @onclick="ShowRefreshHistory">Refresh history</button>
             <button class="btn" @onclick="GoToQuery">Run DAX →</button>
         </div>
+        @if (modelView == ModelView.Tables)
+        {
+            <p class="muted">Click a table to see its M code &amp; partitions.</p>
+            <ClickableList Items="modelTables" OnSelect="SelectTable"
+                           Empty="@(busy ? "Loading…" : "No tables.")" />
+        }
+        else
+        {
+            @if (busy) { <p class="muted">Running…</p> }
+            <ResultGrid Result="result" Error="@error" Empty="Pick a command above." />
+        }
     }
-}
-
-@if (busy) { <p class="muted">Running…</p> }
-@if (ShowResultArea)
-{
-    <ResultGrid Result="result" Error="@error" Empty="Pick a command above." />
+    else
+    {
+        <div class="cmd-group">
+            <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
+            <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
+        </div>
+        @if (busy) { <p class="muted">Running…</p> }
+        else if (!string.IsNullOrEmpty(error)) { <p class="bad-text">@error</p> }
+        else if (tableView == TableView.Mcode && result is not null)
+        {
+            var mcode = SingleCell(result, "QueryDefinition");
+            if (string.IsNullOrEmpty(mcode)) { <p class="muted">No M code for this table (it may be a calculated or DirectQuery table).</p> }
+            else { <pre class="code">@mcode</pre> }
+        }
+        else
+        {
+            <ResultGrid Result="result" Error="@error" Empty="Loading…" />
+        }
+    }
 }
 
 @code {
     private enum Tab { Query, Browse }
     private enum WsView { Datasets, Reports, Lineage }
+    private enum ModelView { None, Tables }
+    private enum TableView { Mcode, Partitions }
 
     private Tab tab = Tab.Query;
     private WsView wsView = WsView.Datasets;
+    private ModelView modelView = ModelView.None;
+    private TableView tableView = TableView.Mcode;
 
     private List<string> workspaces = new();
     private List<string> datasets = new();
+    private List<string> modelTables = new();
     private string workspace = "", dataset = "", dax = "";
+    private string? selTable;
     private string? defaultWorkspace, defaultDataset;
     private QueryResult? result;
     private string? error;
@@ -113,12 +156,6 @@ else
 
     private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
     private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
-
-    // Result grid shows for: the DAX tab; or in Browse when a dataset/command or reports/lineage is active.
-    private bool ShowResultArea =>
-        tab == Tab.Query
-        || !string.IsNullOrEmpty(dataset)
-        || (!string.IsNullOrEmpty(workspace) && wsView != WsView.Datasets);
 
     protected override void OnInitialized()
     {
@@ -139,25 +176,30 @@ else
         if (workspaces.Count == 0) await LoadWorkspaces();
     }
 
-    private void BrowseRoot() { workspace = ""; dataset = ""; result = null; }
+    private void BrowseRoot() { workspace = ""; dataset = ""; selTable = null; result = null; }
 
     private async Task BrowseWorkspace()
     {
-        dataset = "";
-        wsView = WsView.Datasets;
-        result = null;
+        dataset = ""; selTable = null; wsView = WsView.Datasets; result = null;
         if (datasets.Count == 0 && !string.IsNullOrEmpty(workspace)) await OnWorkspaceChanged();
     }
 
+    private void BrowseDataset() { selTable = null; modelView = ModelView.None; result = null; }
+
     private async Task SelectWorkspace(string ws)
     {
-        workspace = ws;
-        wsView = WsView.Datasets;
-        await OnWorkspaceChanged();   // loads datasets, clears dataset + result handled below
+        workspace = ws; selTable = null; wsView = WsView.Datasets;
+        await OnWorkspaceChanged();
         result = null;
     }
 
-    private void SelectDataset(string ds) { dataset = ds; result = null; }
+    private void SelectDataset(string ds) { dataset = ds; selTable = null; modelView = ModelView.None; result = null; }
+
+    private async Task SelectTable(string t)
+    {
+        selTable = t;
+        await ShowMcode();   // show M code by default
+    }
 
     private void GoToQuery() => tab = Tab.Query;
 
@@ -179,8 +221,7 @@ else
 
     private async Task OnWorkspaceChanged()
     {
-        datasets = new();
-        dataset = "";
+        datasets = new(); dataset = ""; selTable = null;
         if (string.IsNullOrEmpty(workspace)) return;
         busy = true; error = null;
         try { datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name"); }
@@ -193,7 +234,15 @@ else
     private Task BrowseDatasets() { wsView = WsView.Datasets; result = null; return Task.CompletedTask; }
     private Task ShowReports() { wsView = WsView.Reports; return Show(() => Ui.ReportsAsync(workspace)); }
     private Task ShowLineage() { wsView = WsView.Lineage; return Show(() => Ui.LineageAsync(workspace)); }
-    private Task ShowTables() => Show(() => Ui.TablesAsync(workspace, dataset));
+
+    private async Task BrowseTables()
+    {
+        modelView = ModelView.Tables; result = null; error = null; busy = true; StateHasChanged();
+        try { modelTables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
     private Task ShowMeasures() => Show(() => Ui.MeasuresAsync(workspace, dataset));
     private Task ShowParameters() => Show(() => Ui.ParametersAsync(workspace, dataset));
     private Task ShowPartitions() => Show(() => Ui.PartitionsAsync(workspace, dataset));
@@ -203,12 +252,25 @@ else
     private Task ShowRefreshHistory() => Show(() => Ui.RefreshHistoryAsync(workspace, dataset));
     private Task RunQuery() => Show(() => Ui.QueryAsync(workspace, dataset, dax));
 
+    private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }
+    private Task ShowTablePartitions() { tableView = TableView.Partitions; return Show(() => Ui.TablePartitionsAsync(workspace, dataset, selTable!)); }
+
     private async Task Show(Func<Task<QueryResult>> op)
     {
+        modelView = ModelView.None;
         busy = true; error = null; result = null; StateHasChanged();
         try { result = await op(); }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
+    }
+
+    private static string? SingleCell(QueryResult r, string column)
+    {
+        if (r.Rows.Count == 0) return null;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase))
+                return r.Rows[0][i]?.ToString();
+        return null;
     }
 
     private static List<string> ColumnValues(QueryResult r, string column)
