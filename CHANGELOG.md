@@ -27,6 +27,8 @@ All notable changes to DAXter are documented here. The format follows
   `Sequence` with `maxParallelism: 1` (a plain refresh runs partitions in parallel).
   `MaintenanceService.BuildPartitionsRefresh` gained an optional `maxParallelism` and an
   explicit-partition-set overload.
+- **Explore → ↻ Refresh** now carries only the **workspace + dataset** to the Refresh page (you
+  pick the scope there); it no longer preselects a specific table.
 - **Jobs survive a redeploy.** The job list is persisted to `~/.daxter/jobs.json` on the mounted
   volume, so restarting/upgrading the container keeps the refresh history. Jobs that were
   queued or running when the container stopped are reconciled to **Interrupted** on load (a

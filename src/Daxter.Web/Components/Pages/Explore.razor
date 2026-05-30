@@ -160,7 +160,7 @@ else
         <div class="cmd-group">
             <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
             <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
-            <a class="btn-sm" href="@RefreshLink()" title="Refresh this table on the Refresh page">↻ Refresh…</a>
+            <a class="btn-sm" href="@RefreshLink()" title="Refresh this dataset on the Refresh page">↻ Refresh…</a>
         </div>
 
         @if (busy) { <p class="muted">Running…</p> }
@@ -406,8 +406,9 @@ else
     private Task ShowTablePartitions() { tableView = TableView.Partitions; return Show(() => Ui.TablePartitionsAsync(workspace, dataset, selTable!)); }
 
     // Deep-link to the dedicated Refresh page with this table preselected.
+    // Refresh links only carry workspace + dataset; the user picks the scope on the Refresh page.
     private string RefreshLink()
-        => $"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}&table={Uri.EscapeDataString(selTable ?? "")}";
+        => $"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}";
 
     private async Task Show(Func<Task<QueryResult>> op)
     {
