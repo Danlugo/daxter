@@ -8,19 +8,20 @@
 
 <div class="row">
     <div>
-        <label>Workspace</label>
-        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
-            <option value="">— pick —</option>
-            @foreach (var w in workspaces) { <option value="@w">@w</option> }
-        </select>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <input class="combo" list="ws-list" @bind="workspace" @bind:after="OnWorkspaceChanged"
+               placeholder="type to search…" autocomplete="off" />
+        <datalist id="ws-list">
+            @foreach (var w in workspaces) { <option value="@w"></option> }
+        </datalist>
         <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
     </div>
     <div>
-        <label>Dataset</label>
-        <select @bind="dataset">
-            <option value="">— pick —</option>
-            @foreach (var d in datasets) { <option value="@d">@d</option> }
-        </select>
+        <label>Dataset <span class="muted">(@datasets.Count)</span></label>
+        <input class="combo" list="ds-list" @bind="dataset" placeholder="type to search…" autocomplete="off" />
+        <datalist id="ds-list">
+            @foreach (var d in datasets) { <option value="@d"></option> }
+        </datalist>
     </div>
 </div>
 
