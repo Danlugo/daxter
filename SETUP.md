@@ -4,6 +4,15 @@ Goal: get the **`daxter` MCP server** working in **Claude Desktop** on a fresh m
 This guide is written so a **Claude agent can follow it top to bottom** (it can run the
 shell commands and edit the config file), or a person can do it manually.
 
+> **Install agent — the flow in one line:** run the Docker/config commands in steps 1–4
+> automatically, **then hand off to the user twice** (these are the only things you can't do
+> for them):
+> 1. **After you start the web console in step 4**, tell the user to open
+>    **<http://localhost:8080> → Status → Sign in** and complete the browser sign-in —
+>    **then wait for them to confirm** they're signed in before continuing.
+> 2. **In step 5, tell the user to fully quit & reopen Claude Desktop** — the `daxter` tools
+>    only load on that restart, so this is the last step that makes the MCP side work.
+
 > Replace `<...>` placeholders with real values. The image carries **no credentials** —
 > you supply them at runtime via `.env`.
 
@@ -211,6 +220,9 @@ docker run -d -p 8080:8080 --restart unless-stopped --env-file "$HOME/daxter.env
 **Sign in**. A Microsoft page opens with a **clickable link and a copyable code** — click the
 link, paste the code, and sign in with your account. The page updates itself when you're done.
 
+> **Agent:** after running the command above, tell the user to do this now, and **wait for them
+> to confirm they're signed in** before moving to step 5 — don't report success until they have.
+
 Your sign-in is cached on the shared `daxter-tokens` volume, so **Claude Desktop's `daxter`
 server will reuse it automatically** — you only sign in once.
 
@@ -219,6 +231,9 @@ server will reuse it automatically** — you only sign in once.
 > **Before restarting, if you set any values (tenant id, or service-principal creds), make sure
 > they're real — not `<...>` placeholders.** A malformed/empty tenant id makes every tool call
 > fail with `The authority (including the tenant ID) must be in a well-formed URI format`.
+
+> **Agent:** you can't do this part — tell the user it's the final step and ask them to fully
+> quit & reopen Claude Desktop now (the `daxter` tools won't appear until they do).
 
 **Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray icon →
 Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config and launches
