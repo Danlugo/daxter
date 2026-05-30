@@ -36,7 +36,7 @@
 </div>
 
 @if (busy) { <p class="muted">Running…</p> }
-<ResultGrid Result="result" Error="error" Empty="Load workspaces, pick a model, then run a command." />
+<ResultGrid Result="result" Error="@error" Empty="Load workspaces, pick a model, then run a command." />
 
 @code {
     private List<string> workspaces = new();
