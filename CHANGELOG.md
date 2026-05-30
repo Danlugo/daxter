@@ -6,6 +6,14 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [1.6.3] - 2026-05-29
 
+### Added
+- **Logs page** in the web console — recent console activity in-app: every operation with its
+  row count and timing (e.g. `datasets [Data Hub] → 94 rows in 887 ms`), sign-in, health checks,
+  and errors. Level filter (All / Information+ / Warning+ / Error), auto-refresh (2 s), and
+  Clear. Backed by a bounded in-memory `LogSink` (last 1000 entries, `DAXTER_LOG_BUFFER` to
+  change) fed by an `ILogger` provider, so the same lines also go to the container console
+  (`docker logs`). `DaxterUi` now logs each operation's start/result/failure.
+
 ### Fixed
 - **Device-code sign-in no longer fails with `AADSTS7000218 / invalid_client`.** When an env had a
   service-principal `DAXTER_CLIENT_ID` (+secret) *and* used device-code auth (the default), the

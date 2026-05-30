@@ -7,6 +7,11 @@ builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddSingleton<ConfigState>();
 builder.Services.AddScoped<DaxterUi>();
 
+// Capture app logs into an in-memory buffer the Logs page reads (in addition to the console).
+var logSink = new LogSink();
+builder.Services.AddSingleton(logSink);
+builder.Logging.AddProvider(new LogSinkLoggerProvider(logSink));
+
 // Default to all interfaces on 8080 inside the container (override with --urls / ASPNETCORE_URLS).
 if (string.IsNullOrEmpty(builder.Configuration["urls"]) &&
     string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))

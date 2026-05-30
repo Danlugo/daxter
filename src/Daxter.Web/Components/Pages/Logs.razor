@@ -1,0 +1,96 @@
+@page "/logs"
+@using Microsoft.Extensions.Logging
+@inject LogSink Sink
+@implements IDisposable
+
+<PageTitle>DAXter — Logs</PageTitle>
+
+<h1>Logs</h1>
+<p class="muted">
+    Recent activity from this console — operations (with row counts and timing), sign-in, and
+    errors. In-memory only (last @Sink.Capacity entries); cleared on restart. Also written to the
+    container console (<code>docker logs</code>).
+</p>
+
+<div class="cmd-group">
+    <label class="inline">Level
+        <select @bind="minLevel" @bind:after="Refresh">
+            <option value="@LogLevel.Trace">All</option>
+            <option value="@LogLevel.Information">Information+</option>
+            <option value="@LogLevel.Warning">Warning+</option>
+            <option value="@LogLevel.Error">Error only</option>
+        </select>
+    </label>
+    <label class="inline"><input type="checkbox" @bind="auto" @bind:after="ToggleAuto" /> Auto-refresh (2s)</label>
+    <button class="btn-sm" @onclick="Refresh">Refresh</button>
+    <button class="btn-sm" @onclick="ClearLog">Clear</button>
+    <span class="muted">@entries.Count shown</span>
+</div>
+
+@if (entries.Count == 0)
+{
+    <p class="muted">No log entries yet. Run a health check or a command on the Explore page.</p>
+}
+else
+{
+    <div class="grid-wrap">
+        <table class="grid logs">
+            <thead>
+                <tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var e in entries)
+                {
+                    <tr class="lvl-@e.Level">
+                        <td class="nowrap">@e.Time.ToString("HH:mm:ss.fff")</td>
+                        <td><span class="badge badge-@e.Level">@e.Level</span></td>
+                        <td class="nowrap">@e.Category</td>
+                        <td class="msg">@e.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private LogLevel minLevel = LogLevel.Information;
+    private bool auto;
+    private Timer? timer;
+    private long lastVersion = -1;
+    private IReadOnlyList<LogEntry> entries = Array.Empty<LogEntry>();
+
+    protected override void OnInitialized() => Refresh();
+
+    private void Refresh()
+    {
+        entries = Sink.Snapshot(minLevel);
+        lastVersion = Sink.Version;
+    }
+
+    private void ClearLog()
+    {
+        Sink.Clear();
+        Refresh();
+    }
+
+    private void ToggleAuto()
+    {
+        timer?.Dispose();
+        timer = null;
+        if (auto)
+        {
+            timer = new Timer(_ => InvokeAsync(() =>
+            {
+                // Only re-render when something actually changed.
+                if (Sink.Version != lastVersion)
+                {
+                    Refresh();
+                    StateHasChanged();
+                }
+            }), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        }
+    }
+
+    public void Dispose() => timer?.Dispose();
+}
