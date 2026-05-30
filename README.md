@@ -30,135 +30,10 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
-## Demo — every feature
+## Examples
 
-All commands accept connection options (`--workspace`, `--dataset`, `--env`, `--auth`,
-`--tenant`, `--client-id`) or read them from `.env`. Results print to **stdout**; status
-and prompts go to **stderr**, so output pipes cleanly.
-
-### Authenticate
-
-```console
-# Interactive (device code) — token is cached, so you sign in once:
-$ ./bin/daxter login
-To sign in, open https://microsoft.com/devicelogin and enter code F7X2K9Q20.
-Signed in. Token valid until 2026-05-29 23:10:00Z.
-
-# Or non-interactive (service principal) via .env:
-#   DAXTER_AUTH_MODE=service-principal
-#   DAXTER_TENANT_ID / DAXTER_CLIENT_ID / DAXTER_CLIENT_SECRET
-```
-
-### Query — DAX / MDX (`query`)
-
-```console
-$ ./bin/daxter query "EVALUATE TOPN(3, Product)"          # table (default)
-╭───────────┬─────────────╮
-│ ProductId │ ProductName │
-├───────────┼─────────────┤
-│ 1         │ Widget      │
-│ 2         │ Gadget      │
-│ 3         │ Gizmo       │
-╰───────────┴─────────────╯
-(3 rows)
-
-$ ./bin/daxter query "EVALUATE Product" -o csv > products.csv   # CSV to a file
-$ ./bin/daxter query "EVALUATE Product" -o json                 # JSON
-$ ./bin/daxter query -f monthly_sales.dax                       # query from a file
-```
-
-### DMV & schema (`dmv`, `ls`)
-
-```console
-$ ./bin/daxter ls                                  # tables in the model
-$ ./bin/daxter dmv 'SELECT [CATALOG_NAME] FROM $SYSTEM.DBSCHEMA_CATALOGS'   # datasets in workspace
-$ ./bin/daxter dmv 'SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLES'          # VertiPaq storage
-```
-
-### Model metadata (`model …`)
-
-```console
-$ ./bin/daxter model measures                      # all measures (name, type, folder)
-$ ./bin/daxter model measures --with-expr -o csv   # include the DAX expression
-$ ./bin/daxter model measure "Total Sales"         # one measure, full definition
-$ ./bin/daxter model mcode --table Sales           # Power Query (M) per partition
-$ ./bin/daxter model parameters                    # shared M expressions / parameters
-$ ./bin/daxter model partitions --table Sales      # partitions + last-refresh times
-$ ./bin/daxter model rls                            # RLS roles
-$ ./bin/daxter model rls --role "Regional Manager" # a role's table filters + members
-```
-
-```console
-$ ./bin/daxter model partitions --table Sales
-╭──────────┬───────┬──────┬─────────────────────╮
-│ Name     │ State │ Mode │ RefreshedTime       │
-├──────────┼───────┼──────┼─────────────────────┤
-│ 2026Q1   │ 3     │ 0    │ 2026-05-29 17:57:59 │
-│ 2026Q2   │ 1     │ 0    │ 2026-05-29 17:42:50 │
-╰──────────┴───────┴──────┴─────────────────────╯
-(2 rows)
-```
-
-### Environments (`env`, `--env`)
-
-```console
-$ ./bin/daxter env ls                              # configured profiles (* = active)
-* dev
-  qa
-  prod
-$ ./bin/daxter model measures --env qa             # same command, QA workspace
-```
-
-### Maintenance / Ops (`refresh`, `cache`)
-
-```console
-$ ./bin/daxter refresh history --top 5                # recent refreshes (REST)
-$ ./bin/daxter refresh model --dry-run                # preview the TMSL, run nothing
-$ ./bin/daxter refresh partitions --table Sales --order newest-first --yes
-$ ./bin/daxter refresh trigger --yes                  # REST refresh (no XMLA write needed)
-$ ./bin/daxter cache clear --yes                      # XMLA ClearCache
-```
-
-Mutating ops require `--yes`, support `--dry-run`, and refuse PROD-looking targets
-without `--force`.
-
-### Workspace inventory (`ws` — REST)
-
-```console
-$ ./bin/daxter ws ls                                  # workspaces + group ids
-$ ./bin/daxter ws datasets                            # datasets in the workspace
-$ ./bin/daxter ws reports                             # reports
-$ ./bin/daxter ws lineage                             # report → dataset
-$ ./bin/daxter ws permissions --dataset 'Sales'       # who has access (or workspace-wide)
-$ ./bin/daxter ws datasources --dataset 'Sales'       # data sources
-$ ./bin/daxter ws gateways                             # gateways
-```
-
-### Export, diff & RLS testing
-
-```console
-$ ./bin/daxter model export --out model.bim           # save-as .bim (TOM)
-$ ./bin/daxter model diff 'Sales (Prod)'              # measure differences vs another model
-$ ./bin/daxter test-rls --role 'Manager' --user u@x.com   # query under an identity
-```
-
-### Deployment pipelines (`pipeline`)
-
-```console
-$ ./bin/daxter pipeline ls                             # deployment pipelines
-$ ./bin/daxter pipeline stages --pipeline <id>         # dev/test/prod → workspace
-$ ./bin/daxter pipeline operations --pipeline <id>     # deployment history
-```
-
-### Output formats & piping
-
-```console
-$ ./bin/daxter query "EVALUATE Product" -o json | jq '.[].ProductName'
-$ ./bin/daxter model measures --with-expr -o csv > measures.csv
-```
-
-`-o` / `--output` accepts `table` (default), `csv`, or `json` on every query/metadata
-command.
+- **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
+- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 25 tools (query, metadata, inventory, gateways, datasources, pipelines, RLS testing, refresh, …).
 
 ## Why a container
 
@@ -248,52 +123,25 @@ cp .env.example .env
 
 The `bin/daxter` wrapper runs the image with the token cache volume, mounts the current
 directory at `/work` (so `-f file.dax` works), loads `./.env`, and attaches a TTY when
-interactive.
+interactive:
 
 ```bash
-./bin/daxter login                                   # interactive sign-in (device code)
-./bin/daxter query 'EVALUATE TOPN(10, Sales)'        # DAX → table
-./bin/daxter query 'EVALUATE Sales' -o csv > out.csv # CSV
-./bin/daxter query -f report.dax -o json             # query from a file → JSON
-./bin/daxter dmv 'SELECT * FROM $SYSTEM.TMSCHEMA_MEASURES'
-./bin/daxter ls                                      # list tables in the model
+./bin/daxter query 'EVALUATE TOPN(10, Sales)'     # DAX → table
+./bin/daxter model measures --with-expr -o csv    # metadata → CSV
+./bin/daxter ws gateways                          # inventory via REST
 ```
 
-### Model metadata
+Or without the wrapper:
 
 ```bash
-./bin/daxter model measures --with-expr -o csv       # measures + DAX expressions
-./bin/daxter model measure 'Total Sales'             # one measure's full definition
-./bin/daxter model mcode --table 'Sales'      # Power Query (M) for a table
-./bin/daxter model parameters                        # shared M expressions / parameters
-./bin/daxter model partitions --table 'Sales' # partitions + last-refresh times
-./bin/daxter model rls                               # RLS roles
-./bin/daxter model rls --role 'Manager'              # a role's table filters + members
-```
-
-### Environments (one SP, workspace per env)
-
-Define `DAXTER_WORKSPACE_<ENV>` (and optionally `DAXTER_DATASET_<ENV>`) in `.env`, then:
-
-```bash
-./bin/daxter env ls                                  # list profiles (* = active)
-./bin/daxter model measures --env qa                 # run against the QA workspace
-```
-
-`--env <name>` (or `DAXTER_ENV`) selects the per-env workspace/dataset; `--workspace`
-still overrides everything.
-
-Results go to **stdout**; status, prompts, and errors go to **stderr** — so you can pipe
-results cleanly. Output formats: `table` (default), `csv`, `json`.
-
-### Without the wrapper
-
-```bash
-docker run --rm -it \
-  -v daxter-tokens:/home/daxter/.daxter \
-  --env-file .env \
+docker run --rm --env-file .env -v daxter-tokens:/home/daxter/.daxter \
   daxter:latest query 'EVALUATE ROW("ok", 1)'
 ```
+
+Results go to **stdout**, status to **stderr**; `-o` is `table` (default), `csv`, or `json`.
+**See [`examples/cli.md`](examples/cli.md) for every command** (query, model, refresh,
+workspace inventory, RLS testing, pipelines), and [`examples/mcp.md`](examples/mcp.md) for
+the MCP tools.
 
 ## Authentication
 
@@ -350,6 +198,8 @@ a headless server). The MCP tools are at **full parity with the CLI** — 23 rea
   `daxter_pipeline_stages`, `daxter_pipeline_operations`
 
 Each accepts optional `workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
+**See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
+the gateways", datasources, pipelines, RLS testing).
 
 Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
 default** — they only execute when `execute=true` **and** the server sets
