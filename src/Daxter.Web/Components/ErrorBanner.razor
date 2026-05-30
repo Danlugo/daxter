@@ -1,0 +1,33 @@
+@* Renders an operation error. Auth/sign-in errors get a friendly message + a link to the
+   Status page so the user can re-sign in (the raw message is MCP-flavored and not actionable
+   in the web console). *@
+@if (!string.IsNullOrEmpty(Message))
+{
+    @if (IsAuthError)
+    {
+        <div class="card bad">
+            <p class="bad-text"><strong>You're not signed in to Power BI.</strong></p>
+            <p class="muted">Your session ended — this can happen after changing the configuration.</p>
+            <a class="btn" href="/">Go to Status to sign in →</a>
+            <details>
+                <summary class="muted">Details</summary>
+                <pre class="code">@Message</pre>
+            </details>
+        </div>
+    }
+    else
+    {
+        <p class="bad-text">@Message</p>
+    }
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+
+    private bool IsAuthError => Message is not null && (
+        Message.Contains("Not signed in", StringComparison.OrdinalIgnoreCase)
+        || Message.Contains("Authentication failed", StringComparison.OrdinalIgnoreCase)
+        || Message.Contains("Sign-in failed", StringComparison.OrdinalIgnoreCase)
+        || Message.Contains("daxter_login", StringComparison.OrdinalIgnoreCase)
+        || Message.Contains("AADSTS", StringComparison.OrdinalIgnoreCase));
+}

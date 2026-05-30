@@ -6,6 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [1.6.3] - 2026-05-29
 
+### Fixed
+- **Web sign-in now completes reliably.** The device-code flow returned the code but swallowed
+  the background result, so after you entered the code on the page **nothing happened** (and a
+  failed sign-in was invisible). The Status page now **awaits sign-in completion**, auto
+  re-checks health when you finish authenticating, and **shows the reason** if sign-in fails.
+  `MsalTokenProvider.StartDeviceLoginAsync` returns a `DeviceLogin(Message, Completion)`.
+- **Auth errors are now actionable.** When an operation fails because the session ended (e.g.
+  after changing the configuration), the error renders a friendly banner with a **link to the
+  Status page** to sign in again — instead of the raw MCP-flavored "use the daxter_login tool"
+  text. New shared `ErrorBanner` component, used by the result grid and the Browse explorer.
+
 ### Added
 - Explore page: the **Workspace and Dataset pickers are now searchable** (type-to-filter via
   an input + `<datalist>`), which matters with ~dozens of workspaces.

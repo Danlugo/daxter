@@ -50,6 +50,10 @@ h1 { font-size:1.5rem; } h3 { margin-top:1.5rem; }
 .checks li.ok .dot { background:var(--ok); } .checks li.bad .dot { background:var(--bad); }
 .checks li.bad { color:var(--bad); }
 .card { border:1px solid var(--line); border-radius:8px; padding:1rem; margin-top:1rem; max-width:640px; }
+.card.bad { border-color:var(--bad); background:#fff5f5; }
+.card details { margin-top:.6rem; }
+.card details summary { cursor:pointer; }
+a.btn { display:inline-block; text-decoration:none; }
 .code { background:#f6f8fa; border:1px solid var(--line); border-radius:6px; padding:.8rem; overflow:auto; white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem; }
 .row { display:flex; gap:1.5rem; flex-wrap:wrap; margin:1rem 0; }
 .row label, .form label { display:block; font-size:.85rem; color:#656d76; margin-bottom:.2rem; }

@@ -5,6 +5,13 @@ using Microsoft.Identity.Client.Extensions.Msal;
 namespace Daxter.Core.Auth;
 
 /// <summary>
+/// A started device-code sign-in: the <paramref name="Message"/> (URL + code) to show the user,
+/// and a <paramref name="Completion"/> task that completes once they authenticate (token cached)
+/// or faults with the failure reason.
+/// </summary>
+public sealed record DeviceLogin(string Message, Task Completion);
+
+/// <summary>
 /// Acquires Power BI XMLA tokens via MSAL. Supports the device-code flow
 /// (interactive, with a persisted token cache so you sign in once) and the
 /// client-credentials flow (service principal). This is the Mac-supported path:
@@ -115,6 +122,16 @@ public sealed class MsalTokenProvider : ITokenProvider
     /// without the call blocking. Returns "Already signed in." if a cached token is valid.
     /// </summary>
     public async Task<string> BeginInteractiveLoginAsync(CancellationToken cancellationToken = default)
+        => (await StartDeviceLoginAsync(cancellationToken)).Message;
+
+    /// <summary>
+    /// Starts the device-code flow and returns both the sign-in <see cref="DeviceLogin.Message"/>
+    /// (URL + code, available immediately) and a <see cref="DeviceLogin.Completion"/> task that
+    /// finishes when the user has authenticated (the token is then cached) or faults with the
+    /// reason sign-in failed. Lets a UI show the code, then await completion to auto-refresh or
+    /// surface the failure — instead of silently swallowing background errors.
+    /// </summary>
+    public async Task<DeviceLogin> StartDeviceLoginAsync(CancellationToken cancellationToken = default)
     {
         if (_config.AuthMode == AuthMode.ServicePrincipal)
         {
@@ -129,7 +146,7 @@ public sealed class MsalTokenProvider : ITokenProvider
             try
             {
                 await app.AcquireTokenSilent(Scopes, account).ExecuteAsync(cancellationToken);
-                return "Already signed in.";
+                return new DeviceLogin("Already signed in.", Task.CompletedTask);
             }
             catch (MsalUiRequiredException)
             {
@@ -138,7 +155,7 @@ public sealed class MsalTokenProvider : ITokenProvider
         }
 
         var messageReady = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = Task.Run(async () =>
+        var completion = Task.Run(async () =>
         {
             try
             {
@@ -148,13 +165,21 @@ public sealed class MsalTokenProvider : ITokenProvider
                     return Task.CompletedTask;
                 }).ExecuteAsync(CancellationToken.None);
             }
+            catch (MsalException ex)
+            {
+                var wrapped = new DaxterException($"Sign-in failed ({ex.ErrorCode}): {ex.Message}", ex);
+                messageReady.TrySetException(wrapped);
+                throw wrapped;
+            }
             catch (Exception ex)
             {
                 messageReady.TrySetException(ex);
+                throw;
             }
         }, CancellationToken.None);
 
-        return await messageReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        var message = await messageReady.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        return new DeviceLogin(message, completion);
     }
 
     private async Task<IPublicClientApplication> BuildUserAppAsync()

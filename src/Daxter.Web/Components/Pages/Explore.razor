@@ -66,6 +66,7 @@ else
 
     @if (string.IsNullOrEmpty(workspace))
     {
+        <ErrorBanner Message="@error" />
         <ClickableList Items="workspaces" OnSelect="SelectWorkspace"
                        Empty="@(busy ? "Loading…" : "No workspaces — click Load.")" />
     }
@@ -78,6 +79,7 @@ else
         </div>
         @if (wsView == WsView.Datasets)
         {
+            <ErrorBanner Message="@error" />
             <ClickableList Items="datasets" OnSelect="SelectDataset"
                            Empty="@(busy ? "Loading…" : "No datasets in this workspace.")" />
         }
@@ -102,6 +104,7 @@ else
         </div>
         @if (modelView == ModelView.Tables)
         {
+            <ErrorBanner Message="@error" />
             <p class="muted">Click a table to see its M code &amp; partitions.</p>
             <ClickableList Items="modelTables" OnSelect="SelectTable"
                            Empty="@(busy ? "Loading…" : "No tables.")" />
@@ -119,7 +122,7 @@ else
             <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
         </div>
         @if (busy) { <p class="muted">Running…</p> }
-        else if (!string.IsNullOrEmpty(error)) { <p class="bad-text">@error</p> }
+        else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
         else if (tableView == TableView.Mcode && result is not null)
         {
             var mcode = SingleCell(result, "QueryDefinition");

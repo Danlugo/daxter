@@ -81,9 +81,12 @@ public sealed class DaxterUi
         return checks;
     }
 
-    /// <summary>Starts device-code sign-in; returns the URL + code to display.</summary>
-    public Task<string> BeginLoginAsync(CancellationToken ct = default)
-        => new MsalTokenProvider(Config(), deviceCodePrompt: Console.Error.WriteLine).BeginInteractiveLoginAsync(ct);
+    /// <summary>
+    /// Starts device-code sign-in; returns the URL + code to display <b>and</b> a completion task
+    /// that finishes when the user has authenticated (or faults with the reason it failed).
+    /// </summary>
+    public Task<DeviceLogin> BeginLoginAsync(CancellationToken ct = default)
+        => new MsalTokenProvider(Config(), deviceCodePrompt: Console.Error.WriteLine).StartDeviceLoginAsync(ct);
 
     public async Task<QueryResult> WorkspacesAsync(CancellationToken ct = default)
     {

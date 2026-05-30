@@ -2,7 +2,7 @@
 
 @if (Error is not null)
 {
-    <p class="bad-text">@Error</p>
+    <ErrorBanner Message="@Error" />
 }
 else if (Result is null)
 {
