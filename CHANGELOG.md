@@ -13,6 +13,8 @@ All notable changes to DAXter are documented here. The format follows
   (datasets, reports, lineage) and model commands (tables, measures, parameters, partitions,
   RLS, datasources, permissions, refresh history); a **Run DAX →** button jumps to the query
   tab with the selected workspace/dataset already filled in.
+- A **"Load default"** link appears when the server has a default workspace/dataset
+  (`DAXTER_WORKSPACE`/`DAXTER_DATASET`) — one click fills them in.
 
 ## [1.6.2] - 2026-05-29
 

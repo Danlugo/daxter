@@ -71,3 +71,5 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 .tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
 .cmd-group { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin:.6rem 0; }
 .cmd-group .cmd-label { font-size:.8rem; color:#656d76; text-transform:uppercase; letter-spacing:.04em; width:80px; }
+.link { background:none; border:0; color:var(--accent); cursor:pointer; text-decoration:underline; padding:0; font:inherit; }
+.link:disabled { opacity:.6; cursor:default; }

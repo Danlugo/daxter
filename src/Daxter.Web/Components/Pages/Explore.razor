@@ -21,6 +21,15 @@
     </div>
 </div>
 
+@if (!string.IsNullOrEmpty(defaultWorkspace))
+{
+    <p>
+        <button class="link" @onclick="LoadDefault" disabled="@busy">
+            ⤓ Load default: @defaultWorkspace@(string.IsNullOrEmpty(defaultDataset) ? "" : " / " + defaultDataset)
+        </button>
+    </p>
+}
+
 <div class="tabs">
     <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="@(() => tab = Tab.Query)">DAX query</button>
     <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="@(() => tab = Tab.Browse)">Browse</button>
@@ -65,12 +74,32 @@ else
     private List<string> workspaces = new();
     private List<string> datasets = new();
     private string workspace = "", dataset = "", dax = "";
+    private string? defaultWorkspace, defaultDataset;
     private QueryResult? result;
     private string? error;
     private bool busy;
 
     private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
     private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            var cfg = Ui.Config();
+            defaultWorkspace = string.IsNullOrWhiteSpace(cfg.Workspace) ? null : cfg.Workspace;
+            defaultDataset = cfg.Dataset;
+        }
+        catch { /* no default configured */ }
+    }
+
+    private async Task LoadDefault()
+    {
+        if (string.IsNullOrEmpty(defaultWorkspace)) return;
+        workspace = defaultWorkspace;
+        await OnWorkspaceChanged();                 // loads datasets, clears dataset
+        if (!string.IsNullOrEmpty(defaultDataset)) dataset = defaultDataset!;
+    }
 
     private void GoToQuery() => tab = Tab.Query;
 
