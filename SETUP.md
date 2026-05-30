@@ -78,6 +78,8 @@ DAXTER_AUTH_MODE=device-code
 # Replace <tenant-guid> with your REAL tenant GUID (Entra admin center -> Overview,
 # or the GUID in your Power BI URL). Do NOT leave the <...> placeholder: an unreplaced
 # value makes every tool fail with "...must be in a well-formed URI format".
+# Don't have it handy? Comment this line out (#) to use the default authority — you can
+# add it later if sign-in resolves the wrong org or fails.
 DAXTER_TENANT_ID=<tenant-guid>
 # Optional defaults (or just name a workspace in chat):
 # DAXTER_WORKSPACE=<workspace name>
@@ -267,8 +269,9 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 ## Agent checklist
 
 - [ ] Docker daemon running — `docker info` succeeds (step 1) **before** any pull/run
-- [ ] env file created (device-code: just `DAXTER_AUTH_MODE=device-code` + optional tenant id),
-      any set values are real (GUID tenant id, no `<>`/quotes/spaces), edited in a normal editor
+- [ ] env file created (device-code: `DAXTER_AUTH_MODE=device-code` + recommended tenant id —
+      or comment it out), any set values are real (GUID tenant id, no `<>`/quotes/spaces),
+      edited in a normal editor
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
 - [ ] Claude Desktop **fully** quit & reopened (image auto-pulls from public GHCR on first run)
 - [ ] **Web console started** (`docker run -d -p 8080:8080 … web`) and the user pointed to
