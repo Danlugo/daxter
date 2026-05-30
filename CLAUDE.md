@@ -23,6 +23,23 @@ Power BI from macOS/Linux (interactive ADOMD login is Windows-only).
 - **Mutations are gated:** CLI `--dry-run`/`--yes`/`--force`; MCP writes need
   `DAXTER_MCP_ALLOW_WRITES=true` and refuse prod. Keep it that way.
 
+## Skills (`.claude/skills/`)
+
+Recurring workflows are packaged as composable skills. Use them instead of improvising:
+
+| Skill | When | Notes |
+|-------|------|-------|
+| `daxter-conventions` | reference (auto) | layering, bridge, store pattern, Razor gotchas — `user-invocable: false` |
+| `daxter-build-verify` | after any change | runs `scripts/build-verify.sh` (test gate) |
+| `daxter-deploy` | "rebuild & restart" / "release it" | `disable-model-invocation: true`; `rebuild-restart.sh`, `release.sh` |
+| `daxter-new-feature` | add new functionality | composes conventions + build-verify |
+| `daxter-update` | change existing behavior | refactor-to-Core when shared |
+| `daxter-fix` | something's broken | starts from the Blazor-gotcha checklist |
+| `daxter-ui` | layout/visual change | card/sidebar/Frequent patterns |
+| `daxter-capability` | expose in CLI + MCP + Web | one Core method, three surfaces |
+
+The deterministic build/restart/release commands live in scripts (same result, no token cost).
+
 ## Build / test / run (containers)
 
 ```bash

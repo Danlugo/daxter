@@ -5,6 +5,8 @@
 @inject JobService Jobs
 @inject NavigationManager Nav
 @inject QueryHistoryStore Hist
+@inject AuditHistoryStore AuditHist
+@inject Daxter.Core.Audit.SavedAuditCheckStore SavedStore
 @inject ExploreActions Actions
 
 <header class="topbar">
@@ -12,20 +14,31 @@
     <nav>
         <NavLink href="" Match="NavLinkMatch.All">Status</NavLink>
         <NavLink href="explore">Explore</NavLink>
+        <NavLink href="query">DAX Query</NavLink>
         <NavLink href="refresh">Refresh</NavLink>
-        <NavLink href="configure">Configure</NavLink>
         <NavLink href="jobs">@(Jobs.ActiveCount > 0 ? $"Jobs ({Jobs.ActiveCount})" : "Jobs")</NavLink>
+        <NavLink href="gateways">Gateways</NavLink>
+        <NavLink href="pipelines">Pipelines</NavLink>
+        <NavLink href="audit">Audit</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
+    <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
+            title="@(OnConfigure ? "Close settings — back to previous view" : "Settings — auth mode, default workspace/dataset, prod workspaces")"
+            aria-label="Settings" aria-pressed="@OnConfigure">⚙</button>
 </header>
 
 <div class="shell">
     <aside class="sidebar">
-        <div class="side-title">Frequent@(context is null ? "" : context == UsageStore.RefreshContext ? " · Refresh" : " · Explore")</div>
+        <div class="side-title">Frequent@(context switch {
+            UsageStore.RefreshContext => " · Refresh",
+            UsageStore.PipelineContext => " · Pipelines",
+            UsageStore.AuditContext => " · Audit",
+            UsageStore.ExploreContext => " · Explore",
+            _ => "" })</div>
 
         @if (context is null)
         {
-            <p class="side-empty">Open <a href="explore">Explore</a> or <a href="refresh">Refresh</a> — each page keeps its own most-used shortcuts.</p>
+            <p class="side-empty">Open <a href="explore">Explore</a>, <a href="refresh">Refresh</a>, <a href="pipelines">Pipelines</a>, or <a href="audit">Audit</a> — each page keeps its own most-used shortcuts.</p>
         }
         else if (wsTop.Count == 0 && dsTop.Count == 0 && tblTop.Count == 0)
         {
@@ -48,13 +61,33 @@
         @if (dsTop.Count > 0)
         {
             <div class="side-group">
-                <div class="side-h">Datasets</div>
+                <div class="side-h">@(context switch {
+                    UsageStore.PipelineContext => "Models",
+                    UsageStore.AuditContext => "Pipelines",
+                    _ => "Datasets" })</div>
                 @foreach (var d in dsTop)
                 {
-                    <a class="side-item" href="@DsLink(d)" title="@($"{d.Name} — in workspace “{d.Parent}”")">
-                        <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@d.Parent</small></span>
-                        <span class="side-count">@d.Count</span>
-                    </a>
+                    @if (context == UsageStore.PipelineContext)
+                    {
+                        <a class="side-item" href="@($"pipelines?model={Uri.EscapeDataString(d.Name)}")" title="@($"{d.Name} — check deployment rules")">
+                            <span class="side-name"><span class="nm">@d.Name</span></span>
+                            <span class="side-count">@d.Count</span>
+                        </a>
+                    }
+                    else if (context == UsageStore.AuditContext)
+                    {
+                        <a class="side-item" href="@($"audit?pipeline={Uri.EscapeDataString(d.Parent ?? "")}")" title="@d.Name">
+                            <span class="side-name"><span class="nm">@d.Name</span></span>
+                            <span class="side-count">@d.Count</span>
+                        </a>
+                    }
+                    else
+                    {
+                        <a class="side-item" href="@DsLink(d)" title="@($"{d.Name} — in workspace “{d.Parent}”")">
+                            <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@d.Parent</small></span>
+                            <span class="side-count">@d.Count</span>
+                        </a>
+                    }
                 }
             </div>
         }
@@ -69,6 +102,54 @@
                         <span class="side-name"><span class="nm">@t.Name</span><small class="side-sub">@TblDs(t)</small></span>
                         <span class="side-count">@t.Count</span>
                     </a>
+                }
+            </div>
+        }
+
+        @if (measTop.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Measures</div>
+                @foreach (var m in measTop)
+                {
+                    <a class="side-item" href="@MeasLink(m)" title="@MeasTitle(m)">
+                        <span class="side-name"><span class="nm">[@m.Name]</span><small class="side-sub">@TblDs(m)</small></span>
+                        <span class="side-count">@m.Count</span>
+                    </a>
+                }
+            </div>
+        }
+
+        @if (context == UsageStore.AuditContext && savedChecks.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Saved checks</div>
+                @foreach (var c in savedChecks)
+                {
+                    <div class="side-recent">
+                        <a class="side-qrun" href="@SavedCheckHref(c)" title="@SavedCheckTitle(c)">
+                            <span class="nm">★ @c.Name</span>
+                            <small class="side-sub">@c.Param @(c.NotEquals ? "≠" : "=") @c.Value · @c.Stage</small>
+                        </a>
+                        <button class="side-qdel" @onclick="() => RemoveSavedCheck(c)" title="Remove">×</button>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (context == UsageStore.AuditContext && recentAudits.Count > 0)
+        {
+            <div class="side-group">
+                <div class="side-h">Recent audits <button class="link" @onclick="ClearAudits">clear</button></div>
+                @foreach (var a in recentAudits)
+                {
+                    <div class="side-recent">
+                        <a class="side-qrun" href="@AuditHref(a)" title="@AuditTitle(a)">
+                            <span class="nm">@a.TargetName</span>
+                            <small class="side-sub">@AuditTypeLabel(a.Type)</small>
+                        </a>
+                        <button class="side-qdel" @onclick="() => RemoveAudit(a)" title="Remove">×</button>
+                    </div>
                 }
             </div>
         }
@@ -105,10 +186,21 @@
 @code {
     private const char Sep = '\u001F'; // table Parent = workspace<unit-sep>dataset
 
+    // Gear toggle: remember the last non-Configure view so a second click returns to it.
+    private string lastNonConfig = "";
+    private string PathOf(string uri) => Nav.ToBaseRelativePath(uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+    private bool OnConfigure => PathOf(Nav.Uri) == "configure";
+
+    private void ToggleConfigure()
+        => Nav.NavigateTo(OnConfigure ? lastNonConfig : "configure");
+
     private IReadOnlyList<UsageItem> wsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> dsTop = Array.Empty<UsageItem>();
     private IReadOnlyList<UsageItem> tblTop = Array.Empty<UsageItem>();
+    private IReadOnlyList<UsageItem> measTop = Array.Empty<UsageItem>();
     private IReadOnlyList<QueryEntry> recent = Array.Empty<QueryEntry>();
+    private IReadOnlyList<AuditEntry> recentAudits = Array.Empty<AuditEntry>();
+    private IReadOnlyList<SavedAuditCheck> savedChecks = Array.Empty<SavedAuditCheck>();
     private string? context;
 
     protected override void OnInitialized()
@@ -116,11 +208,13 @@
         Usage.Changed += OnUsageChanged;
         Jobs.Changed += OnUsageChanged;          // refresh the Jobs nav count
         Hist.Changed += OnUsageChanged;          // refresh Recent queries
+        AuditHist.Changed += OnUsageChanged;     // refresh Recent audits
+        SavedStore.Changed += OnUsageChanged;    // refresh Saved checks
         Nav.LocationChanged += OnLocationChanged; // sidebar is per-page
         Reload();
     }
 
-    private Task RunQuery(QueryEntry h) => Actions.Run(h);
+    private async Task RunQuery(QueryEntry h) { await Actions.Run(h); Nav.NavigateTo("query"); }
     private void RemoveQuery(QueryEntry h) { Hist.Remove(h.Dax, h.Workspace, h.Dataset); recent = Hist.Recent(8); }
     private void ClearQueries() { Hist.Clear(); recent = Hist.Recent(8); }
 
@@ -136,24 +230,32 @@
         var path = Nav.ToBaseRelativePath(uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
         return path switch
         {
-            "explore" => UsageStore.ExploreContext,
+            "explore" or "query" => UsageStore.ExploreContext,
             "refresh" => UsageStore.RefreshContext,
+            "pipelines" => UsageStore.PipelineContext,
+            "audit" => UsageStore.AuditContext,
             _ => null,
         };
     }
 
     private void Reload()
     {
+        // Remember where we are unless it's Configure, so the gear can toggle back (query string kept).
+        if (PathOf(Nav.Uri) != "configure") lastNonConfig = Nav.ToBaseRelativePath(Nav.Uri);
         context = ContextFor(Nav.Uri);
         if (context is null)
         {
-            wsTop = dsTop = tblTop = Array.Empty<UsageItem>();
+            wsTop = dsTop = tblTop = measTop = Array.Empty<UsageItem>();
+            recent = Array.Empty<QueryEntry>(); recentAudits = Array.Empty<AuditEntry>(); savedChecks = Array.Empty<SavedAuditCheck>();
             return;
         }
         wsTop = Usage.Top(UsageStore.Workspace, 6, context);
         dsTop = Usage.Top(UsageStore.Dataset, 6, context);
         tblTop = Usage.Top(UsageStore.Table, 6, context);
+        measTop = Usage.Top(UsageStore.Measure, 6, context);
         recent = context == UsageStore.ExploreContext ? Hist.Recent(8) : Array.Empty<QueryEntry>();
+        recentAudits = context == UsageStore.AuditContext ? AuditHist.Recent() : Array.Empty<AuditEntry>();
+        savedChecks = context == UsageStore.AuditContext ? SavedStore.All() : Array.Empty<SavedAuditCheck>();
     }
 
     private void OnUsageChanged() => InvokeAsync(() => { Reload(); StateHasChanged(); });
@@ -171,17 +273,52 @@
     private string TblLink(UsageItem t)
         => $"{LinkBase}?ws={Uri.EscapeDataString(TblWs(t))}&ds={Uri.EscapeDataString(TblDs(t))}&table={Uri.EscapeDataString(t.Name)}";
 
+    // Measures (like tables) carry "workspace<sep>dataset" in Parent; the link opens its definition in Explore.
+    private string MeasLink(UsageItem m)
+        => $"explore?ws={Uri.EscapeDataString(TblWs(m))}&ds={Uri.EscapeDataString(TblDs(m))}&measure={Uri.EscapeDataString(m.Name)}";
+    private static string MeasTitle(UsageItem m) => $"[{m.Name}] — measure in dataset “{TblDs(m)}” (workspace “{TblWs(m)}”)";
+
     // A table's Parent is "workspace<sep>dataset" — different models often reuse table names,
     // so the dataset (and workspace) is what disambiguates them.
     private static string TblWs(UsageItem t) { var p = (t.Parent ?? "").Split(Sep); return p.Length > 0 ? p[0] : ""; }
     private static string TblDs(UsageItem t) { var p = (t.Parent ?? "").Split(Sep); return p.Length > 1 ? p[1] : ""; }
     private static string TblTitle(UsageItem t) => $"{t.Name} — in dataset “{TblDs(t)}” (workspace “{TblWs(t)}”)";
 
+    // Recent audits helpers
+    private static string AuditHref(AuditEntry a) => a.Type switch
+    {
+        AuditHistoryStore.TypePipelineRules => $"audit?pipeline={Uri.EscapeDataString(a.TargetId)}",
+        _ => "audit",
+    };
+    private static string AuditTitle(AuditEntry a) => $"{a.TargetName} — last ran {a.LastRan.LocalDateTime:g}";
+    private static string AuditTypeLabel(string type) => type switch
+    {
+        AuditHistoryStore.TypePipelineRules => "pipeline rules",
+        _ => type,
+    };
+    private void RemoveAudit(AuditEntry a) { AuditHist.Remove(a.Type, a.TargetId); recentAudits = AuditHist.Recent(); }
+    private void ClearAudits() { AuditHist.Clear(); recentAudits = AuditHist.Recent(); }
+
+    // Saved param-checks (from the shared Daxter.Core store)
+    private static string SavedCheckHref(SavedAuditCheck c)
+        => $"audit?pipeline={Uri.EscapeDataString(c.PipelineId)}&type=check"
+         + $"&stage={Uri.EscapeDataString(c.Stage)}&param={Uri.EscapeDataString(c.Param)}"
+         + $"&value={Uri.EscapeDataString(c.Value)}&ne={(c.NotEquals ? "true" : "false")}";
+    private static string SavedCheckTitle(SavedAuditCheck c)
+        => $"{c.Param} {(c.NotEquals ? "≠" : "=")} {c.Value} in {c.Stage} — click to recall";
+    private void RemoveSavedCheck(SavedAuditCheck c)
+    {
+        SavedStore.Remove(c.PipelineId, c.Stage, c.Param, c.Value, c.NotEquals);
+        savedChecks = SavedStore.All();
+    }
+
     public void Dispose()
     {
         Usage.Changed -= OnUsageChanged;
         Jobs.Changed -= OnUsageChanged;
         Hist.Changed -= OnUsageChanged;
+        AuditHist.Changed -= OnUsageChanged;
+        SavedStore.Changed -= OnUsageChanged;
         Nav.LocationChanged -= OnLocationChanged;
     }
 }

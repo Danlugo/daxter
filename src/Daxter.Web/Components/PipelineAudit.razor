@@ -1,0 +1,333 @@
+@inject DaxterUi Ui
+@inject PipelineScanStore Scans
+@inject SavedAuditCheckStore Saved
+@implements IDisposable
+
+@* Pipeline-wide audits — scan every model in the pipeline once, then offer two checks:
+   (1) models with no deployment rules (every parameter matches across stages);
+   (2) models where a chosen parameter, in a chosen stage, equals a chosen value.
+   The scan runs in the PipelineScanStore (singleton) so progress + results survive page
+   navigation: leave and come back, the scan keeps running and the result is still there. *@
+
+<div class="card audit">
+    <div class="tabs">
+        <button class="tab @(tab == Tab.NoRules ? "active" : "")" @onclick="() => tab = Tab.NoRules">Models without rules</button>
+        <button class="tab @(tab == Tab.Check ? "active" : "")" @onclick="() => tab = Tab.Check">Parameter value check</button>
+    </div>
+
+    @{ var entry = Scans.Get(PipelineId); }
+
+    @if (entry is null)
+    {
+        <div class="actions">
+            <button class="btn" @onclick="Start">Scan all models in this pipeline</button>
+            <span class="muted">Reads every model's parameters in every stage, @concurrency at a time. Runs in the background — leaving the page is safe.</span>
+        </div>
+    }
+    else if (entry.Running)
+    {
+        <div class="actions">
+            <button class="btn" disabled="@true">⏳ Scanning @entry.Done / @(entry.Total == 0 ? "…" : entry.Total.ToString())</button>
+            <button class="btn-sm" @onclick="Cancel">Cancel</button>
+            <span class="muted">Started @Fmt(entry.Elapsed) ago · @concurrency models in parallel · keeps running if you navigate away.</span>
+        </div>
+        @if (entry.Total > 0)
+        {
+            <div class="progress"><div class="progress-bar" style="width:@((int)(100.0 * entry.Done / Math.Max(1, entry.Total)))%"></div></div>
+        }
+    }
+    else if (entry.Error is not null)
+    {
+        <ErrorBanner Message="@entry.Error" />
+        <button class="btn-sm" @onclick="Start">Re-scan</button>
+    }
+    else if (entry.Cancelled)
+    {
+        <p class="muted">Scan cancelled at @entry.Done / @entry.Total.</p>
+        <button class="btn-sm" @onclick="Start">Re-scan</button>
+    }
+    else if (entry.Result is { } scan)
+    {
+        <p class="muted">Scanned <strong>@scan.Models.Count</strong> model(s) across @scan.Stages.Count stage(s) in @Fmt(entry.Elapsed).
+            <button class="link" @onclick="Start">re-scan</button>
+            <button class="link" @onclick="Forget">clear</button>
+        </p>
+
+        @if (tab == Tab.NoRules)
+        {
+            var noRules = scan.Models
+                .Where(m => m.Matrix.Rows.Count > 0 && m.Matrix.Rows.All(r => !r.Differs))
+                .Select(m => m.Model)
+                .ToList();
+            <p>
+                @if (noRules.Count == 0)
+                {
+                    <strong class="ok-text">All scanned models have at least one parameter that differs across stages — none are rule-less.</strong>
+                }
+                else
+                {
+                    <strong>@noRules.Count of @scan.Models.Count model(s)</strong>
+                    <span> have no deployment rules detected — every parameter value matches across stages:</span>
+                }
+            </p>
+            @if (noRules.Count > 0)
+            {
+                <ul class="model-list">
+                    @foreach (var m in noRules)
+                    {
+                        <li><a href="@($"pipelines?model={Uri.EscapeDataString(m)}")">@m</a></li>
+                    }
+                </ul>
+            }
+
+            @if (NoParamModels(scan) is { Count: > 0 } noParams)
+            {
+                <details class="param-notes">
+                    <summary class="muted">@noParams.Count model(s) had no readable parameters (omitted from the check)</summary>
+                    @foreach (var m in noParams) { <p class="muted">@m</p> }
+                </details>
+            }
+        }
+        else
+        {
+            <div class="row">
+                <div>
+                    <label>Model <span class="muted">(blank = all @scan.Models.Count)</span></label>
+                    <input class="combo" list="audit-models" @bind="scopeModel" placeholder="all models — or one, e.g. Sales" autocomplete="off" />
+                    <datalist id="audit-models">@foreach (var mm in scan.Models) { <option value="@mm.Model"></option> }</datalist>
+                </div>
+            </div>
+
+            @if (MyRules().Count > 0)
+            {
+                <div class="actions">
+                    <button class="btn-sm" @onclick="() => RunAll(scan)">▶ Run all @MyRules().Count saved rule(s)@(string.IsNullOrWhiteSpace(scopeModel) ? "" : $" on {scopeModel}")</button>
+                    <span class="muted">Check every saved rule against @(string.IsNullOrWhiteSpace(scopeModel) ? "every model" : scopeModel).</span>
+                </div>
+                @if (ruleResults is not null)
+                {
+                    <div class="grid-wrap">
+                        <table class="grid">
+                            <thead><tr><th>Rule</th><th>Param</th><th>Stage</th><th>Expected</th><th>Compliant</th><th>⚠</th></tr></thead>
+                            <tbody>
+                                @foreach (var rr in ruleResults)
+                                {
+                                    <tr class="@(rr.Result.Violations.Count > 0 ? "param-diff" : "")">
+                                        <td><strong>@rr.Check.Name</strong></td>
+                                        <td>@rr.Result.Param</td>
+                                        <td>@rr.Result.Stage</td>
+                                        <td class="param-val"><code>@(rr.Result.NotEquals ? "≠" : "=") @rr.Result.Value</code></td>
+                                        <td>@rr.Result.Compliant / @rr.Result.Checked</td>
+                                        <td class="nowrap">@(rr.Result.Violations.Count == 0 ? "✓" : rr.Result.Violations.Count.ToString())</td>
+                                    </tr>
+                                    @if (rr.Result.Violations.Count > 0)
+                                    {
+                                        <tr><td colspan="6">
+                                            <details class="param-notes">
+                                                <summary class="muted">@rr.Result.Violations.Count model(s) violate this rule</summary>
+                                                @foreach (var v in rr.Result.Violations)
+                                                {
+                                                    <div class="kv"><span class="kv-k">@v.Model</span>: <code class="kv-v rule">@(v.Actual ?? "—")</code></div>
+                                                }
+                                            </details>
+                                        </td></tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                <hr class="sep" />
+                <p class="muted">Or build a new rule:</p>
+            }
+            <div class="row">
+                <div>
+                    <label>Stage (workspace)</label>
+                    <select @bind="checkStage">
+                        <option value="">— pick a stage —</option>
+                        @foreach (var s in scan.Stages) { <option value="@s.Workspace">@s.Workspace</option> }
+                    </select>
+                </div>
+                <div>
+                    <label>Parameter name</label>
+                    <input class="combo" list="audit-params" @bind="checkParam" placeholder="e.g. DATABASE_NAME" autocomplete="off" />
+                    <datalist id="audit-params">@foreach (var p in AllParamNames(scan)) { <option value="@p"></option> }</datalist>
+                </div>
+                <div>
+                    <label>Expected value</label>
+                    <input class="combo" @bind="checkValue" placeholder="e.g. DB_PROD or a full URL" autocomplete="off" />
+                </div>
+            </div>
+            <p class="muted">Find every model whose <code>@(string.IsNullOrWhiteSpace(checkParam) ? "<param>" : checkParam)</code> in
+                <code>@(string.IsNullOrWhiteSpace(checkStage) ? "<stage>" : checkStage)</code>
+                @(matchMode == MatchMode.Equals ? " equals " : " does not equal ")
+                <code>@(string.IsNullOrWhiteSpace(checkValue) ? "<value>" : checkValue)</code>.</p>
+            <div class="cmd-group">
+                <button class="btn-sm @(matchMode == MatchMode.Equals ? "active" : "")" @onclick="() => matchMode = MatchMode.Equals">Equals</button>
+                <button class="btn-sm @(matchMode == MatchMode.NotEquals ? "active" : "")" @onclick="() => matchMode = MatchMode.NotEquals">Does not equal</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(checkStage) && !string.IsNullOrWhiteSpace(checkParam) && !string.IsNullOrWhiteSpace(checkValue))
+            {
+                <div class="actions">
+                    @if (!showSaveName)
+                    {
+                        <button class="btn-sm" @onclick="BeginSave" title="Save this as a named rule so you can recall it and Run all">➕ Add rule</button>
+                        @if (savedMsg is not null) { <span class="ok-text">@savedMsg</span> }
+                    }
+                    else
+                    {
+                        <input class="combo" style="min-width:340px" @bind="saveName" placeholder="name this check" autocomplete="off" />
+                        <button class="btn-sm active" @onclick="ConfirmSave">Save</button>
+                        <button class="link" @onclick="() => showSaveName = false">cancel</button>
+                    }
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(checkStage) && !string.IsNullOrWhiteSpace(checkParam))
+            {
+                var sIdx = scan.Stages.ToList().FindIndex(s => string.Equals(s.Workspace, checkStage, StringComparison.OrdinalIgnoreCase));
+                var hits = sIdx >= 0 ? Scoped(scan).Models
+                    .Select(m => new { m.Model, Row = m.Matrix.Rows.FirstOrDefault(r => string.Equals(r.Name, checkParam, StringComparison.OrdinalIgnoreCase)) })
+                    .Where(x => x.Row is not null)
+                    .Select(x => new { x.Model, Value = x.Row!.Values[sIdx] })
+                    .Where(x => x.Value is not null && (
+                        matchMode == MatchMode.Equals
+                            ? string.Equals(x.Value, checkValue, StringComparison.Ordinal)
+                            : !string.Equals(x.Value, checkValue, StringComparison.Ordinal)))
+                    .ToList() : null;
+                @if (sIdx < 0)
+                {
+                    <p class="bad-text">Stage '@checkStage' isn't in the scan.</p>
+                }
+                else if (hits is null || hits.Count == 0)
+                {
+                    <p class="muted">No models match.</p>
+                }
+                else
+                {
+                    <p><strong>@hits.Count model(s) match:</strong></p>
+                    <div class="grid-wrap">
+                        <table class="grid">
+                            <thead><tr><th>Model</th><th>@checkParam in @checkStage</th></tr></thead>
+                            <tbody>
+                                @foreach (var h in hits)
+                                {
+                                    <tr>
+                                        <td><a href="@($"pipelines?model={Uri.EscapeDataString(h.Model)}")">@h.Model</a></td>
+                                        <td class="param-val">@h.Value</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string PipelineId { get; set; } = "";
+    [Parameter, EditorRequired] public string PipelineName { get; set; } = "";
+    // Recall: prefill the Parameter-value-check tab from a saved check.
+    [Parameter] public string? InitialStage { get; set; }
+    [Parameter] public string? InitialParam { get; set; }
+    [Parameter] public string? InitialValue { get; set; }
+    [Parameter] public bool InitialNotEquals { get; set; }
+
+    private enum Tab { NoRules, Check }
+    private enum MatchMode { Equals, NotEquals }
+
+    private Tab tab = Tab.NoRules;
+    private MatchMode matchMode = MatchMode.Equals;
+    private const int concurrency = 5;
+
+    private string checkStage = "", checkParam = "", checkValue = "";
+    private string? appliedInitial;
+
+    // Save-this-check UI
+    private bool showSaveName;
+    private string saveName = "";
+    private string? savedMsg;
+
+    protected override void OnInitialized() => Scans.Changed += OnChanged;
+    public void Dispose() => Scans.Changed -= OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet()
+    {
+        // Apply a recalled check once (don't clobber the user's later edits).
+        if (string.IsNullOrWhiteSpace(InitialParam)) return;
+        var key = $"{PipelineId}|{InitialStage}|{InitialParam}|{InitialValue}|{InitialNotEquals}";
+        if (key == appliedInitial) return;
+        appliedInitial = key;
+        tab = Tab.Check;
+        checkStage = InitialStage ?? "";
+        checkParam = InitialParam ?? "";
+        checkValue = InitialValue ?? "";
+        matchMode = InitialNotEquals ? MatchMode.NotEquals : MatchMode.Equals;
+    }
+
+    private void BeginSave() { saveName = SuggestName(); showSaveName = true; savedMsg = null; }
+
+    private void ConfirmSave()
+    {
+        var nm = string.IsNullOrWhiteSpace(saveName) ? SuggestName() : saveName.Trim();
+        Saved.Save(nm, PipelineId, checkStage, checkParam, checkValue, matchMode == MatchMode.NotEquals);
+        showSaveName = false;
+        savedMsg = $"Added rule “{nm}”. Build another, or Run all rules above.";
+        // Reset for the next rule (keep the stage — usually you add several rules for the same stage).
+        checkParam = ""; checkValue = ""; ruleResults = null;
+    }
+
+    // Optional scope: blank = all models; otherwise just the named model.
+    private string scopeModel = "";
+    private PipelineScan Scoped(PipelineScan scan)
+        => string.IsNullOrWhiteSpace(scopeModel)
+            ? scan
+            : new PipelineScan(scan.PipelineId, scan.Stages,
+                scan.Models.Where(m => string.Equals(m.Model, scopeModel, StringComparison.OrdinalIgnoreCase)).ToList());
+
+    // Saved rules for THIS pipeline, and a one-shot "run them all against the (scoped) scan".
+    private List<SavedAuditCheck> MyRules() => Saved.All().Where(c => c.PipelineId == PipelineId).ToList();
+
+    private List<(SavedAuditCheck Check, RuleResult Result)>? ruleResults;
+    private void RunAll(PipelineScan scan)
+    {
+        var s = Scoped(scan);
+        ruleResults = MyRules()
+            .Select(c => (Check: c, Result: PipelineRulesService.EvaluateRule(s, c.Stage, c.Param, c.Value, c.NotEquals)))
+            .ToList();
+    }
+
+    private string SuggestName()
+    {
+        var op = matchMode == MatchMode.NotEquals ? "≠" : "=";
+        var v = checkValue.Length > 24 ? checkValue[..24] + "…" : checkValue;
+        return $"{checkParam} {op} {v} · {checkStage}";
+    }
+
+    private void Start()
+    {
+        Scans.Clear(PipelineId);
+        Scans.StartOrGet(PipelineId, (progress, ct) =>
+            Ui.PipelineScanAsync(PipelineId, concurrency, progress, ct));
+    }
+
+    private void Cancel() => Scans.Cancel(PipelineId);
+    private void Forget() => Scans.Clear(PipelineId);
+
+    private static List<string> NoParamModels(PipelineScan scan)
+        => scan.Models.Where(m => m.Matrix.Rows.Count == 0).Select(m => m.Model).ToList();
+
+    private static IEnumerable<string> AllParamNames(PipelineScan scan)
+        => scan.Models.SelectMany(m => m.Matrix.Rows.Select(r => r.Name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+
+    private static string Fmt(TimeSpan t)
+        => t.TotalMinutes >= 1
+            ? $"{(int)t.TotalMinutes}m {t.Seconds}s"
+            : $"{(int)t.TotalSeconds}s";
+}

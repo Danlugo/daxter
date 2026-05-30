@@ -1,0 +1,32 @@
+@page "/gateways"
+@inject DaxterUi Ui
+
+<PageTitle>DAXter — Gateways</PageTitle>
+
+<h1>Gateways</h1>
+<p class="muted">On-premises data gateways visible to the signed-in identity (tenant-level).</p>
+
+<div class="actions">
+    <button class="btn" @onclick="Load" disabled="@busy">@(busy ? "Loading…" : "Load gateways")</button>
+</div>
+
+@if (loaded || error is not null)
+{
+    <ResultGrid Result="result" Error="@error" Empty="No gateways are visible to this account." />
+}
+
+@code {
+    private QueryResult? result;
+    private string? error;
+    private bool busy, loaded;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        busy = true; error = null;
+        try { result = await Ui.GatewaysAsync(); loaded = true; }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+}

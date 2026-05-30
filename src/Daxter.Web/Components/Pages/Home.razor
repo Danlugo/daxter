@@ -92,6 +92,10 @@
                 </div>
                 break;
 
+            case UpdateState.Ahead:
+                <p class="ok-text">✓ You're on <strong>@update.Current</strong> — ahead of the latest published release (@update.Latest). Unreleased build.</p>
+                break;
+
             case UpdateState.Dev:
                 <p class="muted">You're running a local <code>dev</code> build. Latest release: @(@update.Latest ?? "unknown").</p>
                 break;

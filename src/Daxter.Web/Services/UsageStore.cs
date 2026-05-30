@@ -17,10 +17,13 @@ public sealed class UsageStore
     public const string Workspace = "workspace";
     public const string Dataset = "dataset";
     public const string Table = "table";
+    public const string Measure = "measure";
 
     // Page contexts (each page keeps its own Frequent list).
     public const string ExploreContext = "explore";
     public const string RefreshContext = "refresh";
+    public const string PipelineContext = "pipelines";
+    public const string AuditContext = "audit";
 
     private const int MaxItems = 500;
 

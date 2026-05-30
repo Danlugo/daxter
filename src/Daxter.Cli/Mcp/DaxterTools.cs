@@ -164,6 +164,63 @@ public static class DaxterTools
         [Description("Pipeline id (from daxter_pipelines).")] string pipelineId, CancellationToken ct = default)
         => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.PipelineOperationsAsync(pipelineId, c), ct);
 
+    [McpServerTool(Name = "daxter_pipeline_rules"), Description(
+        "Deployment-rule check: a model's parameter values across each pipeline stage, flagging where they differ. " +
+        "The public Power BI REST API can't read deployment rules directly, so DAXter reads the model's parameters in " +
+        "each stage's workspace over XMLA and treats a per-stage value difference as a deployment rule (or manual override). " +
+        "Returns columns: Parameter, <stage workspaces…>, RuleApplied.")]
+    public static Task<string> PipelineRules(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId,
+        [Description("Model (semantic dataset) name — same in every stage.")] string model,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.PipelineRulesAsync(pipelineId, model, ct);
+
+    [McpServerTool(Name = "daxter_pipeline_models_without_rules"), Description(
+        "Pipeline-wide audit: lists models in a pipeline whose parameter values are identical across every stage " +
+        "— i.e. no deployment rule (and no manual override) is in effect. Scans every model's parameters in every " +
+        "stage via XMLA; potentially slow on large pipelines.")]
+    public static Task<string> PipelineModelsWithoutRules(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.PipelineModelsWithoutRulesAsync(pipelineId, ct);
+
+    [McpServerTool(Name = "daxter_pipeline_param_check"), Description(
+        "Pipeline-wide audit: lists every model whose <param> in <stage> equals (or, with notEquals=true, does not equal) " +
+        "<value>. Useful for verifying a deployment rule is consistently applied across all models in an environment " +
+        "(e.g. WAREHOUSE_URL in 'Prod' = a fixed endpoint). Scans every model's parameters in every stage via XMLA.")]
+    public static Task<string> PipelineParamCheck(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId,
+        [Description("Stage workspace name (e.g. 'Prod').")] string stage,
+        [Description("Parameter name (e.g. DATABASE_NAME).")] string param,
+        [Description("Expected value to match against.")] string value,
+        [Description("When true, find models whose value does NOT equal the expected.")] bool notEquals = false,
+        [Description("Optional: a single model (e.g. 'Sales') — checks just that model and reports its actual value + pass/fail. Omit to scan all models.")] string? model = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.PipelineParamCheckAsync(pipelineId, stage, param, value, notEquals, model, ct);
+
+    [McpServerTool(Name = "daxter_audit_list_saved"), Description(
+        "List the named audit checks saved from the web console (shared via ~/.daxter). " +
+        "Columns: Name, Pipeline, Stage, Param, Expected. Run one with daxter_audit_run_saved.")]
+    public static Task<string> AuditListSaved(CancellationToken ct = default)
+        => DaxterToolRuntime.AuditListSavedAsync(ct);
+
+    [McpServerTool(Name = "daxter_audit_run_saved"), Description(
+        "Run a saved audit check by its name (as shown by daxter_audit_list_saved) — re-runs the " +
+        "stored parameter-value check against its pipeline and returns the matching models.")]
+    public static Task<string> AuditRunSaved(
+        [Description("Saved check name (case-insensitive).")] string name,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.AuditRunSavedAsync(name, ct);
+
+    [McpServerTool(Name = "daxter_audit_run_all_saved"), Description(
+        "Run every saved rule for a pipeline against a fresh scan and report per-rule compliance. " +
+        "Columns: Rule, Param, Stage, Expected, Compliant (compliant/checked), Violations (count).")]
+    public static Task<string> AuditRunAllSaved(
+        [Description("Pipeline id (from daxter_pipelines).")] string pipelineId,
+        [Description("Optional: a single model (e.g. 'Sales') — evaluate every saved rule against just that model. Omit for all models.")] string? model = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.AuditRunAllSavedAsync(pipelineId, model, ct);
+
     // ---- Gated write tools (DRY-RUN by default; disabled unless DAXTER_MCP_ALLOW_WRITES=true) ----
 
     [McpServerTool(Name = "daxter_refresh"), Description(

@@ -126,6 +126,20 @@ public sealed class DaxterConfig
         };
     }
 
+    /// <summary>Returns a copy targeting a different workspace/dataset; all auth settings are preserved.</summary>
+    public DaxterConfig With(string workspace, string? dataset) => new()
+    {
+        Workspace = workspace,
+        Dataset = dataset,
+        TenantId = TenantId,
+        ClientId = ClientId,
+        ClientSecret = ClientSecret,
+        PublicClientId = PublicClientId,
+        AuthMode = AuthMode,
+        Environment = Environment,
+        ProdWorkspaces = ProdWorkspaces,
+    };
+
     /// <summary>
     /// True if the current target is production — used to block writes. Production is
     /// detected by the active env being "prod", the workspace name containing "prod", or

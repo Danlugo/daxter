@@ -4,6 +4,129 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-05-30
+
+### Added
+- **Three XMLA/REST capabilities that were CLI/MCP-only are now in the web console:**
+  - **Test RLS** (Explore → a dataset's **Test RLS** command). Run a DAX query while
+    **impersonating a role and/or a user (UPN)** to see exactly what they'd see. The role
+    dropdown is populated from the model's roles; the effective-user box takes any UPN. Read-only,
+    but the signed-in identity must be an **admin** of the workspace/model to impersonate
+    (`Roles` + `EffectiveUserName` on the XMLA connection).
+  - **Gateways** (new **Gateways** nav page). Lists the on-premises data gateways visible to the
+    signed-in identity (REST `/gateways`) — only gateways the caller administers return a name.
+  - **Deployment Pipelines** (new **Pipelines** nav page). Lists deployment pipelines; click one
+    to drill into its **stages** (Dev → Test → Prod workspaces) and recent **operations**
+    (REST `/pipelines`, `/pipelines/{id}/stages`, `/pipelines/{id}/operations`).
+
+### Added
+- **Deployment-rule check on the Pipelines page (model-first).** Pick a **model** and DAXter finds
+  every accessible pipeline that contains it, then lays out **one card per stage** (Dev → QA → Prod).
+  Each card shows two sections: **Model Parameters** (every parameter + its value in that stage, read
+  over XMLA) and **Deployment Rules** (the parameters whose value differs from the source/Dev stage =
+  the inferred rule overriding them there). Rule values are tinted for quick scanning. The public Power
+  BI REST API has no operation to read rule objects directly, so these are inferred from per-stage value
+  differences; stages where the model can't be read are noted. Raw stages + operations remain under a
+  collapsible "Browse pipelines" section. (Requires the signed-in identity to have pipeline access —
+  works in the web console, not the MCP service principal.) The Pipelines page has its own
+  **Frequent · Pipelines** sidebar with a **Models** group — click a recent model to rebuild its
+  stage board instantly.
+- **Same check on the CLI + MCP.** The rule-inference logic lives in `Daxter.Core` and is shared by
+  all three layers:
+  - **CLI**: `daxter pipeline rules --pipeline <id> --model <name>` — prints a `Parameter | <stage 1> | <stage 2> | … | RuleApplied` table (table/csv/json via `--output`) and a stderr summary `(N stages, N parameters, N differ → N deployment rules inferred)`.
+  - **MCP**: `daxter_pipeline_rules(pipelineId, model)` — same matrix as JSON, with stage-read failures listed as notes.
+- **Pipeline scan results persist to disk** — `PipelineScanStore` now saves completed scans to
+  `~/.daxter/pipeline-scans.json` (last 20) on the mounted volume, so container restarts don't lose them.
+- **Recent audits sidebar** — new `AuditHistoryStore` tracks the last 10 ran audits in
+  `~/.daxter/audit-history.json`. The Audit page sidebar shows them under **Recent audits** with
+  one-click recall (clicking re-loads the persisted scan immediately), plus per-entry remove and clear.
+- **New `/audit` page** — cross-cutting checks across pipelines/workspaces/models, with an
+  **Audit type** picker so new audits drop in without rearranging the layout. Today: Pipeline
+  deployment-rule audits (pick a pipeline → run "models without rules" / "parameter value check");
+  more audit types (refresh status, measure dependencies, etc.) slot in next to it. Has its own
+  **Frequent · Audit** sidebar tracking the most-used pipelines (each item links to
+  `audit?pipeline=<id>`). Replaces the audit tabs that previously sat on the Pipelines page; the
+  Pipelines page now links across to /audit and keeps the per-model deployment-rule board.
+- **Pipeline-wide audits.** Below each model board, a new **Audits** card with two tabs:
+  - **Models without rules** — scans every model in the pipeline and lists the ones whose parameter values are identical across every stage (no deployment rule or manual override in effect anywhere).
+  - **Parameter value check** — pick a stage workspace, a parameter name, and an expected value (equals / does-not-equal); lists every model whose parameter matches in that stage. Useful for verifying a rule is consistently applied (e.g. all models in *Prod* have `WAREHOUSE_URL = <prod-endpoint>`).
+  Both tabs share a single scan that streams progress (`N/Total`) and runs once per pipeline.
+  Mirrored on the CLI (`daxter pipeline audit --pipeline X` with `--mode no-rules|check --stage Y --param Z --value V [--not-equals]`) and on the MCP (`daxter_pipeline_models_without_rules`, `daxter_pipeline_param_check`).
+
+### Added
+- **Saved param-checks (Audit page).** After running a Parameter-value check (e.g. `WAREHOUSE_URL = …` in
+  a stage), a **★ Save this check** button stores it — with an editable, auto-suggested name
+  (`WAREHOUSE_URL = <prod-endpoint> · Prod`) — to a new **Saved checks** group in the Frequent · Audit
+  sidebar. Clicking a saved check deep-links back (`audit?pipeline=…&type=check&stage=&param=&value=&ne=`),
+  selects the pipeline, and prefills the check. Saved via a **shared `Daxter.Core` store**
+  (`~/.daxter/audit-saved.json`) so they survive restarts **and are usable from CLI + MCP**:
+  - CLI: `daxter pipeline audit --list-saved` and `daxter pipeline audit --saved "<name>"`.
+  - MCP: `daxter_audit_list_saved` and `daxter_audit_run_saved(name)`.
+  Each has a remove × in the sidebar; legacy saved entries are migrated out of `audit-history.json`
+  on first read.
+- **Rule sets — ➕ Add rule & Run all.** The check's save button is now **➕ Add rule**, and after
+  saving it clears the param/value (keeps the stage) so you can stack several rules quickly (like
+  Power BI's "+ Add rule"). A **▶ Run all rules** button evaluates every saved rule for the pipeline
+  against the current scan in one table — **Rule · Param · Stage · Expected · Compliant/Checked · ⚠ Violations**
+  (expand a row to see the offending models). Same across surfaces: CLI
+  `daxter pipeline audit --run-all-saved --pipeline X` and MCP `daxter_audit_run_all_saved(pipelineId)`,
+  all sharing the one `Daxter.Core.PipelineRulesService.EvaluateRule`.
+- **Audits scope to a single model (or all).** Every audit can target one model instead of the whole
+  pipeline — much cheaper (one model's stages, read in parallel). `Daxter.Core.ScanModelAsync` produces
+  a one-model scan that the same evaluators run on. Available everywhere:
+  - **MCP:** `daxter_pipeline_param_check(…, model: "Sales")` (reports the model's actual value + pass/fail)
+    and `daxter_audit_run_all_saved(pipelineId, model: "Sales")` ("run all audits for Sales").
+  - **CLI:** `daxter pipeline audit --model Sales …` scopes `--mode check` / `--run-all-saved` to that model.
+  - **Web:** a **Model** box on the Audit page narrows the param-check + Run-all to one model.
+
+### Fixed
+- **DAX Query Fields pane didn't populate on first load** — it only worked after closing and
+  re-opening it. `LoadObjects` now calls `StateHasChanged()` on completion (Blazor doesn't
+  auto-render after an `OnAfterRenderAsync` await), so the tree paints the first time. The Fields
+  pane now also starts **hidden by default** (the model still loads in the background so editor
+  autocomplete works whether or not the pane is open).
+- **"Run →" / "Top N rows" / Recent-query hand-off to the DAX Query page.** Prerendering rendered
+  the target page twice in two DI scopes; the throwaway prerender pass consumed the handed-off
+  query, so the DAX Query page opened empty (showing its placeholder). Prerendering is now disabled,
+  so pages initialize once on the live circuit and the query arrives correctly.
+
+### Changed
+- **New "Slate & Teal" theme** — re-skinned to an enterprise-analytics look: navy chrome topbar
+  (`--chrome:#1b2533`) with muted→bright nav states, a teal interactive accent (`--accent:#0f766e`),
+  cool slate neutrals, lighter borders, and a bit more depth. Because the stylesheet was already
+  fully tokenized, the whole re-theme was ~20 `:root` token-value edits + one topbar rule — every
+  page, card, grid, and badge picked it up automatically. Frozen into `.claude/ui-contract.md` as
+  the project's design contract; `ui-consistency` enforces it. (Established via the `ui-consistency`
+  ESTABLISH flow.)
+- **UI professional pass + theme tokenization.** Promoted the palette to a full CSS-variable token
+  set (text / surface / line / link / status / brand, plus `--radius*`, `--shadow*`, `--ring`) and
+  replaced ~60 hardcoded hex values with `var(--…)` — re-theming is now editing a handful of tokens,
+  not hunting the stylesheet. Added subtle depth (card/topbar/grid shadows), button hover states, and
+  **keyboard focus rings** (`:focus-visible`) for accessibility — no layout change. Added the standard
+  **← Back** button to the **Refresh** and **Audit** pages (both are reached via deep-link from other
+  pages, per the UI contract). Verified with the `ui-consistency` skill: theme-drift and the two
+  missing back-buttons were the only gaps; both now closed.
+- **Measure "Run →" now loads the definition.** Instead of a bare `EVALUATE ROW("M", [M])`
+  reference, it opens the DAX Query page with a runnable `DEFINE MEASURE 'Table'[M] = <definition>
+  EVALUATE ROW("M", [M])` block — so the measure's actual logic is visible and editable. The home
+  table is resolved via a TableID→table join.
+- **Measures now appear in the Frequent · Explore sidebar.** Opening or running a measure records
+  it; the most-used show under a new **Measures** group (click to open its definition).
+- **Measures view is now a searchable grid** (Explore → a dataset → **Measures**): a search box
+  (matches name, display folder, or definition text) over a **Measure | Definition | Actions**
+  table. The **Definition** shows the DAX inline, collapsed with a fade and **click-to-expand**;
+  **Run →** runs the measure on the DAX Query page; **Export CSV** downloads the listed measures
+  + definitions (respects the current search filter). (Was a click-through list of names.)
+- **Explore split into two pages.** The DAX editor moved out of the Explore tabs into its own
+  **DAX Query** page (`/query`); **Explore** (`/explore`) is now purely the drill-down browser.
+  "Run DAX →", "Top N rows", "Run measure", and clicking a **Recent query** in the sidebar all
+  open the DAX Query page **pre-filled** (and run, where applicable) — carried across via the
+  shared `ExploreActions` bus. The Recent-queries sidebar + Frequent shortcuts show on both pages.
+  The DAX Query page has a **← Back** button that returns to the previous page (e.g. the Explore view you came from).
+- **Configure moved to a ⚙ gear icon** in the top-right corner (out of the main nav), so the
+  app's own settings aren't confused with a workspace/dataset's configuration. The gear **toggles**
+  — a second click returns to the previous view.
+
 ## [1.6.8] - 2026-05-30
 
 ### Added
@@ -43,7 +166,7 @@ All notable changes to DAXter are documented here. The format follows
   table names across datasets, so the Frequent list couldn't tell two `FACT - Sales` apart. Each
   table now shows its **dataset** as a subtitle (and each dataset its **workspace**), plus a hover
   **tooltip** with the full context (e.g. *"FACT - Sales — in dataset 'Sales Brand' (workspace
-  'Data Hub - Dev')"*).
+  'Sales Analytics - Dev')"*).
 
 ## [1.6.7] - 2026-05-30
 
@@ -186,7 +309,7 @@ All notable changes to DAXter are documented here. The format follows
 
 ### Added
 - **Logs page** in the web console — recent console activity in-app: every operation with its
-  row count and timing (e.g. `datasets [Data Hub] → 94 rows in 887 ms`), sign-in, health checks,
+  row count and timing (e.g. `datasets [Sales Analytics] → 94 rows in 887 ms`), sign-in, health checks,
   and errors. Level filter (All / Information+ / Warning+ / Error), auto-refresh (2 s), and
   Clear. Backed by a bounded in-memory `LogSink` (last 1000 entries, `DAXTER_LOG_BUFFER` to
   change) fed by an `ILogger` provider, so the same lines also go to the container console

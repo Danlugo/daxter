@@ -1,16 +1,14 @@
 @page "/explore"
 @inject DaxterUi Ui
 @inject UsageStore Usage
-@inject QueryHistoryStore History
-@inject IJSRuntime JS
 @inject ExploreActions Actions
-@implements IDisposable
-@using System.Text
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>DAXter — Explore</PageTitle>
 
 <h1>Explore</h1>
-<p class="muted">Browse models and run commands — the CLI/MCP capabilities, graphically.</p>
+<p class="muted">Browse workspaces → datasets → tables and run model commands. To write DAX, use <a href="query">DAX Query</a>.</p>
 
 <div class="row">
     <div>
@@ -49,217 +47,201 @@
     </p>
 }
 
-<div class="tabs">
-    <button class="tab @(tab == Tab.Browse ? "active" : "")" @onclick="EnterBrowse">Browse</button>
-    <button class="tab @(tab == Tab.Query ? "active" : "")" @onclick="ShowQueryTab">DAX query</button>
-</div>
-
-@if (tab == Tab.Query)
-{
-    <div class="dax-layout">
-        @if (showFields)
-        {
-            <aside class="dax-objects">
-                <div class="pane-head">
-                    <span class="side-title">Fields</span>
-                    <button class="pane-x" @onclick="() => showFields = false" title="Hide fields">×</button>
-                </div>
-                @if (string.IsNullOrEmpty(dataset))
-                {
-                    <p class="side-empty">Pick a dataset to browse its tables, columns and measures.</p>
-                }
-                else if (objError is not null)
-                {
-                    <p class="bad-text">@objError</p>
-                    <button class="btn-sm" @onclick="LoadObjects">Retry</button>
-                }
-                else if (objLoading || objects is null)
-                {
-                    <p class="muted">Loading fields…</p>
-                }
-                else
-                {
-                    <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter fields…" autocomplete="off" />
-                    <div class="obj-tree">
-                        @foreach (var t in FilteredTables())
-                        {
-                            <div class="obj-table">
-                                <button class="obj-tname" @onclick="() => ToggleTable(t.Table)" title="@t.Table — click to insert">
-                                    <span class="chev">@(IsExpanded(t.Table) ? "▾" : "▸")</span>
-                                    <span @onclick:stopPropagation="true" @onclick="() => InsertTable(t.Table)">@t.Table</span>
-                                </button>
-                                @if (IsExpanded(t.Table))
-                                {
-                                    @foreach (var o in FilteredItems(t))
-                                    {
-                                        <button class="obj-item @(o.IsMeasure ? "measure" : "column")"
-                                                @onclick="() => InsertRef(t.Table, o)" title="Insert reference">
-                                            <span class="obj-icon">@(o.IsMeasure ? "ƒ" : "▦")</span>@o.Name
-                                        </button>
-                                    }
-                                }
-                            </div>
-                        }
-                    </div>
-                }
-            </aside>
-        }
-
-        <div class="dax-main">
-            <div class="dax-tools">
-                @if (!showFields) { <button class="btn-sm" @onclick="() => showFields = true" title="Show fields">▸ Fields</button> }
-                <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">▶ Run DAX</button>
-                <button class="btn-sm" @onclick="FormatQuery" disabled="@(string.IsNullOrWhiteSpace(dax))" title="Pretty-print the DAX">⌗ Format</button>
-                <span class="muted dax-hint">Tip: click a field on the left to insert it · recent queries are in the sidebar.</span>
-            </div>
-            <div class="dax-edit">
-                <pre class="dax-hl" aria-hidden="true"><code class="dax-hl-code"></code></pre>
-                <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="14" @ref="editorRef"
-                          placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
-            </div>
-            @if (DaxIssues() is { Count: > 0 } issues)
-            {
-                <div class="dax-issues">
-                    @foreach (var iss in issues) { <div class="dax-issue">⚠ @iss</div> }
-                </div>
-            }
-            @if (busy) { <p class="muted">Running…</p> }
-            <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
-        </div>
-    </div>
-}
-else
-{
-    <nav class="crumbs">
-        <button class="btn-sm back-btn" @onclick="GoBack" disabled="@(!CanGoBack)" title="Back to the previous view">← Back</button>
-        <button class="link" @onclick="BrowseRoot">Workspaces</button>
-        @if (!string.IsNullOrEmpty(workspace))
-        {
-            <span>›</span><button class="link" @onclick="BrowseWorkspace">@workspace</button>
-        }
-        @if (!string.IsNullOrEmpty(dataset))
-        {
-            <span>›</span>
-            @if (!string.IsNullOrEmpty(selTable) || !string.IsNullOrEmpty(selMeasure)) { <button class="link" @onclick="BrowseDataset">@dataset</button> }
-            else { <span class="crumb-current">@dataset</span> }
-        }
-        @if (!string.IsNullOrEmpty(selTable))
-        {
-            <span>›</span><span class="crumb-current">@selTable</span>
-        }
-        else if (!string.IsNullOrEmpty(selMeasure))
-        {
-            <span>›</span><span class="crumb-current">[@selMeasure]</span>
-        }
-    </nav>
-
-    @if (string.IsNullOrEmpty(workspace))
+<nav class="crumbs">
+    <button class="btn-sm back-btn" @onclick="GoBack" disabled="@(!CanGoBack)" title="Back to the previous view">← Back</button>
+    <button class="link" @onclick="BrowseRoot">Workspaces</button>
+    @if (!string.IsNullOrEmpty(workspace))
     {
-        <ErrorBanner Message="@error" />
-        <ClickableList Items="workspaces" OnSelect="SelectWorkspace"
-                       Empty="@(busy ? "Loading…" : "No workspaces — click Load.")" />
+        <span>›</span><button class="link" @onclick="BrowseWorkspace">@workspace</button>
     }
-    else if (string.IsNullOrEmpty(dataset))
+    @if (!string.IsNullOrEmpty(dataset))
     {
-        <div class="cmd-group">
-            <button class="btn-sm @(wsView == WsView.Datasets ? "active" : "")" @onclick="BrowseDatasets">Datasets</button>
-            <button class="btn-sm @(wsView == WsView.Reports ? "active" : "")" @onclick="ShowReports">Reports</button>
-            <button class="btn-sm @(wsView == WsView.Lineage ? "active" : "")" @onclick="ShowLineage">Lineage</button>
-        </div>
-        @if (wsView == WsView.Datasets)
-        {
-            <ErrorBanner Message="@error" />
-            <ClickableList Items="datasets" OnSelect="SelectDataset"
-                           Empty="@(busy ? "Loading…" : "No datasets in this workspace.")" />
-        }
-        else
-        {
-            @if (busy) { <p class="muted">Running…</p> }
-            <ResultGrid Result="result" Error="@error" />
-        }
+        <span>›</span>
+        @if (!string.IsNullOrEmpty(selTable) || !string.IsNullOrEmpty(selMeasure)) { <button class="link" @onclick="BrowseDataset">@dataset</button> }
+        else { <span class="crumb-current">@dataset</span> }
+    }
+    @if (!string.IsNullOrEmpty(selTable))
+    {
+        <span>›</span><span class="crumb-current">@selTable</span>
     }
     else if (!string.IsNullOrEmpty(selMeasure))
     {
-        <div class="cmd-group">
-            <button class="btn" @onclick="() => RunMeasure(selMeasure!)">Run measure →</button>
-            <span class="muted">@selMeasure@(string.IsNullOrEmpty(MeasureField("DisplayFolder")) ? "" : " · " + MeasureField("DisplayFolder"))</span>
-        </div>
-        <div class="side-h">DAX definition</div>
-        @if (string.IsNullOrEmpty(MeasureField("Expression")))
-        {
-            <p class="muted">No expression available for this measure.</p>
-        }
-        else
-        {
-            <pre class="code">@MeasureField("Expression")</pre>
-        }
+        <span>›</span><span class="crumb-current">[@selMeasure]</span>
     }
-    else if (string.IsNullOrEmpty(selTable))
+</nav>
+
+@if (string.IsNullOrEmpty(workspace))
+{
+    <ErrorBanner Message="@error" />
+    <ClickableList Items="workspaces" OnSelect="SelectWorkspace"
+                   Empty="@(busy ? "Loading…" : "No workspaces — click Load.")" />
+}
+else if (string.IsNullOrEmpty(dataset))
+{
+    <div class="cmd-group">
+        <button class="btn-sm @(wsView == WsView.Datasets ? "active" : "")" @onclick="BrowseDatasets">Datasets</button>
+        <button class="btn-sm @(wsView == WsView.Reports ? "active" : "")" @onclick="ShowReports">Reports</button>
+        <button class="btn-sm @(wsView == WsView.Lineage ? "active" : "")" @onclick="ShowLineage">Lineage</button>
+    </div>
+    @if (wsView == WsView.Datasets)
     {
-        <div class="cmd-group">
-            <button class="btn-sm @(modelView == ModelView.Tables ? "active" : "")" @onclick="BrowseTables">Tables</button>
-            <button class="btn-sm @(modelView == ModelView.Measures ? "active" : "")" @onclick="BrowseMeasures">Measures</button>
-            <button class="btn-sm" @onclick="ShowParameters">Parameters</button>
-            <button class="btn-sm" @onclick="ShowPartitions">Partitions</button>
-            <button class="btn-sm" @onclick="ShowRls">RLS</button>
-            <button class="btn-sm" @onclick="ShowDatasources">Datasources</button>
-            <button class="btn-sm" @onclick="ShowPermissions">Permissions</button>
-            <button class="btn-sm" @onclick="ShowRefreshHistory">Refresh history</button>
-            <a class="btn-sm" href="@($"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}")" title="Refresh this dataset">↻ Refresh…</a>
-            <button class="btn" @onclick="GoToQuery">Run DAX →</button>
+        <ErrorBanner Message="@error" />
+        <ClickableList Items="datasets" OnSelect="SelectDataset"
+                       Empty="@(busy ? "Loading…" : "No datasets in this workspace.")" />
+    }
+    else
+    {
+        @if (busy) { <p class="muted">Running…</p> }
+        <ResultGrid Result="result" Error="@error" />
+    }
+}
+else if (!string.IsNullOrEmpty(selMeasure))
+{
+    <div class="cmd-group">
+        <button class="btn" @onclick="() => RunMeasure(selMeasure!)">Run measure →</button>
+        <span class="muted">@selMeasure@(string.IsNullOrEmpty(MeasureField("DisplayFolder")) ? "" : " · " + MeasureField("DisplayFolder"))</span>
+    </div>
+    <div class="side-h">DAX definition</div>
+    @if (string.IsNullOrEmpty(MeasureField("Expression")))
+    {
+        <p class="muted">No expression available for this measure.</p>
+    }
+    else
+    {
+        <pre class="code">@MeasureField("Expression")</pre>
+    }
+}
+else if (string.IsNullOrEmpty(selTable))
+{
+    <div class="cmd-group">
+        <button class="btn-sm @(modelView == ModelView.Tables ? "active" : "")" @onclick="BrowseTables">Tables</button>
+        <button class="btn-sm @(modelView == ModelView.Measures ? "active" : "")" @onclick="BrowseMeasures">Measures</button>
+        <button class="btn-sm" @onclick="ShowParameters">Parameters</button>
+        <button class="btn-sm" @onclick="ShowPartitions">Partitions</button>
+        <button class="btn-sm" @onclick="ShowRls">RLS</button>
+        <button class="btn-sm @(rlsPanel ? "active" : "")" @onclick="ShowTestRls">Test RLS</button>
+        <button class="btn-sm" @onclick="ShowDatasources">Datasources</button>
+        <button class="btn-sm" @onclick="ShowPermissions">Permissions</button>
+        <button class="btn-sm" @onclick="ShowRefreshHistory">Refresh history</button>
+        <a class="btn-sm" href="@($"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}")" title="Refresh this dataset">↻ Refresh…</a>
+        <button class="btn" @onclick="GoToQuery">Run DAX →</button>
+    </div>
+    @if (rlsPanel)
+    {
+        <div class="card">
+            <p><strong>Test RLS</strong> — run a DAX query while impersonating a role and/or user, to see exactly what they'd see. Read-only, but the signed-in identity must be an <strong>admin</strong> of this workspace/model to impersonate.</p>
+            <div class="row">
+                <div>
+                    <label>Role <span class="muted">(@rlsRoles.Count)</span></label>
+                    <select @bind="rlsRole">
+                        <option value="">— none —</option>
+                        @foreach (var r in rlsRoles) { <option value="@r">@r</option> }
+                    </select>
+                </div>
+                <div>
+                    <label>Effective user — UPN <span class="muted">optional</span></label>
+                    <input class="combo" @bind="rlsUser" placeholder="user@contoso.com" autocomplete="off" />
+                </div>
+            </div>
+            <label>DAX query</label>
+            <textarea class="dax-editor" @bind="rlsDax" rows="6" spellcheck="false"
+                      placeholder="EVALUATE TOPN(100, 'Table')"></textarea>
+            <div class="actions">
+                <button class="btn" @onclick="RunTestRls"
+                        disabled="@(rlsBusy || (string.IsNullOrWhiteSpace(rlsRole) && string.IsNullOrWhiteSpace(rlsUser)) || string.IsNullOrWhiteSpace(rlsDax))">
+                    ▶ Run as identity
+                </button>
+                <span class="muted">@IdentityHint()</span>
+            </div>
+            @if (rlsBusy) { <p class="muted">Running under the impersonated identity…</p> }
+            <ResultGrid Result="rlsResult" Error="@rlsError" Empty="Pick a role and/or user, then run." />
         </div>
-        @if (modelView == ModelView.Tables)
-        {
-            <ErrorBanner Message="@error" />
-            <p class="muted">Click a table to see its M code &amp; partitions, or preview its rows.</p>
-            <ClickableList Items="modelTables" OnSelect="SelectTable"
-                           Empty="@(busy ? "Loading…" : "No tables.")" />
-        }
-        else if (modelView == ModelView.Measures)
-        {
-            <ErrorBanner Message="@error" />
-            <p class="muted">Click a measure to see its <strong>DAX definition</strong> and run it.</p>
-            <ClickableList Items="modelMeasures" OnSelect="SelectMeasure"
-                           Empty="@(busy ? "Loading…" : "No measures.")" />
-        }
+    }
+    else if (modelView == ModelView.Tables)
+    {
+        <ErrorBanner Message="@error" />
+        <p class="muted">Click a table to see its M code &amp; partitions, or preview its rows.</p>
+        <ClickableList Items="modelTables" OnSelect="SelectTable"
+                       Empty="@(busy ? "Loading…" : "No tables.")" />
+    }
+    else if (modelView == ModelView.Measures)
+    {
+        <ErrorBanner Message="@error" />
+        @if (busy) { <p class="muted">Loading…</p> }
+        else if (measuresResult is null || measuresResult.RowCount == 0) { <p class="muted">No measures.</p> }
         else
         {
-            @if (busy) { <p class="muted">Running…</p> }
-            <ResultGrid Result="result" Error="@error" Empty="Pick a command above." />
+            <div class="grid-toolbar">
+                <input class="obj-search measure-search" @bind="measureSearch" @bind:event="oninput"
+                       placeholder="search measures — name, folder, or definition…" autocomplete="off" />
+                <button class="btn-sm" @onclick="ExportMeasures" title="Download the listed measures + definitions as CSV">Export CSV</button>
+            </div>
+            <div class="grid-wrap">
+                <table class="grid measures-grid">
+                    <thead><tr><th>Measure</th><th>Definition</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var m in MeasureRows())
+                        {
+                            <tr>
+                                <td class="m-name">
+                                    <button class="link m-namebtn" @onclick="() => SelectMeasure(m.Name)" title="Open this measure">@m.Name</button>
+                                    @if (!string.IsNullOrEmpty(m.Folder)) { <small class="side-sub">@m.Folder</small> }
+                                </td>
+                                <td class="m-def">
+                                    @if (string.IsNullOrEmpty(m.Expression)) { <span class="muted">—</span> }
+                                    else
+                                    {
+                                        <pre class="code m-expr @(expandedMeasures.Contains(m.Name) ? "expanded" : "")"
+                                             @onclick="() => ToggleMeasure(m.Name)"
+                                             title="Click to expand / collapse">@m.Expression</pre>
+                                    }
+                                </td>
+                                <td class="m-actions">
+                                    <button class="btn-sm" @onclick="() => RunMeasure(m.Name)" title="Run on the DAX Query page">Run →</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="muted">@MeasureRows().Count() of @measuresResult.RowCount measure(s)@(string.IsNullOrWhiteSpace(measureSearch) ? "" : " match")</p>
         }
     }
     else
     {
-        <div class="cmd-group">
-            <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
-            <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
-            <button class="btn-sm" @onclick="() => RunTopN(10)" title="EVALUATE TOPN(10, …) on the DAX tab">Top 10 rows →</button>
-            <button class="btn-sm" @onclick="() => RunTopN(100)" title="EVALUATE TOPN(100, …) on the DAX tab">Top 100 rows →</button>
-            <a class="btn-sm" href="@RefreshLink()" title="Refresh this dataset on the Refresh page">↻ Refresh…</a>
-        </div>
-
         @if (busy) { <p class="muted">Running…</p> }
-        else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
-        else if (tableView == TableView.Mcode && result is not null)
-        {
-            var mcode = SingleCell(result, "QueryDefinition");
-            if (string.IsNullOrEmpty(mcode)) { <p class="muted">No M code for this table (it may be a calculated or DirectQuery table).</p> }
-            else { <pre class="code">@mcode</pre> }
-        }
-        else
-        {
-            <ResultGrid Result="result" Error="@error" Empty="Loading…" />
-        }
+        <ResultGrid Result="result" Error="@error" Empty="Pick a command above." />
+    }
+}
+else
+{
+    <div class="cmd-group">
+        <button class="btn-sm @(tableView == TableView.Mcode ? "active" : "")" @onclick="ShowMcode">M code</button>
+        <button class="btn-sm @(tableView == TableView.Partitions ? "active" : "")" @onclick="ShowTablePartitions">Partitions</button>
+        <button class="btn-sm" @onclick="() => RunTopN(10)" title="EVALUATE TOPN(10, …) on the DAX Query page">Top 10 rows →</button>
+        <button class="btn-sm" @onclick="() => RunTopN(100)" title="EVALUATE TOPN(100, …) on the DAX Query page">Top 100 rows →</button>
+        <a class="btn-sm" href="@RefreshLink()" title="Refresh this dataset on the Refresh page">↻ Refresh…</a>
+    </div>
+
+    @if (busy) { <p class="muted">Running…</p> }
+    else if (!string.IsNullOrEmpty(error)) { <ErrorBanner Message="@error" /> }
+    else if (tableView == TableView.Mcode && result is not null)
+    {
+        var mcode = SingleCell(result, "QueryDefinition");
+        if (string.IsNullOrEmpty(mcode)) { <p class="muted">No M code for this table (it may be a calculated or DirectQuery table).</p> }
+        else { <pre class="code">@mcode</pre> }
+    }
+    else
+    {
+        <ResultGrid Result="result" Error="@error" Empty="Loading…" />
     }
 }
 
 @code {
-    private enum Tab { Query, Browse }
     private enum WsView { Datasets, Reports, Lineage }
     private enum ModelView { None, Tables, Measures }
     private enum TableView { Mcode, Partitions }
 
-    private Tab tab = Tab.Browse;
     private WsView wsView = WsView.Datasets;
     private ModelView modelView = ModelView.None;
     private TableView tableView = TableView.Mcode;
@@ -268,7 +250,7 @@ else
     private List<string> datasets = new();
     private List<string> modelTables = new();
     private List<string> modelMeasures = new();
-    private string workspace = "", dataset = "", dax = "";
+    private string workspace = "", dataset = "";
     private string? selTable;
     private string? selMeasure;
     private QueryResult? measuresResult;
@@ -277,19 +259,56 @@ else
     private string? error;
     private bool busy;
 
-    // DAX-tab fields explorer
-    private ModelTree? objects;
-    private string? objectsFor;
-    private bool objLoading;
-    private string? objError;
-    private readonly HashSet<string> expandedTables = new();
-    private string objSearch = "";
-    private bool showFields = true;
-    private ElementReference editorRef;
-    private bool acAttached;
-    private bool acDirty;
+    // Measures grid (search + inline expandable definitions)
+    private string measureSearch = "";
+    private readonly HashSet<string> expandedMeasures = new();
+    private sealed record MeasureRow(string Name, string Folder, string Expression, string Table);
 
-    private sealed record AcItem(string Label, string Insert, string Kind);
+    private IEnumerable<MeasureRow> MeasureRows()
+    {
+        if (measuresResult is null) yield break;
+        int ni = ColIndex(measuresResult, "Name");
+        int ei = ColIndex(measuresResult, "Expression");
+        int fi = ColIndex(measuresResult, "DisplayFolder");
+        int ti = ColIndex(measuresResult, "Table");
+        var q = measureSearch?.Trim();
+        foreach (var row in measuresResult.Rows)
+        {
+            var name = ni >= 0 ? row[ni]?.ToString() ?? "" : "";
+            if (name.Length == 0) continue;
+            var expr = ei >= 0 ? row[ei]?.ToString() ?? "" : "";
+            var folder = fi >= 0 ? row[fi]?.ToString() ?? "" : "";
+            var table = ti >= 0 ? row[ti]?.ToString() ?? "" : "";
+            if (!string.IsNullOrEmpty(q)
+                && !name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                && !expr.Contains(q, StringComparison.OrdinalIgnoreCase)
+                && !folder.Contains(q, StringComparison.OrdinalIgnoreCase))
+                continue;
+            yield return new MeasureRow(name, folder, expr, table);
+        }
+    }
+
+    private void ToggleMeasure(string name) { if (!expandedMeasures.Remove(name)) expandedMeasures.Add(name); }
+
+    // Export the currently listed measures (respects the search filter) as CSV.
+    private async Task ExportMeasures()
+    {
+        var rows = MeasureRows()
+            .Select(m => new object?[] { m.Name, m.Folder, m.Expression })
+            .ToList();
+        var table = new QueryResult(new[] { "Measure", "DisplayFolder", "Definition" }, rows);
+        var csv = new Daxter.Core.Formatting.CsvResultFormatter().Format(table);
+        var safe = string.Concat((dataset ?? "measures").Select(c => char.IsLetterOrDigit(c) ? c : '-'));
+        await JS.InvokeVoidAsync("daxterDownload", $"measures-{safe}.csv", csv);
+    }
+
+    // Test RLS panel (dataset-level command)
+    private bool rlsPanel;
+    private List<string> rlsRoles = new();
+    private string rlsRole = "", rlsUser = "", rlsDax = "";
+    private QueryResult? rlsResult;
+    private string? rlsError;
+    private bool rlsBusy;
 
     // Browse navigation history (browser-style Back).
     private readonly Stack<BrowseState> back = new();
@@ -301,16 +320,14 @@ else
         List<string> Datasets, List<string> ModelTables, List<string> ModelMeasures,
         QueryResult? MeasuresResult, QueryResult? Result, string? Error);
 
-    private const char Sep = '\u001F'; // table usage Parent = workspace<unit-sep>dataset
+    private const char Sep = ''; // table usage Parent = workspace<unit-sep>dataset
 
     // Deep-link from the "Frequent" sidebar: /explore?ws=..&ds=..&table=..
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "table")] public string? Qtable { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "measure")] public string? Qmeasure { get; set; }
     private string? appliedQuery;
-
-    private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
-    private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
 
     protected override async Task OnInitializedAsync()
     {
@@ -322,32 +339,17 @@ else
         }
         catch { /* no default configured */ }
 
-        Actions.RunRequested += OnRunRequested; // sidebar "Recent queries" → run here
-
-        // Browse is the default tab — load the workspace list up front.
         if (workspaces.Count == 0) await LoadWorkspaces();
     }
-
-    private async Task OnRunRequested(QueryEntry e)
-    {
-        tab = Tab.Query;
-        workspace = e.Workspace;
-        dataset = e.Dataset ?? "";
-        dax = e.Dax;
-        await RunQuery();
-    }
-
-    public void Dispose() => Actions.RunRequested -= OnRunRequested;
 
     protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(Qws)) return;
-        var key = $"{Qws}{Sep}{Qds}{Sep}{Qtable}";
+        var key = $"{Qws}{Sep}{Qds}{Sep}{Qtable}{Sep}{Qmeasure}";
         if (key == appliedQuery) return;   // only apply a given deep-link once
         appliedQuery = key;
 
         back.Clear();                      // fresh navigation context from the sidebar
-        tab = Tab.Browse;
         if (workspaces.Count == 0) await LoadWorkspaces();
         workspace = Qws!;
         await OnWorkspaceChanged();        // loads datasets, records the workspace
@@ -360,27 +362,35 @@ else
             {
                 await SelectTable(Qtable!); // drills in + shows M code + records the table
             }
+            else if (!string.IsNullOrEmpty(Qmeasure))
+            {
+                // Open the measure's definition directly.
+                modelView = ModelView.Measures; rlsPanel = false; error = null;
+                measureSearch = ""; expandedMeasures.Clear();
+                try
+                {
+                    measuresResult = await Ui.MeasuresWithTableAsync(workspace, dataset);
+                    modelMeasures = ColumnValues(measuresResult, "Name");
+                }
+                catch (Exception ex) { error = ex.Message; }
+                selMeasure = Qmeasure;
+                Usage.Record(UsageStore.Measure, Qmeasure!, $"{workspace}{Sep}{dataset}", UsageStore.ExploreContext);
+            }
         }
     }
 
     // ---- navigation ----
 
-    private async Task EnterBrowse()
-    {
-        tab = Tab.Browse;
-        if (workspaces.Count == 0) await LoadWorkspaces();
-    }
-
-    private void BrowseRoot() { PushBack(); workspace = ""; dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; result = null; }
+    private void BrowseRoot() { PushBack(); workspace = ""; dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; result = null; rlsPanel = false; }
 
     private async Task BrowseWorkspace()
     {
         PushBack();
-        dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; wsView = WsView.Datasets; result = null;
+        dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; wsView = WsView.Datasets; result = null; rlsPanel = false;
         if (datasets.Count == 0 && !string.IsNullOrEmpty(workspace)) await OnWorkspaceChanged();
     }
 
-    private void BrowseDataset() { PushBack(); selTable = null; selMeasure = null; modelView = ModelView.None; result = null; }
+    private void BrowseDataset() { PushBack(); selTable = null; selMeasure = null; modelView = ModelView.None; result = null; rlsPanel = false; }
 
     private async Task SelectWorkspace(string ws)
     {
@@ -393,7 +403,7 @@ else
     private void SelectDataset(string ds)
     {
         PushBack();
-        dataset = ds; selTable = null; selMeasure = null; modelView = ModelView.None; result = null;
+        dataset = ds; selTable = null; selMeasure = null; modelView = ModelView.None; result = null; rlsPanel = false;
         Usage.Record(UsageStore.Dataset, ds, workspace, UsageStore.ExploreContext);
     }
 
@@ -405,270 +415,12 @@ else
         await ShowMcode();   // show M code by default
     }
 
-    private Task GoToQuery() => ShowQueryTab();
-
-    // ---- DAX-tab fields explorer ----
-
-    private async Task ShowQueryTab()
+    // The top dataset combo: reset the drill-down to the dataset's command view.
+    private void OnDatasetPicked()
     {
-        tab = Tab.Query;
-        if (!string.IsNullOrEmpty(dataset) && objectsFor != dataset) await LoadObjects();
-    }
-
-    private async Task OnDatasetPicked()
-    {
-        objects = null; objectsFor = null; expandedTables.Clear();
-        if (tab == Tab.Query && !string.IsNullOrEmpty(dataset)) await LoadObjects();
-    }
-
-    private async Task LoadObjects()
-    {
-        if (string.IsNullOrEmpty(dataset)) return;
-        objLoading = true; objError = null; objects = null; StateHasChanged();
-        try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; acDirty = true; }
-        catch (Exception ex) { objError = ex.Message; }
-        finally { objLoading = false; }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (tab != Tab.Query) { acAttached = false; return; } // re-attach when the editor re-appears
-
-        // Auto-load the Fields tree for the current dataset (no button).
-        if (!string.IsNullOrEmpty(dataset) && objects is null && !objLoading && objError is null && objectsFor != dataset)
-        {
-            await LoadObjects();
-        }
-
-        if (!acAttached)
-        {
-            try { await JS.InvokeVoidAsync("daxComplete.attach", editorRef); acAttached = true; acDirty = true; }
-            catch { /* JS not ready */ }
-        }
-        if (acAttached && acDirty)
-        {
-            try { await JS.InvokeVoidAsync("daxComplete.setCandidates", editorRef, BuildCandidates()); acDirty = false; }
-            catch { }
-        }
-        // Re-paint the syntax highlight after programmatic edits (Format, field/history insert).
-        if (acAttached)
-        {
-            try { await JS.InvokeVoidAsync("daxComplete.rehighlight", editorRef); }
-            catch { }
-        }
-    }
-
-    // Functions inserted with "(", keywords as-is; fields from the loaded model.
-    private static readonly string[] DaxFunctions =
-    {
-        "CALCULATE","CALCULATETABLE","FILTER","ALL","ALLEXCEPT","ALLSELECTED","ALLNOBLANKROW","REMOVEFILTERS",
-        "KEEPFILTERS","VALUES","DISTINCT","RELATED","RELATEDTABLE","EARLIER","SELECTEDVALUE","HASONEVALUE",
-        "SUM","SUMX","AVERAGE","AVERAGEX","MIN","MINX","MAX","MAXX","COUNT","COUNTA","COUNTAX","COUNTX",
-        "COUNTROWS","COUNTBLANK","DISTINCTCOUNT","DIVIDE","PRODUCT","PRODUCTX","ROUND","ABS","INT","MOD",
-        "IF","IFERROR","SWITCH","AND","OR","NOT","ISBLANK","ISERROR","ISFILTERED","ISINSCOPE","COALESCE",
-        "CONCATENATE","CONCATENATEX","FORMAT","LEFT","RIGHT","MID","LEN","UPPER","LOWER","TRIM","SUBSTITUTE",
-        "SEARCH","FIND","VALUE","DATE","TODAY","NOW","YEAR","MONTH","DAY","WEEKDAY","WEEKNUM","EOMONTH",
-        "EDATE","DATEDIFF","DATEADD","TOTALYTD","TOTALQTD","TOTALMTD","DATESYTD","DATESMTD","SAMEPERIODLASTYEAR",
-        "PARALLELPERIOD","PREVIOUSYEAR","PREVIOUSMONTH","NEXTYEAR","NEXTMONTH","FIRSTDATE","LASTDATE",
-        "STARTOFMONTH","ENDOFMONTH","DATESBETWEEN","DATESINPERIOD","RANKX","TOPN","ROW","SUMMARIZE",
-        "SUMMARIZECOLUMNS","ADDCOLUMNS","SELECTCOLUMNS","GROUPBY","CROSSJOIN","UNION","INTERSECT","EXCEPT",
-        "TREATAS","USERELATIONSHIP","CROSSFILTER","CONTAINS","LOOKUPVALUE","USERPRINCIPALNAME",
-    };
-    private static readonly string[] DaxKeywords =
-    {
-        "EVALUATE","DEFINE","MEASURE","VAR","RETURN","ORDER BY","START AT","TRUE","FALSE","BLANK()",
-    };
-
-    // ---- Format + validate ----
-
-    private void FormatQuery() { dax = FormatDax(dax); }
-
-    private static readonly HashSet<string> DaxUpper =
-        new(DaxFunctions.Concat(new[] { "EVALUATE", "DEFINE", "MEASURE", "VAR", "RETURN", "TRUE", "FALSE", "BLANK", "IN", "NOT", "AND", "OR" }),
-            StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Heuristic DAX pretty-printer (local — never sends the query anywhere).</summary>
-    private static string FormatDax(string src)
-    {
-        if (string.IsNullOrWhiteSpace(src)) return src;
-        var toks = TokenizeDax(src);
-
-        // match parens; a call breaks across lines only if it contains a nested call.
-        var match = new int[toks.Count];
-        var st = new Stack<int>();
-        for (var x = 0; x < toks.Count; x++)
-        {
-            if (toks[x].Kind == '(') st.Push(x);
-            else if (toks[x].Kind == ')' && st.Count > 0) { var o = st.Pop(); match[o] = x; match[x] = o; }
-        }
-        var block = new bool[toks.Count];
-        for (var x = 0; x < toks.Count; x++)
-            if (toks[x].Kind == '(')
-            {
-                var m = match[x] > x ? match[x] : toks.Count;
-                for (var y = x + 1; y < m; y++) if (toks[y].Kind == '(') { block[x] = true; break; }
-            }
-
-        var sb = new StringBuilder();
-        int indent = 0; bool needSpace = false;
-        (char Kind, string Value)? prev = null;
-        var blk = new Stack<bool>();
-        void NL() { while (sb.Length > 0 && sb[^1] == ' ') sb.Length--; sb.Append('\n').Append(new string(' ', indent * 4)); needSpace = false; }
-
-        for (var x = 0; x < toks.Count; x++)
-        {
-            var tk = toks[x];
-            if (tk.Kind == '(')
-            {
-                sb.Append('('); blk.Push(block[x]);
-                if (block[x]) { indent++; NL(); } else needSpace = false;
-                prev = null;
-            }
-            else if (tk.Kind == ')')
-            {
-                var b = blk.Count > 0 && blk.Pop();
-                if (b) { indent = Math.Max(0, indent - 1); NL(); }
-                sb.Append(')'); needSpace = true; prev = tk;
-            }
-            else if (tk.Kind == ',')
-            {
-                while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;
-                sb.Append(',');
-                if (blk.Count > 0 && blk.Peek()) NL(); else { sb.Append(' '); needSpace = false; }
-                prev = null;
-            }
-            else
-            {
-                var v = tk.Value;
-                if (tk.Kind == 'w' && DaxUpper.Contains(v)) v = v.ToUpperInvariant();
-                var attach = tk.Kind == 'l' && v.StartsWith("[")
-                    && prev is { Kind: 'l' } p && (p.Value.EndsWith("'") || p.Value.EndsWith("]"));
-                if (needSpace && !attach) sb.Append(' ');
-                sb.Append(v); needSpace = true; prev = tk;
-                if (tk.Kind == 'w' && indent == 0 && (v == "EVALUATE" || v == "DEFINE")) { NL(); prev = null; }
-            }
-        }
-        return sb.ToString().Trim();
-    }
-
-    private static List<(char Kind, string Value)> TokenizeDax(string s)
-    {
-        var t = new List<(char, string)>();
-        int i = 0, n = s.Length;
-        while (i < n)
-        {
-            var c = s[i];
-            if (char.IsWhiteSpace(c)) { i++; continue; }
-            if (c == '"' || c == '\'')
-            {
-                var j = i + 1;
-                while (j < n) { if (s[j] == c) { if (j + 1 < n && s[j + 1] == c) { j += 2; continue; } j++; break; } j++; }
-                t.Add(('l', s[i..j])); i = j; continue;
-            }
-            if (c == '[')
-            {
-                var j = i + 1;
-                while (j < n && s[j] != ']') j++;
-                if (j < n) j++;
-                t.Add(('l', s[i..j])); i = j; continue;
-            }
-            if (c is '(' or ')' or ',') { t.Add((c, c.ToString())); i++; continue; }
-            var k = i;
-            while (k < n && !char.IsWhiteSpace(s[k]) && s[k] is not ('(' or ')' or ',' or '"' or '\'' or '[')) k++;
-            t.Add(('w', s[i..k])); i = k;
-        }
-        return t;
-    }
-
-    /// <summary>Quick static checks — unbalanced delimiters and the missing-EVALUATE case.</summary>
-    private List<string> DaxIssues()
-    {
-        var issues = new List<string>();
-        if (string.IsNullOrWhiteSpace(dax)) return issues;
-        int paren = 0, bracket = 0; bool inStr = false, inTick = false;
-        for (var i = 0; i < dax.Length; i++)
-        {
-            var c = dax[i];
-            if (inStr) { if (c == '"') { if (i + 1 < dax.Length && dax[i + 1] == '"') i++; else inStr = false; } continue; }
-            if (inTick) { if (c == '\'') { if (i + 1 < dax.Length && dax[i + 1] == '\'') i++; else inTick = false; } continue; }
-            if (c == '"') inStr = true;
-            else if (c == '\'') inTick = true;
-            else if (c == '(') paren++;
-            else if (c == ')') { if (paren == 0) { issues.Add("Extra ')' — a closing parenthesis with no opener."); } else paren--; }
-            else if (c == '[') bracket++;
-            else if (c == ']') { if (bracket == 0) { issues.Add("Extra ']' — a closing bracket with no opener."); } else bracket--; }
-        }
-        if (inStr) issues.Add("Unclosed string — a \" is never closed.");
-        if (inTick) issues.Add("Unclosed table name — a ' is never closed.");
-        if (paren > 0) issues.Add($"{paren} unclosed '(' — missing {paren} ')'.");
-        if (bracket > 0) issues.Add($"{bracket} unclosed '[' — missing {bracket} ']' (a column / measure reference).");
-        var trimmed = dax.TrimStart();
-        if (trimmed.Length > 0 && !trimmed.StartsWith("EVALUATE", StringComparison.OrdinalIgnoreCase)
-            && !trimmed.StartsWith("DEFINE", StringComparison.OrdinalIgnoreCase))
-            issues.Add("A DAX query should start with EVALUATE (or DEFINE).");
-        return issues;
-    }
-
-    private AcItem[] BuildCandidates()
-    {
-        var list = new List<AcItem>();
-        foreach (var f in DaxFunctions) list.Add(new AcItem(f, f + "(", "function"));
-        foreach (var k in DaxKeywords) list.Add(new AcItem(k, k.EndsWith(")") ? k : k + " ", "keyword"));
-
-        if (objects is not null)
-        {
-            foreach (var t in objects.Tables)
-            {
-                var tref = "'" + t.Table.Replace("'", "''") + "'";
-                list.Add(new AcItem("'" + t.Table + "'", tref, "table"));
-                foreach (var o in t.Items)
-                {
-                    if (o.IsMeasure)
-                        list.Add(new AcItem("[" + o.Name + "]", "[" + o.Name.Replace("]", "]]") + "]", "measure"));
-                    else
-                        list.Add(new AcItem("'" + t.Table + "'[" + o.Name + "]", tref + "[" + o.Name.Replace("]", "]]") + "]", "column"));
-                }
-            }
-        }
-        return list.ToArray();
-    }
-
-    private bool IsExpanded(string table) => !string.IsNullOrEmpty(objSearch) || expandedTables.Contains(table);
-    private void ToggleTable(string table) { if (!expandedTables.Remove(table)) expandedTables.Add(table); }
-
-    private IEnumerable<ModelTableNode> FilteredTables()
-    {
-        if (objects is null) yield break;
-        var q = objSearch?.Trim();
-        foreach (var t in objects.Tables)
-        {
-            if (string.IsNullOrEmpty(q)
-                || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || t.Items.Any(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase)))
-                yield return t;
-        }
-    }
-
-    private IEnumerable<ModelObject> FilteredItems(ModelTableNode t)
-    {
-        var q = objSearch?.Trim();
-        if (string.IsNullOrEmpty(q) || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase))
-            return t.Items;
-        return t.Items.Where(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private void InsertTable(string table) => Append("'" + table.Replace("'", "''") + "'");
-
-    private void InsertRef(string table, ModelObject o)
-    {
-        var name = o.Name.Replace("]", "]]");
-        Append(o.IsMeasure ? "[" + name + "]" : "'" + table.Replace("'", "''") + "'[" + name + "]");
-    }
-
-    private void Append(string reference)
-    {
-        var sep = string.IsNullOrEmpty(dax) || dax.EndsWith(" ") || dax.EndsWith("\n") ? "" : " ";
-        dax = dax + sep + reference;
+        selTable = null; selMeasure = null; modelView = ModelView.None; rlsPanel = false; result = null; error = null;
+        if (!string.IsNullOrEmpty(dataset))
+            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext);
     }
 
     private async Task LoadDefault()
@@ -681,7 +433,7 @@ else
 
     // Clear the combo so its full datalist shows again (native datalist filters to the current value).
     private async Task ClearWorkspace() { workspace = ""; await OnWorkspaceChanged(); } // also clears datasets/dataset
-    private void ClearDataset() => dataset = "";
+    private void ClearDataset() { dataset = ""; selTable = null; selMeasure = null; modelView = ModelView.None; rlsPanel = false; result = null; }
 
     private async Task LoadWorkspaces()
     {
@@ -714,7 +466,7 @@ else
     private async Task BrowseTables()
     {
         PushBack();
-        modelView = ModelView.Tables; result = null; error = null; busy = true; StateHasChanged();
+        modelView = ModelView.Tables; rlsPanel = false; result = null; error = null; busy = true; StateHasChanged();
         try { modelTables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }
         finally { busy = false; }
@@ -723,10 +475,12 @@ else
     private async Task BrowseMeasures()
     {
         PushBack();
-        modelView = ModelView.Measures; result = null; error = null; busy = true; StateHasChanged();
+        modelView = ModelView.Measures; rlsPanel = false; result = null; error = null;
+        measureSearch = ""; expandedMeasures.Clear();
+        busy = true; StateHasChanged();
         try
         {
-            measuresResult = await Ui.MeasuresAsync(workspace, dataset); // keeps Name + Expression + folder
+            measuresResult = await Ui.MeasuresWithTableAsync(workspace, dataset); // Name + DisplayFolder + Expression + Table
             modelMeasures = ColumnValues(measuresResult, "Name");
         }
         catch (Exception ex) { error = ex.Message; }
@@ -737,17 +491,22 @@ else
     {
         PushBack();
         selMeasure = measure; result = null; error = null;
+        Usage.Record(UsageStore.Measure, measure, $"{workspace}{Sep}{dataset}", UsageStore.ExploreContext);
     }
 
     /// <summary>A column value for the selected measure, from the loaded measures result.</summary>
-    private string? MeasureField(string column)
+    private string? MeasureField(string column) =>
+        string.IsNullOrEmpty(selMeasure) ? null : MeasureValue(selMeasure!, column);
+
+    /// <summary>A column value for a named measure, from the loaded measures result.</summary>
+    private string? MeasureValue(string measure, string column)
     {
-        if (measuresResult is null || string.IsNullOrEmpty(selMeasure)) return null;
+        if (measuresResult is null) return null;
         var nameIdx = ColIndex(measuresResult, "Name");
         var colIdx = ColIndex(measuresResult, column);
         if (nameIdx < 0 || colIdx < 0) return null;
         foreach (var row in measuresResult.Rows)
-            if (string.Equals(row[nameIdx]?.ToString(), selMeasure, StringComparison.Ordinal))
+            if (string.Equals(row[nameIdx]?.ToString(), measure, StringComparison.Ordinal))
                 return row[colIdx]?.ToString();
         return null;
     }
@@ -759,13 +518,17 @@ else
         return -1;
     }
 
-    // ---- quick "run it" actions: prefill the DAX tab and execute ----
+    // ---- "Run DAX" hands off to the dedicated /query page ----
 
+    // "Run DAX →" — open the DAX Query page preselected to this model (no run).
+    private void GoToQuery()
+        => Nav.NavigateTo($"query?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}");
+
+    // Prefill a query and run it on the DAX Query page.
     private async Task GoRunDax(string daxQuery)
     {
-        dax = daxQuery;
-        tab = Tab.Query;
-        await RunQuery();
+        await Actions.Run(new QueryEntry(daxQuery, workspace, dataset, 0, DateTimeOffset.Now));
+        Nav.NavigateTo("query");
     }
 
     private Task RunTopN(int n)
@@ -774,11 +537,28 @@ else
         return GoRunDax("EVALUATE\nTOPN(" + n + ", '" + t + "')");
     }
 
+    // Open the DAX Query page with the measure's DEFINITION (a runnable DEFINE MEASURE block),
+    // so its actual logic is visible and editable — not just a reference to the measure.
     private Task RunMeasure(string measure)
     {
+        Usage.Record(UsageStore.Measure, measure, $"{workspace}{Sep}{dataset}", UsageStore.ExploreContext);
+        var expr = MeasureValue(measure, "Expression");
+        var table = MeasureValue(measure, "Table");
+        return GoRunDax(BuildMeasureQuery(measure, table, expr));
+    }
+
+    // DEFINE MEASURE 'Table'[Name] = <definition> EVALUATE ROW("Name", [Name])
+    // Falls back to a bare reference if the definition isn't available.
+    private static string BuildMeasureQuery(string measure, string? table, string? expr)
+    {
         var label = measure.Replace("\"", "\"\"");
-        var name = measure.Replace("]", "]]");
-        return GoRunDax("EVALUATE\nROW(\"" + label + "\", [" + name + "])");
+        var safeName = measure.Replace("]", "]]");
+        if (string.IsNullOrWhiteSpace(expr))
+            return "EVALUATE\nROW(\"" + label + "\", [" + safeName + "])";
+        var tbl = (string.IsNullOrWhiteSpace(table) ? "_Measures" : table!).Replace("'", "''");
+        var body = expr!.Trim().Replace("\n", "\n        ");
+        return "DEFINE\n    MEASURE '" + tbl + "'[" + safeName + "] =\n        " + body
+             + "\nEVALUATE\n    ROW(\"" + label + "\", [" + safeName + "])";
     }
 
     // Model commands push a back-state first, so Back returns to the dataset's command view.
@@ -789,28 +569,47 @@ else
     private Task ShowDatasources() => Cmd(() => Ui.DatasourcesAsync(workspace, dataset));
     private Task ShowPermissions() => Cmd(() => Ui.PermissionsAsync(workspace, dataset));
     private Task ShowRefreshHistory() => Cmd(() => Ui.RefreshHistoryAsync(workspace, dataset));
-    private async Task RunQuery()
+
+    // Test RLS: a small form (role + UPN + DAX) that runs under an impersonated identity.
+    private async Task ShowTestRls()
     {
-        await Show(() => Ui.QueryAsync(workspace, dataset, dax));
-        if (error is null)
-        {
-            if (!string.IsNullOrEmpty(dataset))
-                Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext); // dataset proven valid by a successful query
-            History.Record(dax, workspace, dataset); // remember for one-click re-run (shown in the sidebar)
-        }
+        PushBack();
+        modelView = ModelView.None; result = null; error = null;
+        rlsPanel = true; rlsResult = null; rlsError = null;
+        if (string.IsNullOrWhiteSpace(rlsDax))
+            rlsDax = "EVALUATE TOPN(100, '" + (modelTables.FirstOrDefault() ?? "Table").Replace("'", "''") + "')";
+        try { rlsRoles = ColumnValues(await Ui.RlsAsync(workspace, dataset), "Name"); }
+        catch { rlsRoles = new(); } // roles are a convenience for the dropdown — a free-typed UPN still works
+    }
+
+    private async Task RunTestRls()
+    {
+        rlsBusy = true; rlsError = null; rlsResult = null; StateHasChanged();
+        try { rlsResult = await Ui.TestRlsAsync(workspace, dataset, rlsRole, rlsUser, rlsDax); }
+        catch (Exception ex) { rlsError = ex.Message; }
+        finally { rlsBusy = false; }
+    }
+
+    private string IdentityHint()
+    {
+        var hasRole = !string.IsNullOrWhiteSpace(rlsRole);
+        var hasUser = !string.IsNullOrWhiteSpace(rlsUser);
+        if (hasRole && hasUser) return $"as user '{rlsUser}' within role '{rlsRole}'";
+        if (hasRole) return $"as role '{rlsRole}'";
+        if (hasUser) return $"as user '{rlsUser}'";
+        return "pick a role and/or enter a user UPN";
     }
 
     private Task ShowMcode() { tableView = TableView.Mcode; return Show(() => Ui.McodeAsync(workspace, dataset, selTable!)); }
     private Task ShowTablePartitions() { tableView = TableView.Partitions; return Show(() => Ui.TablePartitionsAsync(workspace, dataset, selTable!)); }
 
-    // Deep-link to the dedicated Refresh page with this table preselected.
-    // Refresh links only carry workspace + dataset; the user picks the scope on the Refresh page.
+    // Deep-link to the dedicated Refresh page with this dataset preselected.
     private string RefreshLink()
         => $"refresh?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}";
 
     private async Task Show(Func<Task<QueryResult>> op)
     {
-        modelView = ModelView.None;
+        modelView = ModelView.None; rlsPanel = false;
         busy = true; error = null; result = null; StateHasChanged();
         try { result = await op(); }
         catch (Exception ex) { error = ex.Message; }
@@ -831,7 +630,7 @@ else
         wsView = s.WsView; modelView = s.ModelView; tableView = s.TableView;
         datasets = s.Datasets; modelTables = s.ModelTables; modelMeasures = s.ModelMeasures;
         measuresResult = s.MeasuresResult; result = s.Result; error = s.Error;
-        busy = false;
+        busy = false; rlsPanel = false;
     }
 
     private static string? SingleCell(QueryResult r, string column)

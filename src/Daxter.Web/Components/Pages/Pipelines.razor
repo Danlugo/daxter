@@ -1,0 +1,253 @@
+@page "/pipelines"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+
+<PageTitle>DAXter — Pipelines</PageTitle>
+
+<h1>Deployment Pipelines</h1>
+<p class="muted">
+    Pick a <strong>model</strong> to see, across each pipeline stage (Dev → QA → Prod), its
+    <strong>parameters</strong> and where a <strong>deployment rule</strong> is applied. The public API
+    can't read rules directly, so DAXter reads each stage's parameter values over XMLA — a value that
+    <strong>differs across stages</strong> is where a rule (or manual override) takes effect.
+</p>
+
+<ErrorBanner Message="@error" />
+
+<div class="row">
+    <div>
+        <label>Model <span class="muted">(@allModels.Count@(indexBusy ? " — discovering pipelines…" : ""))</span></label>
+        <div class="combo-wrap">
+            <input class="combo" list="pl-models" @bind="selectedModel" @bind:after="BuildMatrices"
+                   placeholder="@(indexBusy ? "loading…" : "type to search a model…")"
+                   autocomplete="off" onfocus="this.select()" disabled="@indexBusy" />
+            @if (!string.IsNullOrEmpty(selectedModel)) { <button class="combo-clear" @onclick="ClearModel" title="Clear">×</button> }
+        </div>
+        <datalist id="pl-models">@foreach (var m in allModels) { <option value="@m"></option> }</datalist>
+    </div>
+</div>
+
+@if (matrixBusy) { <p class="muted">Reading parameters across stages…</p> }
+else if (matrixError is not null) { <ErrorBanner Message="@matrixError" /> }
+else if (results is not null)
+{
+    @if (results.Count == 0)
+    {
+        <p class="muted">No accessible pipeline contains a model named '<strong>@selectedModel</strong>'.</p>
+    }
+    @foreach (var r in results)
+    {
+        <div class="model-title">@selectedModel <span class="muted">· @r.Pipeline</span></div>
+
+        @if (r.Matrix.Stages.Count == 0)
+        {
+            <p class="muted">This pipeline has no stages with an assigned workspace.</p>
+        }
+        else if (r.Matrix.Rows.Count == 0)
+        {
+            <p class="muted">'@selectedModel' has <strong>no parameters</strong> in the readable stages.</p>
+        }
+        else
+        {
+            <div class="stage-cards">
+                @for (var si = 0; si < r.Matrix.Stages.Count; si++)
+                {
+                    var idx = si;
+                    var stage = r.Matrix.Stages[idx];
+                    var prms = r.Matrix.Rows.Where(p => p.Values[idx] is not null).ToList();
+                    var rules = idx == 0
+                        ? new List<ParamRow>()
+                        : r.Matrix.Rows.Where(p => p.Values[idx] is not null && p.Values[0] is not null && p.Values[idx] != p.Values[0]).ToList();
+                    <div class="stage-card">
+                        <div class="stage-head">@stage.Workspace</div>
+
+                        <div class="stage-section-h">Model Parameters <span class="muted">(@prms.Count)</span></div>
+                        @if (prms.Count == 0)
+                        {
+                            <p class="muted">— model not in this stage</p>
+                        }
+                        else
+                        {
+                            @foreach (var p in prms)
+                            {
+                                <div class="kv"><span class="kv-k">@p.Name</span>: <code class="kv-v @(p.Differs ? "rule" : "")">@p.Values[idx]</code></div>
+                            }
+                        }
+
+                        <div class="stage-section-h">Deployment Rules @if (idx > 0) { <span class="muted">(@rules.Count)</span> }</div>
+                        @if (idx == 0)
+                        {
+                            <p class="muted">Source stage — rules apply downstream</p>
+                        }
+                        else if (rules.Count == 0)
+                        {
+                            <p class="muted">None detected</p>
+                        }
+                        else
+                        {
+                            @foreach (var p in rules)
+                            {
+                                <div class="kv"><span class="kv-k">@p.Name</span>: <code class="kv-v rule">@p.Values[idx]</code></div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+            <p class="muted side-note">Deployment Rules are inferred — a parameter whose value differs from the source (first) stage. The API can't read the rule objects directly.</p>
+            @if (r.Matrix.Notes.Count > 0)
+            {
+                <details class="param-notes">
+                    <summary class="muted">@r.Matrix.Notes.Count stage(s) couldn't be read</summary>
+                    @foreach (var n in r.Matrix.Notes) { <p class="muted">@n</p> }
+                </details>
+            }
+
+            <p class="muted side-note">
+                Pipeline-wide audits (models without rules, parameter value check) live on the
+                <a href="@($"audit?pipeline={Uri.EscapeDataString(r.PipelineId)}")">Audit page</a>.
+            </p>
+        }
+    }
+}
+
+<hr class="sep" />
+
+<details class="browse-pipelines">
+    <summary><strong>Browse pipelines</strong> — stages &amp; recent operations</summary>
+
+    <div class="actions">
+        <button class="btn-sm" @onclick="LoadPipelines" disabled="@indexBusy">Reload</button>
+    </div>
+
+    @if (pipelines is { Count: > 0 })
+    {
+        <div class="grid-wrap">
+            <table class="grid">
+                <thead><tr><th>Pipeline</th><th>Id</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var p in pipelines)
+                    {
+                        <tr class="@(p.Id == selectedId ? "lvl-Running" : "")">
+                            <td>@p.Name</td>
+                            <td class="nowrap"><code>@p.Id</code></td>
+                            <td><button class="btn-sm @(p.Id == selectedId ? "active" : "")" @onclick="() => Select(p)">View →</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (!indexBusy && error is null)
+    {
+        <p class="muted">No deployment pipelines are visible to this account.</p>
+    }
+
+    @if (selectedId is not null)
+    {
+        <h3>Stages <span class="muted">— @selectedName</span></h3>
+        @if (drillBusy) { <p class="muted">Loading stages…</p> }
+        else { <ResultGrid Result="stages" Error="@drillError" Empty="This pipeline has no stages." /> }
+
+        <h3>Operations <span class="muted">— @selectedName</span></h3>
+        @if (drillBusy) { <p class="muted">Loading operations…</p> }
+        else { <ResultGrid Result="operations" Empty="No operations recorded for this pipeline." /> }
+    }
+</details>
+
+@code {
+    private sealed record PipelineRow(string Id, string Name);
+
+    private IReadOnlyList<PipelineModels> index = Array.Empty<PipelineModels>();
+    private List<PipelineRow>? pipelines;
+    private List<string> allModels = new();
+    private string selectedModel = "";
+    private List<(string PipelineId, string Pipeline, PipelineParamMatrix Matrix)>? results;
+    private bool indexBusy, matrixBusy;
+    private string? error, matrixError;
+
+    // Secondary "Browse pipelines" drill-down
+    private string? selectedId, selectedName, drillError;
+    private QueryResult? stages, operations;
+    private bool drillBusy;
+
+    // Deep-link from the Frequent sidebar: /pipelines?model=Sales
+    [Parameter, SupplyParameterFromQuery(Name = "model")] public string? Qmodel { get; set; }
+    private string? appliedModel;
+
+    protected override Task OnInitializedAsync() => LoadPipelines();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qmodel) || Qmodel == appliedModel) return;
+        // The index may still be loading when this fires (OnInitializedAsync hasn't awaited yet).
+        // Don't mark as applied in that case — LoadPipelines re-checks Qmodel on completion.
+        if (indexBusy || index.Count == 0) return;
+        appliedModel = Qmodel;
+        selectedModel = Qmodel!;
+        await BuildMatrices();
+    }
+
+    private async Task LoadPipelines()
+    {
+        indexBusy = true; error = null; results = null; selectedModel = ""; selectedId = null;
+        try
+        {
+            index = await Ui.PipelineModelIndexAsync();
+            pipelines = index.Select(p => new PipelineRow(p.PipelineId, p.PipelineName))
+                .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            allModels = index.SelectMany(p => p.Models)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (Exception ex) { error = ex.Message; pipelines = null; index = Array.Empty<PipelineModels>(); }
+        finally { indexBusy = false; }
+
+        // If the page was opened with ?model=… (e.g. from the Frequent sidebar) but the index
+        // wasn't ready when OnParametersSetAsync fired, apply the deep-link now.
+        if (!string.IsNullOrEmpty(Qmodel) && Qmodel != appliedModel && index.Count > 0)
+        {
+            appliedModel = Qmodel;
+            selectedModel = Qmodel!;
+            await BuildMatrices();
+        }
+    }
+
+    // Choose a model → for each pipeline that contains it, compare its parameters across stages.
+    private async Task BuildMatrices()
+    {
+        results = null; matrixError = null;
+        if (string.IsNullOrWhiteSpace(selectedModel)) return;
+
+        var matching = index
+            .Where(p => p.Models.Any(m => string.Equals(m, selectedModel, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        matrixBusy = true; StateHasChanged();
+        try
+        {
+            var built = new List<(string, string, PipelineParamMatrix)>();
+            foreach (var p in matching)
+                built.Add((p.PipelineId, p.PipelineName, await Ui.PipelineParameterMatrixAsync(p.PipelineId, selectedModel)));
+            results = built;
+            if (built.Count > 0)
+                Usage.Record(UsageStore.Dataset, selectedModel, null, UsageStore.PipelineContext); // Frequent · Pipelines
+        }
+        catch (Exception ex) { matrixError = ex.Message; }
+        finally { matrixBusy = false; }
+    }
+
+    private void ClearModel() { selectedModel = ""; results = null; matrixError = null; }
+
+    private async Task Select(PipelineRow p)
+    {
+        selectedId = p.Id; selectedName = p.Name;
+        drillBusy = true; drillError = null; stages = operations = null;
+        try
+        {
+            stages = await Ui.PipelineStagesAsync(p.Id);
+            operations = await Ui.PipelineOperationsAsync(p.Id);
+        }
+        catch (Exception ex) { drillError = ex.Message; }
+        finally { drillBusy = false; }
+    }
+}

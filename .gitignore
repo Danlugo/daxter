@@ -17,3 +17,6 @@ artifacts/
 .idea/
 *.user
 .DS_Store
+
+# Local Claude skills / UI contract — kept local, never shipped to the public repo
+.claude/

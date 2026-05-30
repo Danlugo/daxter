@@ -2,11 +2,13 @@
 @inject DaxterUi Ui
 @inject JobService Jobs
 @inject UsageStore Usage
+@inject IJSRuntime JS
 @implements IDisposable
 @using Daxter.Core.Maintenance
 
 <PageTitle>DAXter — Refresh</PageTitle>
 
+<button class="btn-sm back-btn" style="margin-bottom:.6rem" @onclick="GoBack" title="Back to the previous page">← Back</button>
 <h1>Refresh</h1>
 <p class="muted">Process a model — full, a table, or partitions — as a tracked background job.</p>
 
@@ -459,6 +461,8 @@ else
         if (idx < 0) return new();
         return r.Rows.Select(row => row[idx]?.ToString() ?? "").Where(s => s.Length > 0).OrderBy(s => s).ToList();
     }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
 
     public void Dispose() => Jobs.Changed -= OnJobsChanged;
 }

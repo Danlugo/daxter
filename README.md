@@ -43,7 +43,7 @@ Full walkthrough (Windows notes, multi-client, service-principal automation) is 
 | **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
-| **Pipeline** | `pipeline ls/stages/operations` (deployment pipelines) |
+| **Pipeline** | `pipeline ls/stages/operations` + `pipeline rules --pipeline X --model Y` (deployment rules — inferred from per-stage parameter differences) + `pipeline audit --pipeline X` (list models without rules; or `--mode check --stage X --param Y --value Z` to find models whose parameter matches) |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
@@ -62,17 +62,24 @@ docker run -d -p 8080:8080 --env-file daxter.env \
 
 1. Open **http://localhost:8080** → **Status** → **Sign in** — opens the Microsoft device-login
    page (clickable link) with a one-click-copy code; the page updates itself once you finish.
-2. **Configure** → set your default workspace/dataset and **Save**.
-3. **Explore** → Browse workspaces → datasets → tables, or run DAX.
+2. **⚙ Configure** (gear icon, top-right) → set your default workspace/dataset and **Save**.
+3. **Explore** → browse workspaces → datasets → tables; or **DAX Query** → write and run DAX.
 
 The `-v …:/home/daxter/.daxter` volume holds your **sign-in token and Configure settings**, so
 they persist across restarts and upgrades.
 
 - **Status** — health checks, sign-in, and a **Version & updates** check.
-- **Explore** — tabbed: a DAX query box, or a drill-down Browse explorer
-  (workspace → dataset → table → **M code** / partitions, measures, RLS, permissions, …).
-- **Configure** — edit auth mode / defaults / prod workspaces and **Save** (persisted to the
-  volume); also generates the env file + Claude Desktop MCP entry.
+- **Explore** — a drill-down browser (workspace → dataset → table → **M code** / partitions,
+  measures, RLS, **Test RLS**, permissions, …). **Test RLS** runs a DAX query while impersonating
+  a role and/or user (UPN) so you can see exactly what they'd see (requires admin on the model).
+- **DAX Query** — a dedicated query editor with **field autocomplete + signature help**,
+  **syntax highlighting**, **⌗ Format**, and live validation. "Run DAX" / "Top N rows" / a clicked
+  Recent query from Explore open here pre-filled.
+- **Gateways** — on-premises data gateways visible to the signed-in identity (REST).
+- **Pipelines** — deployment pipelines with their stages (Dev → Test → Prod workspaces) and
+  recent operations (REST).
+- **⚙ Configure** (gear icon, top-right) — edit auth mode / defaults / prod workspaces and
+  **Save** (persisted to the volume); also generates the env file + Claude Desktop MCP entry.
 - **Logs** — recent activity (operations with row counts + timing, sign-in, errors); secrets redacted.
 
 ## Examples

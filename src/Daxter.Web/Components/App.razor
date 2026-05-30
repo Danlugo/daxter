@@ -5,13 +5,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <link rel="stylesheet" href="app.css" />
-    <link rel="stylesheet" href="Daxter.Web.styles.css" />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    <link rel="stylesheet" href="@($"app.css?v={AssetVer}")" />
+    <link rel="stylesheet" href="@($"Daxter.Web.styles.css?v={AssetVer}")" />
+    <HeadOutlet @rendermode="@InteractiveNoPrerender" />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
+    <Routes @rendermode="@InteractiveNoPrerender" />
     <script>
         window.daxterDownload = (name, content) => {
             const blob = new Blob([content], { type: 'text/csv' });
@@ -28,3 +28,17 @@
 </body>
 
 </html>
+
+@code {
+    // Prerendering renders interactive pages twice in two DI scopes (a throwaway static pass +
+    // the live circuit). That broke the cross-page query hand-off (the scoped ExploreActions
+    // pending query was consumed/missed during prerender, so the DAX Query page started empty).
+    // Disabling prerender means components initialize once, on the circuit, where the hand-off lives.
+    private static readonly Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode InteractiveNoPrerender =
+        new(prerender: false);
+
+    // Cache-buster for the stylesheets: changes every process start, so a rebuilt/restarted
+    // container always serves a fresh CSS URL (no stale-cache "where are my styles?" surprises).
+    private static readonly string AssetVer =
+        (Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev") + "-" + Guid.NewGuid().ToString("N")[..6];
+}

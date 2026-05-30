@@ -20,6 +20,9 @@ builder.Services.AddSingleton<UsageStore>();
 builder.Services.AddSingleton<QueryHistoryStore>();
 builder.Services.AddSingleton<JobHistoryStore>();
 builder.Services.AddSingleton<JobService>();
+builder.Services.AddSingleton<PipelineScanStore>();
+builder.Services.AddSingleton<AuditHistoryStore>();
+builder.Services.AddSingleton<Daxter.Core.Audit.SavedAuditCheckStore>();
 
 // Capture app logs into an in-memory buffer the Logs page reads (in addition to the console).
 var logSink = new LogSink();

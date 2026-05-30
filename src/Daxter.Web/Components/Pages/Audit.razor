@@ -1,0 +1,143 @@
+@page "/audit"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject AuditHistoryStore AuditHist
+@inject IJSRuntime JS
+
+@* Cross-cutting audits. Today: Pipeline deployment-rule audits. Tomorrow: refresh status,
+   measure dependencies, dataset health, … The page is built around an audit-type picker so
+   new audits drop in next to the current one without rearranging the layout. *@
+
+<PageTitle>DAXter — Audit</PageTitle>
+
+<button class="btn-sm back-btn" style="margin-bottom:.6rem" @onclick="GoBack" title="Back to the previous page">← Back</button>
+<h1>Audit</h1>
+<p class="muted">Cross-cutting checks across pipelines, workspaces, and models.</p>
+
+<div class="row">
+    <div>
+        <label>Audit type</label>
+        <select @bind="auditType">
+            @foreach (var (key, label) in AuditTypes)
+            {
+                <option value="@key">@label</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (auditType == "pipeline-rules")
+{
+    <h3>Pipeline — deployment rules</h3>
+    <p class="muted">Scans every model in a pipeline and reports which ones have no deployment rules, or whose parameter value matches your check.</p>
+
+    <ErrorBanner Message="@error" />
+
+    <div class="row">
+        <div>
+            <label>Pipeline <span class="muted">(@pipelines.Count@(indexBusy ? " — discovering…" : ""))</span></label>
+            <select @bind="selectedPipelineId" @bind:after="OnPipelinePicked" disabled="@(indexBusy || pipelines.Count == 0)">
+                <option value="">— pick a pipeline —</option>
+                @foreach (var p in pipelines)
+                {
+                    <option value="@p.PipelineId">@p.PipelineName</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(selectedPipelineId))
+    {
+        var name = pipelines.FirstOrDefault(p => p.PipelineId == selectedPipelineId)?.PipelineName ?? selectedPipelineId;
+        <PipelineAudit PipelineId="@selectedPipelineId" PipelineName="@name"
+                       InitialStage="@(IsRecalledCheck ? Qstage : null)"
+                       InitialParam="@(IsRecalledCheck ? Qparam : null)"
+                       InitialValue="@(IsRecalledCheck ? Qvalue : null)"
+                       InitialNotEquals="@(IsRecalledCheck && Qne)" />
+    }
+}
+else
+{
+    <div class="card">
+        <p class="muted">Coming soon.</p>
+    </div>
+}
+
+@code {
+    private static readonly (string key, string label)[] AuditTypes =
+    {
+        ("pipeline-rules", "Pipeline — deployment rules (no-rules + parameter check)"),
+        ("coming-soon",   "More audits coming soon…"),
+    };
+
+    private string auditType = "pipeline-rules";
+    private IReadOnlyList<PipelineModels> pipelines = Array.Empty<PipelineModels>();
+    private bool indexBusy;
+    private string? error;
+    private string selectedPipelineId = "";
+
+    // Deep-link: /audit?pipeline=<id>  (used by the Frequent sidebar shortcut).
+    [Parameter, SupplyParameterFromQuery(Name = "pipeline")] public string? Qpipeline { get; set; }
+    private string? appliedPipeline;
+
+    // Deep-link for a saved param-check: &type=check&stage=&param=&value=&ne=true|false
+    [Parameter, SupplyParameterFromQuery(Name = "type")] public string? Qtype { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "stage")] public string? Qstage { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "param")] public string? Qparam { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "value")] public string? Qvalue { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ne")] public bool Qne { get; set; }
+
+    // Only pass the recalled check spec to the audit component for the matching pipeline,
+    // so picking a different pipeline manually doesn't carry a stale check.
+    private bool IsRecalledCheck =>
+        string.Equals(Qtype, "check", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrEmpty(Qparam)
+        && selectedPipelineId == Qpipeline;
+
+    protected override Task OnInitializedAsync() => LoadPipelines();
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qpipeline) || Qpipeline == appliedPipeline) return Task.CompletedTask;
+        // Wait for the index to load — LoadPipelines re-checks Qpipeline on completion.
+        if (indexBusy || pipelines.Count == 0) return Task.CompletedTask;
+        appliedPipeline = Qpipeline;
+        selectedPipelineId = Qpipeline!;
+        RecordUsage();
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadPipelines()
+    {
+        indexBusy = true; error = null;
+        try { pipelines = await Ui.PipelineModelIndexAsync(); }
+        catch (Exception ex) { error = ex.Message; pipelines = Array.Empty<PipelineModels>(); }
+        finally { indexBusy = false; }
+
+        // Deep-link arrived before the index — apply it now.
+        if (!string.IsNullOrEmpty(Qpipeline) && Qpipeline != appliedPipeline && pipelines.Count > 0)
+        {
+            appliedPipeline = Qpipeline;
+            selectedPipelineId = Qpipeline!;
+            RecordUsage();
+        }
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private void OnPipelinePicked()
+    {
+        if (!string.IsNullOrEmpty(selectedPipelineId)) RecordUsage();
+    }
+
+    // Frequent · Audit tracks pipelines by id; the display name is the dataset's Name,
+    // and the pipeline id is stashed as Parent so the sidebar can build the right link.
+    // Also recorded in AuditHistoryStore so the sidebar can show the *last 10* (chronological).
+    private void RecordUsage()
+    {
+        var name = pipelines.FirstOrDefault(p => p.PipelineId == selectedPipelineId)?.PipelineName;
+        if (string.IsNullOrEmpty(name)) return;
+        Usage.Record(UsageStore.Dataset, name, selectedPipelineId, UsageStore.AuditContext);
+        AuditHist.Record(AuditHistoryStore.TypePipelineRules, selectedPipelineId, name);
+    }
+}

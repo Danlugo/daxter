@@ -1,0 +1,522 @@
+@page "/query"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject QueryHistoryStore History
+@inject ExploreActions Actions
+@inject IJSRuntime JS
+@implements IDisposable
+@using System.Text
+
+<PageTitle>DAXter — DAX Query</PageTitle>
+
+<h1>DAX Query</h1>
+<p class="muted">Write and run DAX against a model — with field autocomplete, formatting, and validation.</p>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <div class="combo-wrap">
+            <input class="combo" list="q-ws" @bind="workspace" @bind:after="OnWorkspaceChanged"
+                   placeholder="type to search…" autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(workspace))
+            {
+                <button class="combo-clear" @onclick="ClearWorkspace" title="Clear — pick another workspace">×</button>
+            }
+        </div>
+        <datalist id="q-ws">@foreach (var w in workspaces) { <option value="@w"></option> }</datalist>
+        <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
+    </div>
+    <div>
+        <label>Dataset <span class="muted">(@datasets.Count)</span></label>
+        <div class="combo-wrap">
+            <input class="combo" list="q-ds" @bind="dataset" @bind:after="OnDatasetPicked" placeholder="type to search…"
+                   autocomplete="off" onfocus="this.select()" />
+            @if (!string.IsNullOrEmpty(dataset))
+            {
+                <button class="combo-clear" @onclick="ClearDataset" title="Clear — pick another dataset">×</button>
+            }
+        </div>
+        <datalist id="q-ds">@foreach (var d in datasets) { <option value="@d"></option> }</datalist>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(defaultWorkspace))
+{
+    <p>
+        <button class="link" @onclick="LoadDefault" disabled="@busy">
+            ⤓ Load default: @defaultWorkspace@(string.IsNullOrEmpty(defaultDataset) ? "" : " / " + defaultDataset)
+        </button>
+    </p>
+}
+
+<div class="dax-layout">
+    @if (showFields)
+    {
+        <aside class="dax-objects">
+            <div class="pane-head">
+                <span class="side-title">Fields</span>
+                <button class="pane-x" @onclick="() => showFields = false" title="Hide fields">×</button>
+            </div>
+            @if (string.IsNullOrEmpty(dataset))
+            {
+                <p class="side-empty">Pick a dataset to browse its tables, columns and measures.</p>
+            }
+            else if (objError is not null)
+            {
+                <p class="bad-text">@objError</p>
+                <button class="btn-sm" @onclick="LoadObjects">Retry</button>
+            }
+            else if (objLoading || objects is null)
+            {
+                <p class="muted">Loading fields…</p>
+            }
+            else
+            {
+                <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter fields…" autocomplete="off" />
+                <div class="obj-tree">
+                    @foreach (var t in FilteredTables())
+                    {
+                        <div class="obj-table">
+                            <button class="obj-tname" @onclick="() => ToggleTable(t.Table)" title="@t.Table — click to insert">
+                                <span class="chev">@(IsExpanded(t.Table) ? "▾" : "▸")</span>
+                                <span @onclick:stopPropagation="true" @onclick="() => InsertTable(t.Table)">@t.Table</span>
+                            </button>
+                            @if (IsExpanded(t.Table))
+                            {
+                                @foreach (var o in FilteredItems(t))
+                                {
+                                    <button class="obj-item @(o.IsMeasure ? "measure" : "column")"
+                                            @onclick="() => InsertRef(t.Table, o)" title="Insert reference">
+                                        <span class="obj-icon">@(o.IsMeasure ? "ƒ" : "▦")</span>@o.Name
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </aside>
+    }
+
+    <div class="dax-main">
+        <div class="dax-tools">
+            <button class="btn-sm back-btn" @onclick="GoBack" title="Back to the previous page">← Back</button>
+            @if (!showFields) { <button class="btn-sm" @onclick="() => showFields = true" title="Show fields">▸ Fields</button> }
+            <button class="btn" @onclick="RunQuery" disabled="@(!HasDataset)">▶ Run DAX</button>
+            <button class="btn-sm" @onclick="FormatQuery" disabled="@(string.IsNullOrWhiteSpace(dax))" title="Pretty-print the DAX">⌗ Format</button>
+            <span class="muted dax-hint">Tip: click a field on the left to insert it · recent queries are in the sidebar.</span>
+        </div>
+        <div class="dax-edit">
+            <pre class="dax-hl" aria-hidden="true"><code class="dax-hl-code"></code></pre>
+            <textarea class="dax-editor" @bind="dax" @bind:event="oninput" rows="14" @ref="editorRef"
+                      placeholder="EVALUATE TOPN(10, 'Table')   ·   type to autocomplete fields &amp; DAX functions" spellcheck="false"></textarea>
+        </div>
+        @if (DaxIssues() is { Count: > 0 } issues)
+        {
+            <div class="dax-issues">
+                @foreach (var iss in issues) { <div class="dax-issue">⚠ @iss</div> }
+            </div>
+        }
+        @if (busy) { <p class="muted">Running…</p> }
+        <ResultGrid Result="result" Error="@error" Empty="Pick a dataset and run a query." />
+    </div>
+</div>
+
+@code {
+    private List<string> workspaces = new();
+    private List<string> datasets = new();
+    private string workspace = "", dataset = "", dax = "";
+    private string? defaultWorkspace, defaultDataset;
+    private QueryResult? result;
+    private string? error;
+    private bool busy;
+
+    // Fields explorer
+    private ModelTree? objects;
+    private string? objectsFor;
+    private bool objLoading;
+    private string? objError;
+    private readonly HashSet<string> expandedTables = new();
+    private string objSearch = "";
+    private bool showFields = false; // hidden by default — opens on demand (objects still load for autocomplete)
+    private ElementReference editorRef;
+    private bool acAttached;
+    private bool acDirty;
+
+    private sealed record AcItem(string Label, string Insert, string Kind);
+
+    private const char Sep = ''; // table usage Parent = workspace<unit-sep>dataset
+
+    // Deep-link to preselect a model (no run): /query?ws=..&ds=..
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+    private string? appliedQuery;
+
+    private bool HasWorkspace => !string.IsNullOrEmpty(workspace) && !busy;
+    private bool HasDataset => HasWorkspace && !string.IsNullOrEmpty(dataset);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var cfg = Ui.Config();
+            defaultWorkspace = string.IsNullOrWhiteSpace(cfg.Workspace) ? null : cfg.Workspace;
+            defaultDataset = cfg.Dataset;
+        }
+        catch { /* no default configured */ }
+
+        Actions.PendingChanged += OnPending;        // a query handed over while we're already mounted
+        if (workspaces.Count == 0) await LoadWorkspaces();
+        await OnPending();                          // …or one handed over just before we mounted
+    }
+
+    public void Dispose() => Actions.PendingChanged -= OnPending;
+
+    // Return to the previous page (e.g. the Explore measure/table view we came from).
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    // Run a query handed over from the sidebar (Recent queries) or the Browse page.
+    private async Task OnPending()
+    {
+        var e = Actions.TakePending();
+        if (e is null) return;
+        workspace = e.Workspace;
+        await OnWorkspaceChanged();
+        dataset = e.Dataset ?? "";
+        dax = e.Dax;
+        if (!string.IsNullOrEmpty(dataset)) await LoadObjects();
+        await RunQuery();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}{Sep}{Qds}";
+        if (key == appliedQuery) return; // only apply a given deep-link once
+        appliedQuery = key;
+
+        if (workspaces.Count == 0) await LoadWorkspaces();
+        workspace = Qws!;
+        await OnWorkspaceChanged();
+        if (!string.IsNullOrEmpty(Qds))
+        {
+            dataset = Qds!;
+            Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext);
+            await LoadObjects();
+        }
+    }
+
+    private async Task OnDatasetPicked()
+    {
+        objects = null; objectsFor = null; expandedTables.Clear();
+        if (!string.IsNullOrEmpty(dataset)) await LoadObjects();
+    }
+
+    private async Task LoadObjects()
+    {
+        if (string.IsNullOrEmpty(dataset)) return;
+        objLoading = true; objError = null; objects = null; StateHasChanged();
+        try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; acDirty = true; }
+        catch (Exception ex) { objError = ex.Message; }
+        // StateHasChanged is required: when called from OnAfterRenderAsync, Blazor does not
+        // auto-render after the await, so the loaded tree wouldn't paint until the next event.
+        finally { objLoading = false; StateHasChanged(); }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Auto-load the Fields tree for the current dataset (no button).
+        if (!string.IsNullOrEmpty(dataset) && objects is null && !objLoading && objError is null && objectsFor != dataset)
+        {
+            await LoadObjects();
+        }
+
+        if (!acAttached)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.attach", editorRef); acAttached = true; acDirty = true; }
+            catch { /* JS not ready */ }
+        }
+        if (acAttached && acDirty)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.setCandidates", editorRef, BuildCandidates()); acDirty = false; }
+            catch { }
+        }
+        // Re-paint the syntax highlight after programmatic edits (Format, field/history insert).
+        if (acAttached)
+        {
+            try { await JS.InvokeVoidAsync("daxComplete.rehighlight", editorRef); }
+            catch { }
+        }
+    }
+
+    // Functions inserted with "(", keywords as-is; fields from the loaded model.
+    private static readonly string[] DaxFunctions =
+    {
+        "CALCULATE","CALCULATETABLE","FILTER","ALL","ALLEXCEPT","ALLSELECTED","ALLNOBLANKROW","REMOVEFILTERS",
+        "KEEPFILTERS","VALUES","DISTINCT","RELATED","RELATEDTABLE","EARLIER","SELECTEDVALUE","HASONEVALUE",
+        "SUM","SUMX","AVERAGE","AVERAGEX","MIN","MINX","MAX","MAXX","COUNT","COUNTA","COUNTAX","COUNTX",
+        "COUNTROWS","COUNTBLANK","DISTINCTCOUNT","DIVIDE","PRODUCT","PRODUCTX","ROUND","ABS","INT","MOD",
+        "IF","IFERROR","SWITCH","AND","OR","NOT","ISBLANK","ISERROR","ISFILTERED","ISINSCOPE","COALESCE",
+        "CONCATENATE","CONCATENATEX","FORMAT","LEFT","RIGHT","MID","LEN","UPPER","LOWER","TRIM","SUBSTITUTE",
+        "SEARCH","FIND","VALUE","DATE","TODAY","NOW","YEAR","MONTH","DAY","WEEKDAY","WEEKNUM","EOMONTH",
+        "EDATE","DATEDIFF","DATEADD","TOTALYTD","TOTALQTD","TOTALMTD","DATESYTD","DATESMTD","SAMEPERIODLASTYEAR",
+        "PARALLELPERIOD","PREVIOUSYEAR","PREVIOUSMONTH","NEXTYEAR","NEXTMONTH","FIRSTDATE","LASTDATE",
+        "STARTOFMONTH","ENDOFMONTH","DATESBETWEEN","DATESINPERIOD","RANKX","TOPN","ROW","SUMMARIZE",
+        "SUMMARIZECOLUMNS","ADDCOLUMNS","SELECTCOLUMNS","GROUPBY","CROSSJOIN","UNION","INTERSECT","EXCEPT",
+        "TREATAS","USERELATIONSHIP","CROSSFILTER","CONTAINS","LOOKUPVALUE","USERPRINCIPALNAME",
+    };
+    private static readonly string[] DaxKeywords =
+    {
+        "EVALUATE","DEFINE","MEASURE","VAR","RETURN","ORDER BY","START AT","TRUE","FALSE","BLANK()",
+    };
+
+    // ---- Format + validate ----
+
+    private void FormatQuery() { dax = FormatDax(dax); }
+
+    private static readonly HashSet<string> DaxUpper =
+        new(DaxFunctions.Concat(new[] { "EVALUATE", "DEFINE", "MEASURE", "VAR", "RETURN", "TRUE", "FALSE", "BLANK", "IN", "NOT", "AND", "OR" }),
+            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Heuristic DAX pretty-printer (local — never sends the query anywhere).</summary>
+    private static string FormatDax(string src)
+    {
+        if (string.IsNullOrWhiteSpace(src)) return src;
+        var toks = TokenizeDax(src);
+
+        // match parens; a call breaks across lines only if it contains a nested call.
+        var match = new int[toks.Count];
+        var st = new Stack<int>();
+        for (var x = 0; x < toks.Count; x++)
+        {
+            if (toks[x].Kind == '(') st.Push(x);
+            else if (toks[x].Kind == ')' && st.Count > 0) { var o = st.Pop(); match[o] = x; match[x] = o; }
+        }
+        var block = new bool[toks.Count];
+        for (var x = 0; x < toks.Count; x++)
+            if (toks[x].Kind == '(')
+            {
+                var m = match[x] > x ? match[x] : toks.Count;
+                for (var y = x + 1; y < m; y++) if (toks[y].Kind == '(') { block[x] = true; break; }
+            }
+
+        var sb = new StringBuilder();
+        int indent = 0; bool needSpace = false;
+        (char Kind, string Value)? prev = null;
+        var blk = new Stack<bool>();
+        void NL() { while (sb.Length > 0 && sb[^1] == ' ') sb.Length--; sb.Append('\n').Append(new string(' ', indent * 4)); needSpace = false; }
+
+        for (var x = 0; x < toks.Count; x++)
+        {
+            var tk = toks[x];
+            if (tk.Kind == '(')
+            {
+                sb.Append('('); blk.Push(block[x]);
+                if (block[x]) { indent++; NL(); } else needSpace = false;
+                prev = null;
+            }
+            else if (tk.Kind == ')')
+            {
+                var b = blk.Count > 0 && blk.Pop();
+                if (b) { indent = Math.Max(0, indent - 1); NL(); }
+                sb.Append(')'); needSpace = true; prev = tk;
+            }
+            else if (tk.Kind == ',')
+            {
+                while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;
+                sb.Append(',');
+                if (blk.Count > 0 && blk.Peek()) NL(); else { sb.Append(' '); needSpace = false; }
+                prev = null;
+            }
+            else
+            {
+                var v = tk.Value;
+                if (tk.Kind == 'w' && DaxUpper.Contains(v)) v = v.ToUpperInvariant();
+                var attach = tk.Kind == 'l' && v.StartsWith("[")
+                    && prev is { Kind: 'l' } p && (p.Value.EndsWith("'") || p.Value.EndsWith("]"));
+                if (needSpace && !attach) sb.Append(' ');
+                sb.Append(v); needSpace = true; prev = tk;
+                if (tk.Kind == 'w' && indent == 0 && (v == "EVALUATE" || v == "DEFINE")) { NL(); prev = null; }
+            }
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static List<(char Kind, string Value)> TokenizeDax(string s)
+    {
+        var t = new List<(char, string)>();
+        int i = 0, n = s.Length;
+        while (i < n)
+        {
+            var c = s[i];
+            if (char.IsWhiteSpace(c)) { i++; continue; }
+            if (c == '"' || c == '\'')
+            {
+                var j = i + 1;
+                while (j < n) { if (s[j] == c) { if (j + 1 < n && s[j + 1] == c) { j += 2; continue; } j++; break; } j++; }
+                t.Add(('l', s[i..j])); i = j; continue;
+            }
+            if (c == '[')
+            {
+                var j = i + 1;
+                while (j < n && s[j] != ']') j++;
+                if (j < n) j++;
+                t.Add(('l', s[i..j])); i = j; continue;
+            }
+            if (c is '(' or ')' or ',') { t.Add((c, c.ToString())); i++; continue; }
+            var k = i;
+            while (k < n && !char.IsWhiteSpace(s[k]) && s[k] is not ('(' or ')' or ',' or '"' or '\'' or '[')) k++;
+            t.Add(('w', s[i..k])); i = k;
+        }
+        return t;
+    }
+
+    /// <summary>Quick static checks — unbalanced delimiters and the missing-EVALUATE case.</summary>
+    private List<string> DaxIssues()
+    {
+        var issues = new List<string>();
+        if (string.IsNullOrWhiteSpace(dax)) return issues;
+        int paren = 0, bracket = 0; bool inStr = false, inTick = false;
+        for (var i = 0; i < dax.Length; i++)
+        {
+            var c = dax[i];
+            if (inStr) { if (c == '"') { if (i + 1 < dax.Length && dax[i + 1] == '"') i++; else inStr = false; } continue; }
+            if (inTick) { if (c == '\'') { if (i + 1 < dax.Length && dax[i + 1] == '\'') i++; else inTick = false; } continue; }
+            if (c == '"') inStr = true;
+            else if (c == '\'') inTick = true;
+            else if (c == '(') paren++;
+            else if (c == ')') { if (paren == 0) { issues.Add("Extra ')' — a closing parenthesis with no opener."); } else paren--; }
+            else if (c == '[') bracket++;
+            else if (c == ']') { if (bracket == 0) { issues.Add("Extra ']' — a closing bracket with no opener."); } else bracket--; }
+        }
+        if (inStr) issues.Add("Unclosed string — a \" is never closed.");
+        if (inTick) issues.Add("Unclosed table name — a ' is never closed.");
+        if (paren > 0) issues.Add($"{paren} unclosed '(' — missing {paren} ')'.");
+        if (bracket > 0) issues.Add($"{bracket} unclosed '[' — missing {bracket} ']' (a column / measure reference).");
+        var trimmed = dax.TrimStart();
+        if (trimmed.Length > 0 && !trimmed.StartsWith("EVALUATE", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.StartsWith("DEFINE", StringComparison.OrdinalIgnoreCase))
+            issues.Add("A DAX query should start with EVALUATE (or DEFINE).");
+        return issues;
+    }
+
+    private AcItem[] BuildCandidates()
+    {
+        var list = new List<AcItem>();
+        foreach (var f in DaxFunctions) list.Add(new AcItem(f, f + "(", "function"));
+        foreach (var k in DaxKeywords) list.Add(new AcItem(k, k.EndsWith(")") ? k : k + " ", "keyword"));
+
+        if (objects is not null)
+        {
+            foreach (var t in objects.Tables)
+            {
+                var tref = "'" + t.Table.Replace("'", "''") + "'";
+                list.Add(new AcItem("'" + t.Table + "'", tref, "table"));
+                foreach (var o in t.Items)
+                {
+                    if (o.IsMeasure)
+                        list.Add(new AcItem("[" + o.Name + "]", "[" + o.Name.Replace("]", "]]") + "]", "measure"));
+                    else
+                        list.Add(new AcItem("'" + t.Table + "'[" + o.Name + "]", tref + "[" + o.Name.Replace("]", "]]") + "]", "column"));
+                }
+            }
+        }
+        return list.ToArray();
+    }
+
+    private bool IsExpanded(string table) => !string.IsNullOrEmpty(objSearch) || expandedTables.Contains(table);
+    private void ToggleTable(string table) { if (!expandedTables.Remove(table)) expandedTables.Add(table); }
+
+    private IEnumerable<ModelTableNode> FilteredTables()
+    {
+        if (objects is null) yield break;
+        var q = objSearch?.Trim();
+        foreach (var t in objects.Tables)
+        {
+            if (string.IsNullOrEmpty(q)
+                || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || t.Items.Any(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                yield return t;
+        }
+    }
+
+    private IEnumerable<ModelObject> FilteredItems(ModelTableNode t)
+    {
+        var q = objSearch?.Trim();
+        if (string.IsNullOrEmpty(q) || t.Table.Contains(q, StringComparison.OrdinalIgnoreCase))
+            return t.Items;
+        return t.Items.Where(o => o.Name.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void InsertTable(string table) => Append("'" + table.Replace("'", "''") + "'");
+
+    private void InsertRef(string table, ModelObject o)
+    {
+        var name = o.Name.Replace("]", "]]");
+        Append(o.IsMeasure ? "[" + name + "]" : "'" + table.Replace("'", "''") + "'[" + name + "]");
+    }
+
+    private void Append(string reference)
+    {
+        var sep = string.IsNullOrEmpty(dax) || dax.EndsWith(" ") || dax.EndsWith("\n") ? "" : " ";
+        dax = dax + sep + reference;
+    }
+
+    private async Task LoadDefault()
+    {
+        if (string.IsNullOrEmpty(defaultWorkspace)) return;
+        workspace = defaultWorkspace;
+        await OnWorkspaceChanged();
+        if (!string.IsNullOrEmpty(defaultDataset)) { dataset = defaultDataset!; await LoadObjects(); }
+    }
+
+    private async Task ClearWorkspace() { workspace = ""; await OnWorkspaceChanged(); }
+    private void ClearDataset() { dataset = ""; objects = null; objectsFor = null; }
+
+    private async Task LoadWorkspaces()
+    {
+        busy = true; error = null;
+        try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        datasets = new(); dataset = ""; objects = null; objectsFor = null;
+        if (string.IsNullOrEmpty(workspace)) return;
+        busy = true; error = null;
+        try
+        {
+            datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ExploreContext);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task RunQuery()
+    {
+        busy = true; error = null; result = null; StateHasChanged();
+        try { result = await Ui.QueryAsync(workspace, dataset, dax); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+
+        if (error is null)
+        {
+            if (!string.IsNullOrEmpty(dataset))
+                Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ExploreContext);
+            History.Record(dax, workspace, dataset); // remember for one-click re-run (shown in the sidebar)
+        }
+    }
+
+    private static List<string> ColumnValues(QueryResult r, string column)
+    {
+        var idx = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        if (idx < 0) return new();
+        return r.Rows.Select(row => row[idx]?.ToString() ?? "")
+                     .Where(s => s.Length > 0).OrderBy(s => s).ToList();
+    }
+}

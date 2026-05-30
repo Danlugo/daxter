@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Daxter.Web.Services;
 
-public enum UpdateState { Dev, UpToDate, UpdateAvailable, Unknown }
+public enum UpdateState { Dev, UpToDate, UpdateAvailable, Ahead, Unknown }
 
 /// <summary>Result of an update check.</summary>
 public sealed record UpdateInfo(
@@ -67,7 +67,11 @@ public sealed class VersionService
             return UpdateState.Dev;
 
         if (TryParse(current, out var cur) && TryParse(latest, out var lat))
-            return lat > cur ? UpdateState.UpdateAvailable : UpdateState.UpToDate;
+        {
+            if (lat > cur) return UpdateState.UpdateAvailable;
+            if (cur > lat) return UpdateState.Ahead;   // running an unreleased build newer than the latest release
+            return UpdateState.UpToDate;
+        }
 
         return UpdateState.Unknown;
     }

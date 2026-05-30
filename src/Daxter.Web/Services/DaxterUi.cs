@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
@@ -17,6 +18,9 @@ public sealed record ModelObject(string Name, bool IsMeasure);
 public sealed record ModelTableNode(string Table, IReadOnlyList<ModelObject> Items);
 /// <summary>The model's fields tree for the DAX explorer.</summary>
 public sealed record ModelTree(IReadOnlyList<ModelTableNode> Tables);
+
+/// <summary>A pipeline and the models found in its first (Dev) stage — for the model-first picker.</summary>
+public sealed record PipelineModels(string PipelineId, string PipelineName, IReadOnlyList<string> Models);
 
 /// <summary>Bridges the Blazor pages to the Daxter.Core engine (same logic as the CLI/MCP).</summary>
 public sealed class DaxterUi
@@ -148,6 +152,27 @@ public sealed class DaxterUi
     public Task<QueryResult> MeasuresAsync(string ws, string ds, CancellationToken ct = default)
         => XmlaAsync("measures", ws, ds, s => new ModelMetadataService(s).Measures(true), ct);
 
+    /// <summary>Measures with their home table resolved (Name, DisplayFolder, Expression, Table).</summary>
+    public Task<QueryResult> MeasuresWithTableAsync(string ws, string ds, CancellationToken ct = default)
+        => XmlaAsync("measures", ws, ds, s =>
+        {
+            var measures = s.Execute(
+                "SELECT [Name], [DisplayFolder], [Expression], [TableID] FROM $SYSTEM.TMSCHEMA_MEASURES ORDER BY [Name]");
+            var tables = s.Execute("SELECT [ID], [Name] FROM $SYSTEM.TMSCHEMA_TABLES");
+
+            var idToName = new Dictionary<long, string>();
+            foreach (var t in tables.Rows)
+                if (t[0] is not null) idToName[Convert.ToInt64(t[0])] = t[1]?.ToString() ?? "";
+
+            var rows = new List<object?[]>();
+            foreach (var m in measures.Rows)
+            {
+                var table = m[3] is not null && idToName.TryGetValue(Convert.ToInt64(m[3]), out var nm) ? nm : "";
+                rows.Add(new object?[] { m[0], m[1], m[2], table });
+            }
+            return new QueryResult(new[] { "Name", "DisplayFolder", "Expression", "Table" }, rows);
+        }, ct);
+
     public Task<QueryResult> QueryAsync(string ws, string ds, string dax, CancellationToken ct = default)
         => XmlaAsync("query", ws, ds, s => s.Execute(dax), ct);
 
@@ -196,6 +221,134 @@ public sealed class DaxterUi
             var groupId = await rest.ResolveGroupIdAsync(ws, ct);
             var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
             return await rest.DatasetUsersAsync(groupId, datasetId, ct);
+        });
+
+    // ---- admin: gateways + deployment pipelines (REST) ----
+
+    public Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
+        => Track("gateways", null, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.GatewaysAsync(ct);
+        });
+
+    public Task<QueryResult> PipelinesAsync(CancellationToken ct = default)
+        => Track("pipelines", null, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.PipelinesAsync(ct);
+        });
+
+    public Task<QueryResult> PipelineStagesAsync(string pipelineId, CancellationToken ct = default)
+        => Track("pipeline-stages", pipelineId, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.PipelineStagesAsync(pipelineId, ct);
+        });
+
+    public Task<QueryResult> PipelineOperationsAsync(string pipelineId, CancellationToken ct = default)
+        => Track("pipeline-operations", pipelineId, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.PipelineOperationsAsync(pipelineId, ct);
+        });
+
+    /// <summary>
+    /// Compares a model's parameter values across a pipeline's stages — see
+    /// <see cref="PipelineRulesService"/> in Daxter.Core for the shared implementation.
+    /// </summary>
+    public async Task<PipelineParamMatrix> PipelineParameterMatrixAsync(string pipelineId, string model, CancellationToken ct = default)
+    {
+        var cfg = Config();
+        using var rest = new PowerBiRestClient(Provider(cfg));
+        var matrix = await PipelineRulesService.ComputeAsync(rest, cfg, Provider(cfg), pipelineId, model, ct: ct);
+        _log.LogInformation("pipeline-params [{Model}] → {Stages} stages, {Rows} params, {Rules} differ",
+            model, matrix.Stages.Count, matrix.Rows.Count, matrix.Rows.Count(r => r.Differs));
+        return matrix;
+    }
+
+    /// <summary>
+    /// Pipeline-wide audit — scans every model in the source stage and returns its parameter
+    /// matrix across all stages. Use the progress callback to update a UI counter.
+    /// </summary>
+    public async Task<PipelineScan> PipelineScanAsync(
+        string pipelineId, int concurrency = 5,
+        Action<int, int>? onProgress = null, CancellationToken ct = default)
+    {
+        var cfg = Config();
+        using var rest = new PowerBiRestClient(Provider(cfg));
+        var scan = await PipelineRulesService.ScanPipelineAsync(
+            rest, cfg, Provider(cfg), pipelineId, concurrency, onProgress, ct);
+        _log.LogInformation("pipeline-scan [{Concurrency} parallel] → {Models} models, {NoRule} without rules",
+            concurrency, scan.Models.Count, scan.Models.Count(m => m.Matrix.Rows.All(r => !r.Differs)));
+        return scan;
+    }
+
+    /// <summary>
+    /// Index of every accessible pipeline and the models in its first (Dev) stage — used to drive
+    /// a model-first picker (choose a model → find the pipelines that contain it).
+    /// </summary>
+    public async Task<IReadOnlyList<PipelineModels>> PipelineModelIndexAsync(CancellationToken ct = default)
+    {
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var pipes = await rest.PipelinesAsync(ct);
+        int pi = Col(pipes, "id"), pn = Col(pipes, "displayName");
+
+        var result = new List<PipelineModels>();
+        foreach (var row in pipes.Rows)
+        {
+            var id = pi >= 0 ? row[pi]?.ToString() ?? "" : "";
+            if (id.Length == 0) continue;
+            var name = pn >= 0 ? row[pn]?.ToString() ?? "" : "";
+
+            var models = new List<string>();
+            try
+            {
+                var stagesQr = await rest.PipelineStagesAsync(id, ct);
+                int oi = Col(stagesQr, "order"), wi = Col(stagesQr, "workspaceName");
+                var firstWs = stagesQr.Rows
+                    .Where(r => wi >= 0 && !string.IsNullOrEmpty(r[wi]?.ToString()))
+                    .OrderBy(r => oi >= 0 && r[oi] is not null ? Convert.ToInt32(r[oi]) : 0)
+                    .Select(r => r[wi]!.ToString()!)
+                    .FirstOrDefault();
+                if (firstWs is not null)
+                {
+                    var gid = await rest.ResolveGroupIdAsync(firstWs, ct);
+                    var ds = await rest.DatasetsAsync(gid, ct);
+                    int ni = Col(ds, "name");
+                    models = ds.Rows.Select(r => ni >= 0 ? r[ni]?.ToString() ?? "" : "")
+                        .Where(s => s.Length > 0).ToList();
+                }
+            }
+            catch { /* skip pipelines whose stage workspace we can't enumerate */ }
+
+            result.Add(new PipelineModels(id, name, models));
+        }
+        return result;
+    }
+
+    private static int Col(QueryResult r, string column)
+    {
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Runs a DAX query under an impersonated role and/or user (RLS test). Read-only, but the
+    /// connecting identity must be an admin of the workspace/model to impersonate.
+    /// </summary>
+    public Task<QueryResult> TestRlsAsync(string ws, string ds, string? role, string? user, string dax, CancellationToken ct = default)
+        => Track("test-rls", $"{ws}/{ds}", async () =>
+        {
+            if (string.IsNullOrWhiteSpace(role) && string.IsNullOrWhiteSpace(user))
+                throw new DaxterException("Provide a role and/or a user to impersonate.");
+            if (string.IsNullOrWhiteSpace(dax))
+                throw new DaxterException("Provide a DAX query to evaluate under the identity.");
+            var cfg = _state.ToConfig(ws, ds);
+            var factory = new AdomdXmlaSessionFactory(cfg, Provider(cfg), role, user);
+            using var session = await factory.CreateAsync(ct);
+            return session.Execute(dax);
         });
 
     /// <summary>Loads the model's fields tree (tables → their columns + measures) for the DAX explorer.</summary>

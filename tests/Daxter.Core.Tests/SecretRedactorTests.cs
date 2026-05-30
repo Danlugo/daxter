@@ -43,7 +43,7 @@ public class SecretRedactorTests
 
     [Theory]
     // Normal, non-sensitive log content that must pass through unchanged.
-    [InlineData("datasets [Data Hub] -> 94 rows in 887 ms")]
+    [InlineData("datasets [Prod] -> 94 rows in 887 ms")]
     [InlineData("Data Source=powerbi://api.powerbi.com/v1.0/myorg/Sales;Initial Catalog=Retail Model;")]
     [InlineData("Health check finished: 4/4 checks ok")]
     [InlineData("workspace 'Secret Sauce Analytics' selected")]

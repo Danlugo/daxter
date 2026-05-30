@@ -428,6 +428,10 @@ internal static class Program
     private static Command BuildPipelineCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
     {
         var pipelineOption = new Option<string?>("--pipeline") { Description = "Deployment pipeline id." };
+        var modelOption = new Option<string?>("--model")
+        {
+            Description = "Model (semantic dataset) name — same in every stage.",
+        };
 
         var ls = new Command("ls", "List deployment pipelines.") { outputOption };
         connectionOptions.AddTo(ls);
@@ -452,10 +456,201 @@ internal static class Program
             () => pr.GetValue(outputOption),
             (rest, _, c) => rest.PipelineOperationsAsync(RequireOption(pr, pipelineOption, "--pipeline"), c), ct));
 
-        return new Command("pipeline", "Deployment pipelines: stages (env→workspace mapping) and history.")
+        // Deployment-rule check: read the model's parameters from each stage over XMLA and
+        // flag values that differ across stages — where a deployment rule (or manual override) applies.
+        var rules = new Command("rules",
+            "Show a model's parameter values across each pipeline stage and flag where a deployment rule is applied.")
         {
-            ls, stages, operations,
+            pipelineOption, modelOption, outputOption,
         };
+        connectionOptions.AddTo(rules);
+        rules.SetAction((pr, ct) => RunPipelineRulesAsync(
+            () => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption),
+            RequireOption(pr, pipelineOption, "--pipeline"),
+            RequireOption(pr, modelOption, "--model"),
+            ct));
+
+        // Pipeline-wide audits — scans every model in the pipeline once, runs the chosen check.
+        var stageOption = new Option<string?>("--stage") { Description = "Stage workspace name (e.g. 'Prod'). For --check." };
+        var paramOption = new Option<string?>("--param") { Description = "Parameter name (e.g. DATABASE_NAME). For --check." };
+        var valueOption = new Option<string?>("--value") { Description = "Expected value to match against. For --check." };
+        var notEqualsOption = new Option<bool>("--not-equals") { Description = "Invert the value check (find non-matching models)." };
+        var modeOption = new Option<string?>("--mode")
+        {
+            Description = "Audit mode: no-rules (default) or check.",
+        };
+        var concurrencyOption = new Option<int>("--concurrency")
+        {
+            Description = "Number of models to scan in parallel (default 5).",
+            DefaultValueFactory = _ => 5,
+        };
+        var savedOption = new Option<string?>("--saved") { Description = "Run a saved check by name (shared with the web console)." };
+        var listSavedOption = new Option<bool>("--list-saved") { Description = "List saved checks and exit." };
+        var runAllSavedOption = new Option<bool>("--run-all-saved") { Description = "Run every saved rule for --pipeline and report compliance." };
+
+        var audit = new Command("audit",
+            "Audit a pipeline (all models) or one --model: models without rules, a parameter check, or run saved checks/rules (--saved / --list-saved / --run-all-saved).")
+        {
+            pipelineOption, modelOption, modeOption, stageOption, paramOption, valueOption, notEqualsOption, concurrencyOption, savedOption, listSavedOption, runAllSavedOption, outputOption,
+        };
+        connectionOptions.AddTo(audit);
+        audit.SetAction((pr, ct) => RunPipelineAuditAsync(
+            () => connectionOptions.Resolve(pr),
+            () => pr.GetValue(outputOption),
+            pr.GetValue(pipelineOption), pr.GetValue(modelOption),
+            pr.GetValue(modeOption),
+            pr.GetValue(stageOption), pr.GetValue(paramOption), pr.GetValue(valueOption),
+            pr.GetValue(notEqualsOption), pr.GetValue(concurrencyOption),
+            pr.GetValue(savedOption), pr.GetValue(listSavedOption), pr.GetValue(runAllSavedOption), ct));
+
+        return new Command("pipeline", "Deployment pipelines: stages, history, and deployment-rule checks.")
+        {
+            ls, stages, operations, rules, audit,
+        };
+    }
+
+    private static async Task<int> RunPipelineAuditAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory,
+        string? pipelineId, string? model, string? mode, string? stage, string? param, string? value, bool notEquals,
+        int concurrency, string? saved, bool listSaved, bool runAllSaved, CancellationToken ct)
+    {
+        try
+        {
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            var savedStore = new Daxter.Core.Audit.SavedAuditCheckStore();
+
+            // --list-saved: just print the saved checks (no pipeline / auth needed).
+            if (listSaved)
+            {
+                var rows = savedStore.All()
+                    .Select(c => new object?[] { c.Name, c.PipelineId, c.Stage, c.Param, (c.NotEquals ? "!=" : "=") + " " + c.Value })
+                    .ToList();
+                Console.Out.Write(formatter.Format(new QueryResult(new[] { "Name", "Pipeline", "Stage", "Param", "Expected" }, rows)));
+                Console.Error.WriteLine($"({rows.Count} saved check{(rows.Count == 1 ? "" : "s")})");
+                return 0;
+            }
+
+            var resolvedMode = (mode ?? "no-rules").Trim().ToLowerInvariant();
+
+            // --saved <name>: load the spec and run it as a check.
+            if (!string.IsNullOrWhiteSpace(saved))
+            {
+                var c = savedStore.FindByName(saved)
+                    ?? throw new DaxterException($"No saved check named '{saved}'. See `pipeline audit --list-saved`.");
+                pipelineId = c.PipelineId; stage = c.Stage; param = c.Param; value = c.Value; notEquals = c.NotEquals;
+                resolvedMode = "check";
+                Console.Error.WriteLine($"Running saved check '{c.Name}': {c.Param} {(c.NotEquals ? "!=" : "=")} '{c.Value}' in {c.Stage}");
+            }
+
+            if (resolvedMode is not ("no-rules" or "check"))
+                throw new DaxterException("Unknown --mode. Use 'no-rules' or 'check'.");
+            if (string.IsNullOrWhiteSpace(pipelineId))
+                throw new DaxterException("Provide --pipeline (or --saved <name> / --list-saved).");
+
+            var config = configFactory();
+            var tokens = BuildTokenProvider(config);
+            using var rest = new PowerBiRestClient(tokens);
+
+            PipelineScan scan;
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                Console.Error.WriteLine($"Reading model '{model}' across stages…");
+                scan = await PipelineRulesService.ScanModelAsync(rest, config, tokens, pipelineId!, model, ct: ct);
+            }
+            else
+            {
+                Console.Error.WriteLine($"Scanning pipeline — {concurrency} models in parallel…");
+                scan = await PipelineRulesService.ScanPipelineAsync(rest, config, tokens, pipelineId!, concurrency,
+                    (done, total) => Console.Error.Write($"\r  {done}/{total}"), ct);
+                Console.Error.WriteLine();
+            }
+
+            // --run-all-saved: evaluate every saved rule for this pipeline against the scan.
+            if (runAllSaved)
+            {
+                var rules = savedStore.All().Where(c => c.PipelineId == pipelineId).ToList();
+                if (rules.Count == 0) throw new DaxterException("No saved rules for this pipeline. Save some in the web console first.");
+                var rows = rules.Select(c =>
+                {
+                    var r = PipelineRulesService.EvaluateRule(scan, c.Stage, c.Param, c.Value, c.NotEquals);
+                    return new object?[] { c.Name, c.Param, c.Stage, (c.NotEquals ? "!=" : "=") + " " + c.Value, $"{r.Compliant}/{r.Checked}", r.Violations.Count };
+                }).ToList();
+                Console.Out.Write(formatter.Format(new QueryResult(new[] { "Rule", "Param", "Stage", "Expected", "Compliant", "Violations" }, rows)));
+                Console.Error.WriteLine($"({rules.Count} rule(s) evaluated against {scan.Models.Count} models)");
+                return 0;
+            }
+
+            QueryResult table;
+            if (resolvedMode == "no-rules")
+            {
+                var rows = scan.Models
+                    .Where(m => m.Matrix.Rows.Count > 0 && m.Matrix.Rows.All(r => !r.Differs))
+                    .Select(m => new object?[] { m.Model })
+                    .ToList();
+                table = new QueryResult(new[] { "Model" }, rows);
+                Console.Out.Write(formatter.Format(table));
+                Console.Error.WriteLine(
+                    $"({rows.Count} of {scan.Models.Count} models have no detected rules across {scan.Stages.Count} stage{(scan.Stages.Count == 1 ? "" : "s")})");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(stage) || string.IsNullOrWhiteSpace(param) || string.IsNullOrWhiteSpace(value))
+                    throw new DaxterException("--mode check requires --stage, --param, and --value.");
+                var sIdx = scan.Stages.ToList().FindIndex(s => string.Equals(s.Workspace, stage, StringComparison.OrdinalIgnoreCase));
+                if (sIdx < 0)
+                    throw new DaxterException($"Stage '{stage}' isn't in this pipeline. Available: " +
+                        string.Join(", ", scan.Stages.Select(s => s.Workspace)));
+
+                var rows = scan.Models
+                    .Select(m => new { m.Model, Row = m.Matrix.Rows.FirstOrDefault(r => string.Equals(r.Name, param, StringComparison.OrdinalIgnoreCase)) })
+                    .Where(x => x.Row is not null)
+                    .Select(x => new { x.Model, Value = x.Row!.Values[sIdx] })
+                    .Where(x => x.Value is not null && (notEquals
+                        ? !string.Equals(x.Value, value, StringComparison.Ordinal)
+                        : string.Equals(x.Value, value, StringComparison.Ordinal)))
+                    .Select(x => new object?[] { x.Model, x.Value })
+                    .ToList();
+                table = new QueryResult(new[] { "Model", $"{param}@{stage}" }, rows);
+                Console.Out.Write(formatter.Format(table));
+                Console.Error.WriteLine(
+                    $"({rows.Count} of {scan.Models.Count} models have {param} {(notEquals ? "!=" : "==")} '{value}' in {stage})");
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunPipelineRulesAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory,
+        string pipelineId, string model, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            var tokens = BuildTokenProvider(config);
+            using var rest = new PowerBiRestClient(tokens);
+
+            var matrix = await PipelineRulesService.ComputeAsync(rest, config, tokens, pipelineId, model, ct: ct);
+            var table = PipelineRulesService.ToTable(matrix);
+            Console.Out.Write(formatter.Format(table));
+
+            var rules = matrix.Rows.Count(r => r.Differs);
+            Console.Error.WriteLine(
+                $"({matrix.Stages.Count} stage{(matrix.Stages.Count == 1 ? "" : "s")}, " +
+                $"{matrix.Rows.Count} parameter{(matrix.Rows.Count == 1 ? "" : "s")}, " +
+                $"{rules} differ → deployment rule{(rules == 1 ? "" : "s")} inferred)");
+            foreach (var note in matrix.Notes) Console.Error.WriteLine("note: " + note);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
     }
 
     // ---- Test RLS (XMLA impersonation) ----
