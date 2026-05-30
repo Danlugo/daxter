@@ -34,7 +34,8 @@ shell commands and edit the config file), or a person can do it manually.
 
 - **Docker Desktop** installed and **running** — *running*, not just installed; you'll verify
   this with `docker info` in step 1 before pulling anything.
-- **python3** (used only for the safe config merge in step 3). `git` only if you build from source.
+- **python3** for the macOS/Linux config merge in step 3 (on **Windows** use the PowerShell
+  merge — no python needed). `git` only if you build from source.
 - A **Power BI account** with access to a Premium/PPU/Fabric workspace — you'll **sign in as
   yourself** (default). *(For automation/CI you can use a service principal instead — see
   [Service principal](#alternative-service-principal-automation).)*
@@ -73,7 +74,10 @@ chat after signing in):
 
 ```ini
 DAXTER_AUTH_MODE=device-code
-# Optional but recommended for a single org — pin to your tenant:
+# Recommended — pin your Entra tenant so device-code reliably resolves your org.
+# Replace <tenant-guid> with your REAL tenant GUID (Entra admin center -> Overview,
+# or the GUID in your Power BI URL). Do NOT leave the <...> placeholder: an unreplaced
+# value makes every tool fail with "...must be in a well-formed URI format".
 DAXTER_TENANT_ID=<tenant-guid>
 # Optional defaults (or just name a workspace in chat):
 # DAXTER_WORKSPACE=<workspace name>
@@ -121,11 +125,14 @@ Config file location:
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 Add a `daxter` server under `mcpServers`. **Merge — don't overwrite** existing servers.
-Set `ENVFILE` to the **absolute path** of your env file from step 2. The safe merge below
-makes a backup, preserves other servers, and uses your real docker path:
+Set the env path to the **absolute path** of your env file from step 2. The safe merge below
+makes a backup, preserves other servers, and uses your real docker path.
+
+**macOS / Linux (bash):**
 
 ```bash
-CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"   # macOS
+# Linux: CFG="$HOME/.config/Claude/claude_desktop_config.json"
 ENVFILE="$HOME/daxter.env"        # ← absolute path to your env file from step 2
 mkdir -p "$(dirname "$CFG")"; [ -f "$CFG" ] && cp "$CFG" "$CFG.bak"
 python3 - "$CFG" "$(command -v docker)" "$ENVFILE" <<'PY'
@@ -144,7 +151,32 @@ print("mcpServers:", list(d["mcpServers"]))
 PY
 ```
 
-The equivalent JSON, if editing by hand (use absolute paths):
+**Windows (PowerShell):** no bash, so use this equivalent merge — config lives at
+`%APPDATA%\Claude\claude_desktop_config.json`:
+
+```powershell
+$cfg = "$env:APPDATA\Claude\claude_desktop_config.json"
+$envfile = "C:\Users\<you>\daxter.env"   # ← absolute path to your env file from step 2
+$docker = (Get-Command docker).Source
+New-Item -ItemType Directory -Force -Path (Split-Path $cfg) | Out-Null
+if (Test-Path $cfg) { Copy-Item $cfg "$cfg.bak" -Force }
+$d = if ((Test-Path $cfg) -and (Get-Item $cfg).Length -gt 0) {
+        Get-Content $cfg -Raw | ConvertFrom-Json
+     } else { [pscustomobject]@{} }
+if (-not $d.PSObject.Properties['mcpServers']) {
+    $d | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{}) -Force
+}
+$d.mcpServers | Add-Member -NotePropertyName daxter -NotePropertyValue ([pscustomobject]@{
+    command = $docker
+    args = @("run","-i","--rm","--env-file",$envfile,
+             "-v","daxter-tokens:/home/daxter/.daxter",
+             "ghcr.io/danlugo/daxter:latest","mcp")
+}) -Force
+$d | ConvertTo-Json -Depth 10 | Set-Content $cfg -Encoding UTF8
+"mcpServers: " + ($d.mcpServers.PSObject.Properties.Name -join ', ')
+```
+
+Either way, the equivalent JSON, if editing by hand (use absolute paths):
 
 ```jsonc
 "mcpServers": {
