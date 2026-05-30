@@ -7,6 +7,17 @@ shell commands and edit the config file), or a person can do it manually.
 > Replace `<...>` placeholders with real values. The image carries **no credentials** —
 > you supply them at runtime via `.env`.
 
+> **Just want to sign in and look around first?** The quickest path is the **web console** —
+> no Claude Desktop config needed:
+> ```bash
+> docker run -d -p 8080:8080 --env-file daxter.env \
+>   -v daxter-tokens:/home/daxter/.daxter \
+>   ghcr.io/danlugo/daxter:latest web
+> ```
+> Open <http://localhost:8080> → **Status → Sign in**, then **Configure** your default
+> workspace/dataset. The same `daxter-tokens` volume is reused by the MCP server below, so
+> **you only sign in once.** Continue here to also wire up Claude Desktop.
+
 ## 0. Prerequisites
 
 - **Docker Desktop** installed and **running**.

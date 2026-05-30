@@ -49,17 +49,31 @@ Full walkthrough (Windows notes, multi-client, service-principal automation) is 
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
-## Web console
+## Web console (easiest sign-in)
 
-Prefer a UI? `daxter web` serves a local Blazor console:
+Prefer a UI? `daxter web` serves a local Blazor console — the simplest way to **sign in** and
+pick your defaults, no terminal back-and-forth:
 
 ```bash
-docker run --rm -p 8080:8080 --env-file daxter.env daxter:latest web   # → http://localhost:8080
+docker run -d -p 8080:8080 --env-file daxter.env \
+  -v daxter-tokens:/home/daxter/.daxter \
+  ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080
 ```
 
-- **Status** — health checks (config, sign-in/token, connectivity), with a device-code sign-in button
-- **Explore** — workspaces → models → tables/measures, a DAX query box → results grid, refresh history
-- **Configure** — view the current config + generate an env file and the Claude Desktop MCP entry
+1. Open **http://localhost:8080** → **Status** → **Sign in** — opens the Microsoft device-login
+   page (clickable link) with a one-click-copy code; the page updates itself once you finish.
+2. **Configure** → set your default workspace/dataset and **Save**.
+3. **Explore** → Browse workspaces → datasets → tables, or run DAX.
+
+The `-v …:/home/daxter/.daxter` volume holds your **sign-in token and Configure settings**, so
+they persist across restarts and upgrades.
+
+- **Status** — health checks, sign-in, and a **Version & updates** check.
+- **Explore** — tabbed: a DAX query box, or a drill-down Browse explorer
+  (workspace → dataset → table → **M code** / partitions, measures, RLS, permissions, …).
+- **Configure** — edit auth mode / defaults / prod workspaces and **Save** (persisted to the
+  volume); also generates the env file + Claude Desktop MCP entry.
+- **Logs** — recent activity (operations with row counts + timing, sign-in, errors); secrets redacted.
 
 ## Examples
 
@@ -94,6 +108,23 @@ docker run --rm --env-file .env -v daxter-tokens:/home/daxter/.daxter \
 Prefer to **build it yourself**: `make image`. For a guided, end-to-end setup (including
 Claude Desktop), see **[`SETUP.md`](SETUP.md)**; for `-e` flags, device-code login, and the
 `bin/daxter` wrapper, see [`examples/cli.md`](examples/cli.md).
+
+## Upgrade
+
+Your sign-in token and settings live on the `daxter-tokens` volume — **not** in the image — so
+upgrading never touches them. Pull the new image and recreate the container with the **same**
+volume mount:
+
+```bash
+docker pull ghcr.io/danlugo/daxter:latest
+docker rm -f daxter                          # your container name
+docker run -d -p 8080:8080 --env-file daxter.env \
+  -v daxter-tokens:/home/daxter/.daxter \
+  ghcr.io/danlugo/daxter:latest web
+```
+
+The web console's **Status** page shows the running version and checks GitHub for newer
+releases. Or just ask Claude: *"upgrade my DAXter container and keep the volume."*
 
 ## Configure
 

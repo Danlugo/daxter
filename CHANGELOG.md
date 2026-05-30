@@ -4,6 +4,22 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-05-29
+
+### Added
+- **Version awareness + update check.** The image is stamped with its version at build time
+  (`DAXTER_VERSION`, from the git tag); the web console shows it in the header, and the Status
+  page has a **Version & updates** card that checks GitHub `releases/latest` on demand. If a
+  newer release exists it shows the release link and **volume-preserving upgrade commands**
+  (your sign-in + Configure settings are kept). Outbound-only, on click — no telemetry, no
+  background polling. Fork-friendly via `DAXTER_REPO`.
+
+### Changed
+- **Docs lead with the web console for sign-in.** README and `SETUP.md` now present
+  `daxter web` → **Sign in** as the easiest first-run path (the device-code dance moves to a
+  one-click page), and document an **Upgrade** flow that reuses the `daxter-tokens` volume so
+  config and tokens survive. Clarified that the volume — not the image — holds all state.
+
 ## [1.6.3] - 2026-05-29
 
 ### Security

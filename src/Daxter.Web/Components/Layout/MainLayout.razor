@@ -1,7 +1,8 @@
 @inherits LayoutComponentBase
+@inject VersionService Version
 
 <header class="topbar">
-    <span class="brand">DAXter <small>Console</small></span>
+    <span class="brand">DAXter <small>Console @Version.Current</small></span>
     <nav>
         <NavLink href="" Match="NavLinkMatch.All">Status</NavLink>
         <NavLink href="explore">Explore</NavLink>

@@ -28,6 +28,9 @@ RUN dotnet publish src/Daxter.Web/Daxter.Web.csproj -c Release --no-restore -o /
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
+# Version stamped at build time (CI passes the git tag, e.g. v1.6.3); "dev" for local builds.
+ARG DAXTER_VERSION=dev
+
 # Non-root user with a home directory for the MSAL token cache (~/.daxter).
 RUN groupadd --system daxter \
     && useradd --system --gid daxter --create-home --home-dir /home/daxter daxter \
@@ -38,7 +41,8 @@ COPY --from=build /app .
 
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
-    HOME=/home/daxter
+    HOME=/home/daxter \
+    DAXTER_VERSION=$DAXTER_VERSION
 
 USER daxter
 EXPOSE 8080

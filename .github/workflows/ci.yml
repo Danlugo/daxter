@@ -54,7 +54,8 @@ jobs:
         run: |
           IMG="ghcr.io/${GITHUB_REPOSITORY,,}"
           for attempt in 1 2 3; do
-            if docker build -t "$IMG:latest" -t "$IMG:${GITHUB_REF_NAME}" . \
+            if docker build --build-arg "DAXTER_VERSION=${GITHUB_REF_NAME}" \
+                 -t "$IMG:latest" -t "$IMG:${GITHUB_REF_NAME}" . \
                && docker push "$IMG:latest" \
                && docker push "$IMG:${GITHUB_REF_NAME}"; then
               exit 0

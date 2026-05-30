@@ -1,6 +1,7 @@
 @page "/"
 @inject DaxterUi Ui
 @inject IJSRuntime JS
+@inject VersionService Version
 
 <PageTitle>DAXter — Status</PageTitle>
 
@@ -61,10 +62,53 @@
     </div>
 }
 
+<div class="card">
+    <h3>Version &amp; updates</h3>
+    <p>
+        Running <strong>@Version.Current</strong> ·
+        <a href="@Version.RepoUrl" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+    </p>
+    <button class="btn-sm" @onclick="CheckUpdatesAsync" disabled="@checkingUpdate">
+        @(checkingUpdate ? "Checking…" : "Check for updates")
+    </button>
+
+    @if (update is not null)
+    {
+        @switch (update.State)
+        {
+            case UpdateState.UpToDate:
+                <p class="ok-text">✓ You're on the latest release (@update.Latest).</p>
+                break;
+
+            case UpdateState.UpdateAvailable:
+                <div class="card bad" style="margin-top:.8rem;">
+                    <p><strong>Update available:</strong> @update.Latest
+                        (you have @update.Current) ·
+                        <a href="@update.Url" target="_blank" rel="noopener noreferrer">Release notes ↗</a>
+                    </p>
+                    <p class="muted">Upgrade — reuses the same volume, so your sign-in and Configure settings are kept:</p>
+                    <pre class="code">@UpgradeCommands()</pre>
+                    <p class="muted">Or just ask Claude: <em>"upgrade my DAXter container and keep the volume."</em></p>
+                </div>
+                break;
+
+            case UpdateState.Dev:
+                <p class="muted">You're running a local <code>dev</code> build. Latest release: @(@update.Latest ?? "unknown").</p>
+                break;
+
+            default:
+                <p class="muted">@(update.Detail ?? "Couldn't determine the latest version.")
+                    <a href="@update.Url" target="_blank" rel="noopener noreferrer">Releases ↗</a></p>
+                break;
+        }
+    }
+</div>
+
 @code {
     private List<HealthCheck>? checks;
-    private bool busy, needsLogin, loggingIn, awaitingAuth, copied;
+    private bool busy, needsLogin, loggingIn, awaitingAuth, copied, checkingUpdate;
     private string? loginMsg, loginError, verificationUrl, userCode;
+    private UpdateInfo? update;
 
     protected override async Task OnInitializedAsync() => await RunAsync();
 
@@ -139,5 +183,24 @@
             copied = true;
         }
         catch { /* clipboard unavailable */ }
+    }
+
+    private async Task CheckUpdatesAsync()
+    {
+        checkingUpdate = true;
+        update = null;
+        try { update = await Version.CheckLatestAsync(); }
+        finally { checkingUpdate = false; }
+    }
+
+    private string UpgradeCommands()
+    {
+        var img = $"ghcr.io/{Version.Repo.ToLowerInvariant()}:latest";
+        return
+            $"docker pull {img}\n" +
+            "docker rm -f daxter            # your container name\n" +
+            "docker run -d -p 8080:8080 --env-file daxter.env \\\n" +
+            "  -v daxter-tokens:/home/daxter/.daxter \\\n" +
+            $"  {img} web";
     }
 }
