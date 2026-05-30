@@ -30,9 +30,16 @@ path — so Mac/Linux users and pipelines get programmatic model access.
 See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
-> **Setting up on a new machine or in Claude Desktop?** Follow **[`SETUP.md`](SETUP.md)** —
-> it's written so a Claude agent can configure the MCP server for you end to end. Just point
-> Claude at it: *"Set up DAXter for Claude Desktop using SETUP.md."*
+> **Setting up on a new machine?** Follow **[`SETUP.md`](SETUP.md)** — or **let Claude do it**.
+> Point **Claude Code** (which can run commands; a plain Claude Desktop chat can't execute the
+> steps) at it:
+>
+> > *"Set up DAXter for Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md"*
+>
+> It pulls the public image, creates the env file, and merges the `daxter` MCP server into your
+> Claude Desktop config. You provide three things: **Docker running**, your **service-principal
+> credentials** (tenant/client/secret + workspace — not in the repo), and **permission** to edit
+> the Desktop config. Then quit & reopen Claude Desktop.
 
 ## Examples
 
