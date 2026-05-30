@@ -45,6 +45,25 @@ DAXTER_DATASET=<default model name>          # optional
 (If you cloned the repo, `cp .env.example .env` gives you a starting template.)
 Keep this file private and never commit it.
 
+**Fill in real values now — before you touch Claude Desktop.** Format matters:
+
+- **No angle brackets** — replace each `<...>` entirely, brackets included.
+- **No surrounding quotes** and **no trailing spaces** on any value.
+- `DAXTER_TENANT_ID` and `DAXTER_CLIENT_ID` must be **GUIDs**
+  (e.g. `12345678-1234-1234-1234-123456789abc`).
+
+A placeholder, empty, or malformed `DAXTER_TENANT_ID` is the #1 cause of setup failure — it
+makes every tool call throw `The authority (including the tenant ID) must be in a
+well-formed URI format`.
+
+> **Editor gotcha:** do **not** edit this file with **Claude Desktop's built-in editor** —
+> it refuses with *"This file can't be saved — its path is outside the session folder."*
+> Use a normal editor (Notepad, VS Code, `nano`, …).
+
+> **The container reads `--env-file` only once, at startup**, and Claude Desktop launches it
+> once per session — so **any change to the env file takes effect only after a full
+> quit-and-reopen of Claude Desktop** (step 4), not just saving the file.
+
 ## 3. Configure Claude Desktop
 
 Config file location:
@@ -91,8 +110,15 @@ The equivalent JSON, if editing by hand (use absolute paths):
 
 ## 4. Restart Claude Desktop
 
-**Fully quit** (Cmd+Q on macOS / quit from the tray on Windows) and reopen — Claude reads
-the MCP config only at launch. Docker must be running.
+> **Do not restart until `daxter.env` contains real values — placeholders cause an auth
+> error.** Restarting while the file still has `<...>` / empty / malformed values makes
+> every tool call fail with `The authority (including the tenant ID) must be in a
+> well-formed URI format`.
+
+**Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray
+icon → Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config
+and launches the env-file'd container only at startup, so this same full restart is required
+**every time you change `daxter.env`**. Docker must be running.
 
 ## 5. Verify
 
@@ -117,6 +143,9 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 
 | Symptom | Fix |
 |---------|-----|
+| `The authority ... must be in a well-formed URI format` | `DAXTER_TENANT_ID` is still a placeholder, empty, or malformed — **or** you edited `daxter.env` without fully restarting Claude Desktop. Verify the values are real GUIDs/strings (no `<>`, quotes, or spaces) and **fully quit & reopen** the app. |
+| Edited the env file but nothing changed | The container reads `--env-file` only at startup. Fully quit & reopen Claude Desktop (closing the window isn't enough). |
+| `can't be saved — path is outside the session folder` | You're editing `daxter.env` in Claude Desktop's built-in editor. Use a normal editor (Notepad, VS Code, `nano`). |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
 | `pull access denied` from GHCR | The package is public; this only appears if it was made private — `docker login ghcr.io` or build from source. |
 | Auth / connection errors | SP creds correct? Tenant setting *Allow service principals…* enabled? SP added to the workspace? Workspace on Premium/PPU/Fabric with XMLA enabled? |
@@ -126,8 +155,9 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 ## Agent checklist
 
 - [ ] Docker running
-- [ ] env file created with SP creds + workspace (absolute path noted)
+- [ ] env file has **real** values — GUID tenant/client ids, no `<>`/quotes/trailing spaces
+- [ ] env file edited with a normal editor (not Claude Desktop's), absolute path noted
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute paths, backup made)
 - [ ] image pulls on first run (public GHCR) — or pre-pulled / built
-- [ ] Claude Desktop fully restarted
+- [ ] Claude Desktop **fully** quit & reopened (after the env file had real values)
 - [ ] "List my Power BI workspaces" returns results
