@@ -266,11 +266,31 @@ public sealed class JobService
         NotifyChanged();
     }
 
-    /// <summary>Removes finished (succeeded/failed/canceled) jobs from the list.</summary>
+    /// <summary>Removes all finished jobs (succeeded/failed/canceled/interrupted) from the list.</summary>
     public void ClearFinished()
     {
-        lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Canceled);
+        lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Canceled or JobStatus.Interrupted);
         NotifyChanged();
+    }
+
+    /// <summary>Removes one finished job (not a queued/running one) from the list.</summary>
+    public void Remove(int id)
+    {
+        lock (_gate)
+        {
+            var j = _jobs.FirstOrDefault(x => x.Id == id);
+            if (j is not null && j.Status is not (JobStatus.Queued or JobStatus.Running))
+                _jobs.Remove(j);
+        }
+        NotifyChanged();
+    }
+
+    /// <summary>Re-runs a finished/interrupted job by enqueuing the same spec (re-validates write gates).</summary>
+    public Job? Resume(int id)
+    {
+        RefreshSpec? spec;
+        lock (_gate) spec = _jobs.FirstOrDefault(j => j.Id == id)?.Spec;
+        return spec is null ? null : Enqueue(spec);
     }
 
     private void EnsureWorker()

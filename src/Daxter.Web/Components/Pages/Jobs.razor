@@ -21,6 +21,8 @@
     <span class="muted">@Svc.ActiveCount active · @jobs.Count total</span>
 </div>
 
+@if (msg is not null) { <p class="bad-text">@msg</p> }
+
 @if (jobs.Count == 0)
 {
     <p class="muted">No jobs yet.</p>
@@ -42,7 +44,17 @@ else
                         <td>@j.Title</td>
                         <td class="nowrap muted">@(j.Step ?? "")</td>
                         <td class="nowrap">@TimeCell(j)</td>
-                        <td>@if (j.CanCancel) { <button class="btn-sm" @onclick:stopPropagation="true" @onclick="() => Cancel(j.Id)">Cancel</button> }</td>
+                        <td @onclick:stopPropagation="true">
+                            @if (j.CanCancel)
+                            {
+                                <button class="btn-sm" @onclick="() => Cancel(j.Id)">Cancel</button>
+                            }
+                            else
+                            {
+                                <button class="btn-sm" @onclick="() => Resume(j.Id)" title="Re-run this refresh">↻ Resume</button>
+                                <button class="btn-sm" @onclick="() => Dismiss(j.Id)" title="Remove from the list">×</button>
+                            }
+                        </td>
                     </tr>
                     @if (j.Status == JobStatus.Running && j.Progress is { } p)
                     {
@@ -88,7 +100,16 @@ else
 
     private void Refresh() => jobs = Svc.Snapshot();
     private void ClearFinished() { Svc.ClearFinished(); Refresh(); }
+    private string? msg;
     private void Cancel(int id) { Svc.Cancel(id); Refresh(); }
+    private void Dismiss(int id) { Svc.Remove(id); Refresh(); }
+    private void Resume(int id)
+    {
+        msg = null;
+        try { Svc.Resume(id); }
+        catch (Exception ex) { msg = ex.Message; }
+        Refresh();
+    }
     private void Toggle(int id) { if (!expanded.Remove(id)) expanded.Add(id); }
     private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
 

@@ -27,6 +27,11 @@ All notable changes to DAXter are documented here. The format follows
   type (the exact class of error that an unclosed `[` causes).
 
 ### Fixed
+- **Interrupted jobs can be resumed or dismissed.** A job that was queued/running when the
+  container was bounced comes back as **Interrupted** — but there was no way to clear or re-run
+  it. Now each finished job (interrupted/failed/canceled/succeeded) has **↻ Resume** (re-runs the
+  same spec, re-checking the write gates) and **×** (remove from the list), on both the Jobs page
+  and the Refresh-page tracker. **Clear finished** now also removes interrupted jobs.
 - **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse
   table names across datasets, so the Frequent list couldn't tell two `FACT - Sales` apart. Each
   table now shows its **dataset** as a subtitle (and each dataset its **workspace**), plus a hover

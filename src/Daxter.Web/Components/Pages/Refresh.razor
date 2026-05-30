@@ -206,7 +206,17 @@ else
                             <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
                             <td>@j.Title</td>
                             <td class="nowrap">@Fmt(j.Duration)</td>
-                            <td>@if (j.CanCancel) { <button class="btn-sm" @onclick="() => Jobs.Cancel(j.Id)">Cancel</button> }</td>
+                            <td>
+                                @if (j.CanCancel)
+                                {
+                                    <button class="btn-sm" @onclick="() => Jobs.Cancel(j.Id)">Cancel</button>
+                                }
+                                else
+                                {
+                                    <button class="btn-sm" @onclick="() => ResumeJob(j.Id)" title="Re-run this refresh">↻ Resume</button>
+                                    <button class="btn-sm" @onclick="() => Jobs.Remove(j.Id)" title="Remove from the list">×</button>
+                                }
+                            </td>
                             <td class="msg">@(j.Error ?? j.Step ?? "")</td>
                         </tr>
                     }
@@ -245,6 +255,12 @@ else
     private bool historyBusy;
 
     private IReadOnlyList<Job> Mine => Jobs.For(workspace, dataset);
+
+    private void ResumeJob(int id)
+    {
+        try { var j = Jobs.Resume(id); jobMsg = j is null ? null : $"Re-queued as job #{j.Id}."; jobMsgOk = true; }
+        catch (Exception ex) { jobMsg = ex.Message; jobMsgOk = false; }
+    }
 
     private bool CanReview => scope switch
     {
