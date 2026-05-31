@@ -22,7 +22,7 @@ no service principal required to start).
 **Set it up — let Claude do it.** Point **Claude Code** (which can run commands; a plain
 Claude Desktop *chat* can't execute the steps) at the setup guide:
 
-> *"Using **Claude Code**, set up the DAXter MCP server for my Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md — run all the Docker/config commands and **start the web console**. I'll do the browser sign-in at localhost and the final Claude Desktop restart."*
+> *"Using **Claude Code**, set up the DAXter MCP server for my Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md — **fetch the raw file (`raw.githubusercontent.com/Danlugo/daxter/main/SETUP.md`) so you get the exact commands, not a summary**, then run all the Docker/config commands and **start the web console**. I'll do the browser sign-in at localhost and the final Claude Desktop restart."*
 
 It auto-pulls the public image and merges the `daxter` server into your Claude Desktop config
 (no build, no credentials to obtain). Then **fully quit & reopen Claude Desktop** and, in a chat:
