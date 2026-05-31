@@ -713,23 +713,27 @@ internal static class Program
     private static Command BuildWorkspaceCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
     {
         Command Sub(string name, string desc,
-            Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op)
+            Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op,
+            bool requiresWorkspace = true)
         {
             var cmd = new Command(name, desc) { outputOption };
             connectionOptions.AddTo(cmd);
             cmd.SetAction((pr, ct) => RunRestQueryAsync(
-                () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption), op, ct));
+                () => connectionOptions.Resolve(pr, requiresWorkspace), () => pr.GetValue(outputOption), op, ct));
             return cmd;
         }
 
-        var ls = Sub("ls", "List workspaces (group ids).", (rest, _, ct) => rest.GroupsAsync(ct));
+        // Tenant-level — no workspace needed (matches the MCP daxter_workspaces / daxter_gateways tools).
+        var ls = Sub("ls", "List workspaces (group ids).", (rest, _, ct) => rest.GroupsAsync(ct),
+            requiresWorkspace: false);
         var datasets = Sub("datasets", "List datasets in the workspace.", async (rest, cfg, ct) =>
             await rest.DatasetsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
         var reports = Sub("reports", "List reports in the workspace.", async (rest, cfg, ct) =>
             await rest.ReportsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
         var lineage = Sub("lineage", "Report → dataset lineage.", async (rest, cfg, ct) =>
             await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
-        var gateways = Sub("gateways", "List gateways (needs gateway admin).", (rest, _, ct) => rest.GatewaysAsync(ct));
+        var gateways = Sub("gateways", "List gateways (needs gateway admin).", (rest, _, ct) => rest.GatewaysAsync(ct),
+            requiresWorkspace: false);
         var permissions = Sub("permissions", "Who has access (workspace, or a model via --dataset).",
             async (rest, cfg, ct) =>
             {

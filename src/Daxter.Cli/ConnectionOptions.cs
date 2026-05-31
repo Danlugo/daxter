@@ -57,8 +57,12 @@ internal sealed class ConnectionOptions
         command.Options.Add(_env);
     }
 
-    /// <summary>Merges CLI options with environment variables into a validated config.</summary>
-    public DaxterConfig Resolve(ParseResult parseResult)
+    /// <summary>
+    /// Merges CLI options with environment variables into a validated config.
+    /// Pass <paramref name="requireWorkspace"/> = false for tenant-level commands
+    /// (e.g. <c>ws ls</c>, <c>ws gateways</c>) that don't target a specific workspace.
+    /// </summary>
+    public DaxterConfig Resolve(ParseResult parseResult, bool requireWorkspace = true)
     {
         var authValue = parseResult.GetValue(_auth);
         AuthMode? authMode = authValue switch
@@ -77,6 +81,7 @@ internal sealed class ConnectionOptions
             clientId: parseResult.GetValue(_clientId),
             clientSecret: parseResult.GetValue(_clientSecret),
             authMode: authMode,
-            environment: parseResult.GetValue(_env));
+            environment: parseResult.GetValue(_env),
+            requireWorkspace: requireWorkspace);
     }
 }

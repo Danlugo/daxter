@@ -4,6 +4,16 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-05-31
+
+### Fixed
+- **`daxter ws ls` and `ws gateways` no longer require a workspace.** Listing workspaces/gateways
+  is a tenant-level operation, but the CLI resolved config with `requireWorkspace: true` and failed
+  with `No workspace configured` even when the token was valid. They now resolve with
+  `requireWorkspace: false`, matching the MCP `daxter_workspaces` / `daxter_gateways` tools.
+  This also un-breaks the `ws ls` sign-in self-check the install agent runs in `SETUP.md`.
+  (`ConnectionOptions.Resolve` gained a `requireWorkspace` parameter; regression-tested.)
+
 ## [1.7.2] - 2026-05-30
 
 ### Docs
