@@ -487,7 +487,7 @@ internal static class Program
         };
         var savedOption = new Option<string?>("--saved") { Description = "Run a saved check by name (shared with the web console)." };
         var listSavedOption = new Option<bool>("--list-saved") { Description = "List saved checks and exit." };
-        var runAllSavedOption = new Option<bool>("--run-all-saved") { Description = "Run every saved rule for --pipeline and report compliance." };
+        var runAllSavedOption = new Option<bool>("--run-all-saved") { Description = "Run every saved rule for --pipeline and list the models matching each." };
 
         var audit = new Command("audit",
             "Audit a pipeline (all models) or one --model: models without rules, a parameter check, or run saved checks/rules (--saved / --list-saved / --run-all-saved).")
@@ -574,9 +574,9 @@ internal static class Program
                 var rows = rules.Select(c =>
                 {
                     var r = PipelineRulesService.EvaluateRule(scan, c.Stage, c.Param, c.Value, c.NotEquals);
-                    return new object?[] { c.Name, c.Param, c.Stage, (c.NotEquals ? "!=" : "=") + " " + c.Value, $"{r.Compliant}/{r.Checked}", r.Violations.Count };
+                    return new object?[] { c.Name, c.Param, c.Stage, (c.NotEquals ? "!=" : "=") + " " + c.Value, $"{r.Matched}/{r.Checked}" };
                 }).ToList();
-                Console.Out.Write(formatter.Format(new QueryResult(new[] { "Rule", "Param", "Stage", "Expected", "Compliant", "Violations" }, rows)));
+                Console.Out.Write(formatter.Format(new QueryResult(new[] { "Rule", "Param", "Stage", "Expected", "Matches" }, rows)));
                 Console.Error.WriteLine($"({rules.Count} rule(s) evaluated against {scan.Models.Count} models)");
                 return 0;
             }

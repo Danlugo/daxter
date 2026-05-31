@@ -213,8 +213,8 @@ public static class DaxterTools
         => DaxterToolRuntime.AuditRunSavedAsync(name, ct);
 
     [McpServerTool(Name = "daxter_audit_run_all_saved"), Description(
-        "Run every saved rule for a pipeline against a fresh scan and report per-rule compliance. " +
-        "Columns: Rule, Param, Stage, Expected, Compliant (compliant/checked), Violations (count).")]
+        "Run every saved rule for a pipeline against a fresh scan and list, per rule, the models that match its condition. " +
+        "Columns: Rule, Param, Stage, Expected, Matches (matched/checked).")]
     public static Task<string> AuditRunAllSaved(
         [Description("Pipeline id (from daxter_pipelines).")] string pipelineId,
         [Description("Optional: a single model (e.g. 'Sales') — evaluate every saved rule against just that model. Omit for all models.")] string? model = null,

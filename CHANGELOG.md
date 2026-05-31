@@ -4,6 +4,19 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.5] - 2026-05-31
+
+### Fixed
+- **"Run all rules" now matches the single Parameter-value-check (finder semantics).** The rule-set
+  view inverted a "≠ X" check: it treated the saved check as a compliance assertion ("every model
+  *should* be ≠ X") and listed the models that **were** X as "violations" — the opposite of what the
+  single check (and the rule name) means. It now lists, per rule, the models whose value **satisfies**
+  the condition — e.g. `DB_NAME ≠ DB_PROD` returns the models that are ≠ DB_PROD (the anomalies),
+  consistent with the single check. Applied across Web, CLI (`--run-all-saved`), and MCP
+  (`daxter_audit_run_all_saved`); the column is now **Matches** (matched / checked).
+  (`RuleResult.Violations`→`Matches`, `Compliant`→`Matched`; `EvaluateRule` is finder-based and
+  regression-tested.)
+
 ## [1.7.4] - 2026-05-31
 
 ### Fixed

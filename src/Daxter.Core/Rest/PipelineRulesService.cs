@@ -18,12 +18,16 @@ public sealed record ModelMatrix(string Model, PipelineParamMatrix Matrix);
 /// <summary>The result of a pipeline-wide scan (all models, each with its parameter matrix).</summary>
 public sealed record PipelineScan(string PipelineId, IReadOnlyList<StageColumn> Stages, IReadOnlyList<ModelMatrix> Models);
 
-/// <summary>A model that violates a rule, with the value it actually has.</summary>
-public sealed record RuleViolation(string Model, string? Actual);
-/// <summary>How a saved rule fares across the scanned models.</summary>
+/// <summary>A model that matches a rule's condition, with the value it has in that stage.</summary>
+public sealed record RuleMatch(string Model, string? Actual);
+/// <summary>
+/// Result of running a saved check against a scan: <see cref="Checked"/> = models that have the
+/// param in that stage; <see cref="Matches"/> = the ones whose value satisfies the condition
+/// (the finder hits — for "≠ X", the models that are ≠ X), with <see cref="Matched"/> their count.
+/// </summary>
 public sealed record RuleResult(
     string Stage, string Param, string Value, bool NotEquals,
-    int Checked, int Compliant, IReadOnlyList<RuleViolation> Violations);
+    int Checked, int Matched, IReadOnlyList<RuleMatch> Matches);
 
 /// <summary>
 /// Compares a model's parameter values across a pipeline's stages — the public Power BI REST API
@@ -196,28 +200,28 @@ public static class PipelineRulesService
     }
 
     /// <summary>
-    /// Evaluates a saved rule (param @ stage == value, or != for <paramref name="notEquals"/>)
-    /// against a completed scan: counts models that <i>have</i> the param in that stage, how many
-    /// comply, and lists the offenders. Pure in-memory — no extra XMLA.
+    /// Evaluates a saved check (param @ stage == value, or != for <paramref name="notEquals"/>)
+    /// against a completed scan as a <b>finder</b>: counts models that <i>have</i> the param in that
+    /// stage (<see cref="RuleResult.Checked"/>) and lists the ones whose value <i>satisfies</i> the
+    /// condition (the matches — for "≠ X", the models that are ≠ X). Pure in-memory — no extra XMLA.
     /// </summary>
     public static RuleResult EvaluateRule(PipelineScan scan, string stage, string param, string value, bool notEquals)
     {
         var sIdx = scan.Stages.ToList().FindIndex(s => string.Equals(s.Workspace, stage, StringComparison.OrdinalIgnoreCase));
-        if (sIdx < 0) return new RuleResult(stage, param, value, notEquals, 0, 0, Array.Empty<RuleViolation>());
+        if (sIdx < 0) return new RuleResult(stage, param, value, notEquals, 0, 0, Array.Empty<RuleMatch>());
 
-        int checkedCount = 0, compliant = 0;
-        var violations = new List<RuleViolation>();
+        int checkedCount = 0;
+        var matches = new List<RuleMatch>();
         foreach (var m in scan.Models)
         {
             var row = m.Matrix.Rows.FirstOrDefault(r => string.Equals(r.Name, param, StringComparison.OrdinalIgnoreCase));
             var actual = row?.Values[sIdx];
             if (actual is null) continue; // model doesn't have this param in this stage
             checkedCount++;
-            var matches = string.Equals(actual, value, StringComparison.Ordinal);
-            if (notEquals ? !matches : matches) compliant++;
-            else violations.Add(new RuleViolation(m.Model, actual));
+            var equals = string.Equals(actual, value, StringComparison.Ordinal);
+            if (notEquals ? !equals : equals) matches.Add(new RuleMatch(m.Model, actual)); // condition holds → a hit
         }
-        return new RuleResult(stage, param, value, notEquals, checkedCount, compliant, violations);
+        return new RuleResult(stage, param, value, notEquals, checkedCount, matches.Count, matches);
     }
 
     /// <summary>

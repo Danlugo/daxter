@@ -108,24 +108,23 @@
                 {
                     <div class="grid-wrap">
                         <table class="grid">
-                            <thead><tr><th>Rule</th><th>Param</th><th>Stage</th><th>Expected</th><th>Compliant</th><th>⚠</th></tr></thead>
+                            <thead><tr><th>Rule</th><th>Param</th><th>Stage</th><th>Expected</th><th>Matches</th></tr></thead>
                             <tbody>
                                 @foreach (var rr in ruleResults)
                                 {
-                                    <tr class="@(rr.Result.Violations.Count > 0 ? "param-diff" : "")">
+                                    <tr class="@(rr.Result.Matched > 0 ? "param-diff" : "")">
                                         <td><strong>@rr.Check.Name</strong></td>
                                         <td>@rr.Result.Param</td>
                                         <td>@rr.Result.Stage</td>
                                         <td class="param-val"><code>@(rr.Result.NotEquals ? "≠" : "=") @rr.Result.Value</code></td>
-                                        <td>@rr.Result.Compliant / @rr.Result.Checked</td>
-                                        <td class="nowrap">@(rr.Result.Violations.Count == 0 ? "✓" : rr.Result.Violations.Count.ToString())</td>
+                                        <td class="nowrap">@rr.Result.Matched / @rr.Result.Checked</td>
                                     </tr>
-                                    @if (rr.Result.Violations.Count > 0)
+                                    @if (rr.Result.Matched > 0)
                                     {
-                                        <tr><td colspan="6">
+                                        <tr><td colspan="5">
                                             <details class="param-notes">
-                                                <summary class="muted">@rr.Result.Violations.Count model(s) violate this rule</summary>
-                                                @foreach (var v in rr.Result.Violations)
+                                                <summary class="muted">@rr.Result.Matched model(s) match this rule</summary>
+                                                @foreach (var v in rr.Result.Matches)
                                                 {
                                                     <div class="kv"><span class="kv-k">@v.Model</span>: <code class="kv-v rule">@(v.Actual ?? "—")</code></div>
                                                 }

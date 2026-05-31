@@ -278,9 +278,18 @@ internal static class DaxterToolRuntime
             // Single-model: report the actual value + pass/fail (even on a miss). Pipeline-wide: list matches.
             if (!string.IsNullOrWhiteSpace(model))
             {
-                var r = PipelineRulesService.EvaluateRule(scan, stage, param, value, notEquals);
-                var actual = r.Checked == 0 ? "(param not in stage)" : (r.Compliant == 1 ? value : r.Violations[0].Actual);
-                var result = r.Checked == 0 ? "n/a" : (r.Compliant == 1 ? "MATCH" : "no match");
+                var sIdx0 = scan.Stages.ToList().FindIndex(s => string.Equals(s.Workspace, stage, StringComparison.OrdinalIgnoreCase));
+                var row0 = scan.Models.FirstOrDefault()?.Matrix.Rows
+                    .FirstOrDefault(r => string.Equals(r.Name, param, StringComparison.OrdinalIgnoreCase));
+                var actual0 = (sIdx0 >= 0 && row0 is not null) ? row0.Values[sIdx0] : null;
+                string actual, result;
+                if (actual0 is null) { actual = "(param not in stage)"; result = "n/a"; }
+                else
+                {
+                    var eq = string.Equals(actual0, value, StringComparison.Ordinal);
+                    actual = actual0;
+                    result = (notEquals ? !eq : eq) ? "MATCH" : "no match";
+                }
                 return Format(new QueryResult(
                     new[] { "Model", "Stage", "Param", "Expected", "Actual", "Result" },
                     new List<object?[]> { new object?[] { model, stage, param, (notEquals ? "!= " : "= ") + value, actual, result } }));
@@ -318,7 +327,7 @@ internal static class DaxterToolRuntime
             : PipelineParamCheckAsync(c.PipelineId, c.Stage, c.Param, c.Value, c.NotEquals, null, ct);
     }
 
-    /// <summary>Runs every saved rule for a pipeline against a fresh scan; reports per-rule compliance.
+    /// <summary>Runs every saved rule for a pipeline against a fresh scan; lists the models matching each.
     /// Scope to one model with <paramref name="model"/> (fast), or omit for all models.</summary>
     public static Task<string> AuditRunAllSavedAsync(string pipelineId, string? model, CancellationToken ct)
         => Guard(async () =>
@@ -337,9 +346,9 @@ internal static class DaxterToolRuntime
             var rows = rules.Select(c =>
             {
                 var r = PipelineRulesService.EvaluateRule(scan, c.Stage, c.Param, c.Value, c.NotEquals);
-                return new object?[] { c.Name, c.Param, c.Stage, (c.NotEquals ? "!=" : "=") + " " + c.Value, $"{r.Compliant}/{r.Checked}", r.Violations.Count };
+                return new object?[] { c.Name, c.Param, c.Stage, (c.NotEquals ? "!=" : "=") + " " + c.Value, $"{r.Matched}/{r.Checked}" };
             }).ToList();
-            return Format(new QueryResult(new[] { "Rule", "Param", "Stage", "Expected", "Compliant", "Violations" }, rows));
+            return Format(new QueryResult(new[] { "Rule", "Param", "Stage", "Expected", "Matches" }, rows));
         });
 
     /// <summary>Runs a tenant-level REST call (no workspace required).</summary>
