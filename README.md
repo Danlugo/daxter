@@ -251,6 +251,13 @@ Multi-stage build — the `sdk:8.0` stage restores + **tests** + publishes; the 
 `runtime:8.0` stage ships only the app as a non-root user. Full design in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+**Image security.** A scanner (e.g. `docker scout`) will flag CVEs on the image — these are
+**inherited from the .NET runtime's Debian base packages** (`perl`, `gnutls28`, …), **not** from
+DAXter's code, and they sit in paths a .NET app never executes (no `perl` at runtime; .NET TLS uses
+OpenSSL, not `gnutls`). They clear when the .NET base image is refreshed; a future move to a
+[chiseled base](https://learn.microsoft.com/dotnet/core/docker/container-images) would remove them
+outright. DAXter's own layers add no critical/high vulnerabilities.
+
 ## Finding workspace & model names
 
 XMLA addresses use **names**, not the GUIDs you see in portal/OneLake URLs
