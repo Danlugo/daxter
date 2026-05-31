@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 
@@ -13,8 +12,7 @@ namespace Daxter.Web.Services;
 /// </summary>
 public sealed class ConfigState
 {
-    private static string ConfigPath => Path.Combine(
-        Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath(), ".daxter", "console-config.json");
+    private static string ConfigPath => PersistedSettings.FilePath;
 
     public string AuthMode { get; set; } = "device-code";
     public string? TenantId { get; set; }
@@ -55,30 +53,19 @@ public sealed class ConfigState
 
     private bool LoadPersisted()
     {
-        try
-        {
-            if (!File.Exists(ConfigPath)) return false;
-            var dto = JsonSerializer.Deserialize<Dto>(File.ReadAllText(ConfigPath));
-            if (dto is null) return false;
-
-            AuthMode = dto.AuthMode ?? AuthMode;
-            TenantId = dto.TenantId; ClientId = dto.ClientId; ClientSecret = dto.ClientSecret;
-            Workspace = dto.Workspace; Dataset = dto.Dataset;
-            ProdWorkspaces = dto.ProdWorkspaces; AllowWrites = dto.AllowWrites;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        if (!File.Exists(ConfigPath)) return false;
+        var s = PersistedSettings.Load();   // shared shape — same file the CLI/MCP read
+        AuthMode = s.AuthMode ?? AuthMode;
+        TenantId = s.TenantId; ClientId = s.ClientId; ClientSecret = s.ClientSecret;
+        Workspace = s.Workspace; Dataset = s.Dataset;
+        ProdWorkspaces = s.ProdWorkspaces; AllowWrites = s.AllowWrites;
+        return true;
     }
 
-    /// <summary>Persists the current values to the mounted volume. Returns the path or an error.</summary>
+    /// <summary>Persists the current values to the mounted volume (the single source the CLI/MCP also read).</summary>
     public string Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-        var dto = new Dto(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset, ProdWorkspaces, AllowWrites);
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(dto, new JsonSerializerOptions { WriteIndented = true }));
+        new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset, ProdWorkspaces, AllowWrites).Save();
         Persisted = true;
         return ConfigPath;
     }
@@ -99,8 +86,4 @@ public sealed class ConfigState
             ? Array.Empty<string>()
             : ProdWorkspaces.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
     };
-
-    private sealed record Dto(
-        string? AuthMode, string? TenantId, string? ClientId, string? ClientSecret,
-        string? Workspace, string? Dataset, string? ProdWorkspaces, bool AllowWrites);
 }

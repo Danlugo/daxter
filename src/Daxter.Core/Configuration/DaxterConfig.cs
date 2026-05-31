@@ -85,6 +85,12 @@ public sealed class DaxterConfig
                 ? null
                 : System.Environment.GetEnvironmentVariable(key);
 
+        static string? Nz(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+        // Single source of truth: settings the web console saved to the shared volume.
+        // Precedence everywhere is: explicit arg > volume config (UI) > env var (fallback) > default.
+        var saved = PersistedSettings.Load();
+
         // Active environment (e.g. "dev") enables per-env overrides like
         // DAXTER_WORKSPACE_DEV / DAXTER_DATASET_DEV (one SP, workspace per env).
         var activeEnv = environment ?? Env(EnvEnvironment);
@@ -93,7 +99,7 @@ public sealed class DaxterConfig
             ? null
             : Env($"{baseKey}_{activeEnv.Trim().ToUpperInvariant()}");
 
-        var resolvedWorkspace = workspace ?? PerEnv(EnvWorkspace) ?? Env(EnvWorkspace);
+        var resolvedWorkspace = workspace ?? Nz(saved.Workspace) ?? PerEnv(EnvWorkspace) ?? Env(EnvWorkspace);
         if (string.IsNullOrWhiteSpace(resolvedWorkspace))
         {
             if (!requireWorkspace)
@@ -110,19 +116,19 @@ public sealed class DaxterConfig
             }
         }
 
-        var resolvedAuth = authMode ?? ParseAuthMode(Env(EnvAuthMode));
+        var resolvedAuth = authMode ?? ParseAuthMode(Nz(saved.AuthMode) ?? Env(EnvAuthMode));
 
         return new DaxterConfig
         {
             Workspace = resolvedWorkspace,
-            Dataset = dataset ?? PerEnv(EnvDataset) ?? Env(EnvDataset),
-            TenantId = tenantId ?? Env(EnvTenantId),
-            ClientId = clientId ?? Env(EnvClientId),
-            ClientSecret = clientSecret ?? Env(EnvClientSecret),
+            Dataset = dataset ?? Nz(saved.Dataset) ?? PerEnv(EnvDataset) ?? Env(EnvDataset),
+            TenantId = tenantId ?? Nz(saved.TenantId) ?? Env(EnvTenantId),
+            ClientId = clientId ?? Nz(saved.ClientId) ?? Env(EnvClientId),
+            ClientSecret = clientSecret ?? Nz(saved.ClientSecret) ?? Env(EnvClientSecret),
             PublicClientId = Env(EnvPublicClientId),
             AuthMode = resolvedAuth,
             Environment = string.IsNullOrWhiteSpace(activeEnv) ? null : activeEnv!.Trim().ToLowerInvariant(),
-            ProdWorkspaces = ParseList(Env(EnvProdWorkspaces)),
+            ProdWorkspaces = ParseList(Nz(saved.ProdWorkspaces) ?? Env(EnvProdWorkspaces)),
         };
     }
 

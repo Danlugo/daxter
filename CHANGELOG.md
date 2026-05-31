@@ -4,6 +4,21 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-05-31
+
+### Changed
+- **One config source across CLI, MCP, and the web console.** `DaxterConfig.FromEnvironment` — used
+  by all three — now reads the settings the web console saves to the shared volume
+  (`~/.daxter/console-config.json`) as the primary source, with env vars as a fallback. Precedence:
+  explicit `--flag`/tool-arg **>** web-console config **>** env var **>** default. So workspace,
+  dataset, tenant, client id/secret, prod-workspaces and allow-writes set in the UI are now honored
+  by the CLI and MCP server too — no more "the console shows it but the MCP doesn't." A new
+  `PersistedSettings` type is the single shape Core and the web both read/write; v1.7.6's allow-writes
+  special-case folds into it.
+- **The env file is now optional.** With config living on the shared volume, a `daxter.env` /
+  `--env-file` is no longer required for normal use — it stays a supported fallback for
+  headless/CI / service-principal injection. (Install-guide simplification to follow.)
+
 ## [1.7.6] - 2026-05-31
 
 ### Changed

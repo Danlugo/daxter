@@ -18,14 +18,22 @@ public class ConnectionOptionsTests
     private static void WithNoWorkspaceEnv(Action body)
     {
         var saved = WorkspaceVars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
+        var savedHome = Environment.GetEnvironmentVariable("HOME");
+        // Empty HOME → no ~/.daxter/console-config.json, so the volume-config layer can't supply a workspace.
+        var home = Path.Combine(Path.GetTempPath(), "daxter-conntest-home");
         try
         {
+            if (Directory.Exists(home)) Directory.Delete(home, true);
+            Directory.CreateDirectory(home);
+            Environment.SetEnvironmentVariable("HOME", home);
             foreach (var v in WorkspaceVars) Environment.SetEnvironmentVariable(v, null);
             body();
         }
         finally
         {
             foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v);
+            Environment.SetEnvironmentVariable("HOME", savedHome);
+            try { if (Directory.Exists(home)) Directory.Delete(home, true); } catch { /* best effort */ }
         }
     }
 

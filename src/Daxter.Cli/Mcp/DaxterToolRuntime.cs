@@ -126,25 +126,11 @@ internal static class DaxterToolRuntime
         _ => throw new DaxterException($"Unknown order '{value}'. Use newest-first or oldest-first."),
     };
 
-    /// <summary>Writes are enabled by the server env var OR the web console's saved "Allow writes" toggle.</summary>
+    /// <summary>Writes are enabled by the server env var OR the web console's saved "Allow writes" toggle
+    /// (the shared <c>~/.daxter/console-config.json</c>, read via <see cref="PersistedSettings"/>).</summary>
     internal static bool WritesAllowed()
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase)
-           || ConsoleConfigAllowsWrites();
-
-    /// <summary>Reads the web console's "Allow writes" toggle from ~/.daxter/console-config.json (shared volume).</summary>
-    internal static bool ConsoleConfigAllowsWrites()
-    {
-        try
-        {
-            var home = Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath();
-            var path = Path.Combine(home, ".daxter", "console-config.json");
-            if (!File.Exists(path)) return false;
-            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
-            return doc.RootElement.TryGetProperty("AllowWrites", out var v)
-                && v.ValueKind == System.Text.Json.JsonValueKind.True;
-        }
-        catch { return false; }
-    }
+           || PersistedSettings.Load().AllowWrites;
 
     /// <summary>Optional guardrail: set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block prod refresh/cache over MCP.</summary>
     internal static bool ProdWritesBlocked()

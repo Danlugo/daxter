@@ -19,8 +19,15 @@ public class DaxterConfigTests
     private static void WithEnv(IDictionary<string, string?> values, Action body)
     {
         var saved = AllVars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
+        var savedHome = Environment.GetEnvironmentVariable("HOME");
+        // Redirect HOME to an empty temp dir so FromEnvironment's volume-config layer
+        // (~/.daxter/console-config.json) is empty and these tests see env-only behavior.
+        var home = Path.Combine(Path.GetTempPath(), "daxter-cfgtest-home");
         try
         {
+            if (Directory.Exists(home)) Directory.Delete(home, true);
+            Directory.CreateDirectory(home);
+            Environment.SetEnvironmentVariable("HOME", home);
             foreach (var v in AllVars)
             {
                 Environment.SetEnvironmentVariable(
@@ -35,6 +42,8 @@ public class DaxterConfigTests
             {
                 Environment.SetEnvironmentVariable(k, v);
             }
+            Environment.SetEnvironmentVariable("HOME", savedHome);
+            try { if (Directory.Exists(home)) Directory.Delete(home, true); } catch { /* best effort */ }
         }
     }
 
