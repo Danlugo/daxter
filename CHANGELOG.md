@@ -4,6 +4,15 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.4] - 2026-05-31
+
+### Fixed
+- **Windows config merge no longer writes a UTF-8 BOM.** The PowerShell merge in `SETUP.md` used
+  `Set-Content -Encoding UTF8`, which on Windows PowerShell 5.1 prepends a BOM — Claude Desktop
+  then rejects the file with *"Could not load app settings… not valid JSON"* and **no** MCP servers
+  load. It now writes BOM-free via `[System.IO.File]::WriteAllText(…, UTF8Encoding($false))`. Added
+  a Troubleshooting row with a one-line repair for a config that already got a BOM.
+
 ## [1.7.3] - 2026-05-31
 
 ### Fixed

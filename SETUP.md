@@ -191,7 +191,10 @@ $d.mcpServers | Add-Member -NotePropertyName daxter -NotePropertyValue ([pscusto
              "-v","daxter-tokens:/home/daxter/.daxter",
              "ghcr.io/danlugo/daxter:latest","mcp")
 }) -Force
-$d | ConvertTo-Json -Depth 10 | Set-Content $cfg -Encoding UTF8
+# Write UTF-8 WITHOUT a BOM — Claude Desktop's JSON parser rejects a BOM ("not valid JSON").
+# (Windows PowerShell 5.1's `Set-Content -Encoding UTF8` adds one, so don't use it here.)
+$json = $d | ConvertTo-Json -Depth 10
+[System.IO.File]::WriteAllText($cfg, $json, (New-Object System.Text.UTF8Encoding $false))
 "mcpServers: " + ($d.mcpServers.PSObject.Properties.Name -join ', ')
 ```
 
@@ -297,6 +300,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 | `The authority ... must be in a well-formed URI format` | `DAXTER_TENANT_ID` is still a placeholder, empty, or malformed — **or** you edited `daxter.env` without fully restarting Claude Desktop. Verify the values are real GUIDs/strings (no `<>`, quotes, or spaces) and **fully quit & reopen** the app. |
 | Edited the env file but nothing changed | The container reads `--env-file` only at startup. Fully quit & reopen Claude Desktop (closing the window isn't enough). |
 | `can't be saved — path is outside the session folder` | You're editing `daxter.env` in Claude Desktop's built-in editor. Use a normal editor (Notepad, VS Code, `nano`). |
+| Claude: **"Could not load app settings… not valid JSON"** | The config file has a **UTF-8 BOM** (older Windows PowerShell's `Set-Content -Encoding UTF8` adds one). Rewrite it BOM-free, then fully restart: `$p="$env:APPDATA\Claude\claude_desktop_config.json"; [System.IO.File]::WriteAllText($p,[System.IO.File]::ReadAllText($p),(New-Object System.Text.UTF8Encoding $false))` — keeps your `daxter` entry. (Step 3's merge now writes BOM-free.) |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
 | No `…mcp` container in `docker ps` | **Normal — not a failure.** Claude Desktop runs the MCP server over **stdio** (`docker run -i --rm … mcp`), not as a standalone long-lived container, so it won't show in `docker ps`. Confirm it loaded by running **"List my workspaces"** in the Claude Desktop chat — not from the shell. |
 | `pull access denied` from GHCR | The package is public; this only appears if it was made private — `docker login ghcr.io` or build from source. |
