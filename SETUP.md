@@ -226,18 +226,30 @@ link, paste the code, and sign in with your account. The page updates itself whe
 Your sign-in is cached on the shared `daxter-tokens` volume, so **Claude Desktop's `daxter`
 server will reuse it automatically** — you only sign in once.
 
+> **Agent — verify it yourself; don't make the user test it.** Once they confirm they've signed
+> in, prove the sign-in **and** the data path with the CLI (same image, same token volume — no
+> Claude Desktop needed):
+> ```bash
+> docker run --rm --env-file "$HOME/daxter.env" \
+>   -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest ws ls
+> # Windows (PowerShell): --env-file "C:\Users\<you>\daxter.env"
+> ```
+> If it lists workspaces, sign-in works and the connection is good. With the config merge from
+> step 3 also confirmed, **everything is verified** — so after the user restarts (step 5) you can
+> simply **tell them it's all working**, not ask them to run a test.
+
 ## 5. Restart Claude Desktop — last step, and you're done
 
 > **Before restarting, if you set any values (tenant id, or service-principal creds), make sure
 > they're real — not `<...>` placeholders.** A malformed/empty tenant id makes every tool call
 > fail with `The authority (including the tenant ID) must be in a well-formed URI format`.
 
-> **Agent:** you can't do this part — tell the user it's the final step and ask them to fully
-> quit & reopen Claude Desktop now (the `daxter` tools won't appear until they do). **Don't try
-> to verify the MCP server from the shell** — it runs *inside* Claude Desktop over stdio, so it
-> **won't show in `docker ps`** (its absence means nothing). Just ask the user to run **"List my
-> workspaces"** in the Claude Desktop chat and treat a normal result as success — don't preface
-> it with a long "if it's broken" checklist; only walk through fixes if they report a real error.
+> **Agent:** you can't do this part — tell the user the final step is to fully quit & reopen
+> Claude Desktop (the `daxter` tools load only at startup). You already proved sign-in + the data
+> path with `ws ls` (step 4) and the config merge (step 3), so **once they've restarted, just tell
+> them everything's working** — don't make them run a test or report back. **Don't look for an
+> `…mcp` container in `docker ps`** — Claude Desktop runs it over stdio, so it won't appear
+> (normal, not a failure). Only troubleshoot if the user reports an actual error.
 
 **Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray icon →
 Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config and launches
@@ -245,12 +257,12 @@ the `daxter` container **only at startup** — so the tools don't appear until y
 you signed in first (step 4), the container finds your cached token immediately and the tools work
 on the first try. (Docker must be running. Redo this restart **every time you change `daxter.env`**.)
 
-**Verify:** in a chat, type **"List my workspaces"** — it should return your workspaces right away
-(your token is already cached). Name one as your default (or just mention a workspace per request,
-e.g. `Sales - QA`), then try **"List the tables in the `<your model>` model"**. That's it — you're
-done. *(Only if a tool says "Not signed in" — which shouldn't happen — reopen
-**<http://localhost:8080> → Status → Sign in**.)* See [`examples/mcp.md`](examples/mcp.md) for a
-prompt per tool.
+**That's it — you're done after the restart.** The `daxter` tools are now in Claude Desktop, using
+the sign-in already verified, so there's nothing more to set up. *(Want to see them? Type **"List
+my workspaces"** in a chat — it returns right away; name one as your default, or just mention a
+workspace per request, e.g. `Sales - QA`. If a tool ever says "Not signed in" — it shouldn't —
+reopen **<http://localhost:8080> → Status → Sign in**.)* See [`examples/mcp.md`](examples/mcp.md)
+for a prompt per tool.
 
 ## Multiple clients / environments
 
@@ -292,4 +304,5 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
       code). Token cached on the shared volume.
 - [ ] **Restarted last (step 5):** Claude Desktop **fully** quit & reopened — so it loads the
       `daxter` config and the MCP container finds the cached token (image auto-pulls on first run)
-- [ ] **"List my workspaces"** returns results
+- [ ] **Verified by Claude (step 4):** `… ws ls` (CLI) lists workspaces — proves sign-in +
+      connection, so after the restart Claude **confirms it's all working** (no user test required)
