@@ -102,7 +102,8 @@ they persist across restarts and upgrades.
 
 ## Install
 
-**Pull the prebuilt image** (published to GHCR by CI on every release — no build needed):
+**Pull the prebuilt image** — published to GHCR by CI on every release, **multi-arch
+(`linux/amd64` + `linux/arm64`)** so it runs native on Apple Silicon and x86 (no build needed):
 
 ```bash
 docker pull ghcr.io/danlugo/daxter:latest

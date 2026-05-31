@@ -4,6 +4,16 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.9] - 2026-05-31
+
+### Changed
+- **Published image is now multi-arch (`linux/amd64` + `linux/arm64`).** The GHCR publish job uses
+  `docker buildx` with QEMU to build and push a multi-platform manifest, so **Apple Silicon (arm64)
+  pulls a native image** instead of running the amd64 image under emulation. The Dockerfile's
+  in-build test step is now conditional (`ARG RUN_TESTS`, default on); the multi-arch publish passes
+  `RUN_TESTS=0` to skip re-running the suite under slow arm64 emulation — tests are still gated
+  natively on amd64 by the `test` and Docker `image` CI jobs, and the code is platform-agnostic.
+
 ## [1.7.8] - 2026-05-31
 
 ### Docs

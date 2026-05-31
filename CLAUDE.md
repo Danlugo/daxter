@@ -80,7 +80,7 @@ src/Daxter.Core/    # UI-free engine
 src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server + tools
 tests/              # xUnit (94); fakes for IXmlaSession; env tests serialized
 Dockerfile          # multi-stage: sdk build+test → slim non-root runtime
-.github/workflows/  # CI: test → docker build → publish to GHCR on v* tags (3× retry)
+.github/workflows/  # CI: test → docker build → publish MULTI-ARCH (amd64+arm64, buildx) to GHCR on v* tags
 ```
 
 ## How the pieces connect

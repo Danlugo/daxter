@@ -20,7 +20,13 @@ RUN dotnet restore src/Daxter.Cli/Daxter.Cli.csproj \
 
 # Build, test, then publish the CLI and the web console into the same /app.
 COPY . .
-RUN dotnet test tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj -c Release --no-restore
+# Tests run by default (local builds, `make image`, CI's test + Docker-build jobs). The multi-arch
+# publish passes RUN_TESTS=0 to skip re-running them under slow arm64 emulation — they're already
+# gated natively on amd64 by the `test` and `image` jobs, and the code is platform-agnostic.
+ARG RUN_TESTS=1
+RUN if [ "$RUN_TESTS" != "0" ]; then \
+        dotnet test tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj -c Release --no-restore; \
+    fi
 RUN dotnet publish src/Daxter.Cli/Daxter.Cli.csproj -c Release --no-restore -o /app
 RUN dotnet publish src/Daxter.Web/Daxter.Web.csproj -c Release --no-restore -o /app
 
