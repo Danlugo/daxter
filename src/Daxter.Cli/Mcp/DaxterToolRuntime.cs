@@ -79,9 +79,10 @@ internal static class DaxterToolRuntime
         });
 
     /// <summary>
-    /// Gated maintenance: builds the command, returns it as a dry-run unless
-    /// <paramref name="execute"/> is set AND the server allows writes
-    /// (<c>DAXTER_MCP_ALLOW_WRITES=true</c>) AND the target is not PROD-looking.
+    /// Gated maintenance: builds the command and returns it as a dry-run unless <paramref name="execute"/>
+    /// is set AND writes are enabled (the web console's "Allow writes" toggle, or
+    /// <c>DAXTER_MCP_ALLOW_WRITES=true</c>). PROD targets are allowed by default; set
+    /// <c>DAXTER_MCP_BLOCK_PROD_WRITES=true</c> to re-block them.
     /// </summary>
     public static Task<string> MaintenanceAsync(
         string? workspace, string? dataset, Func<MaintenanceService, string> build, bool execute, CancellationToken ct)
@@ -105,13 +106,13 @@ internal static class DaxterToolRuntime
 
             if (!WritesAllowed())
             {
-                return "REFUSED — writes are disabled on this MCP server. " +
-                       "Set DAXTER_MCP_ALLOW_WRITES=true to enable.\n" + command;
+                return "REFUSED — writes are disabled. Enable them in the web console " +
+                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + command;
             }
 
-            if (LooksLikeProd(config))
+            if (LooksLikeProd(config) && ProdWritesBlocked())
             {
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION; writes are blocked over MCP.\n" + command;
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + command;
             }
 
             service.Execute(command);
@@ -125,8 +126,29 @@ internal static class DaxterToolRuntime
         _ => throw new DaxterException($"Unknown order '{value}'. Use newest-first or oldest-first."),
     };
 
-    private static bool WritesAllowed()
-        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Writes are enabled by the server env var OR the web console's saved "Allow writes" toggle.</summary>
+    internal static bool WritesAllowed()
+        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase)
+           || ConsoleConfigAllowsWrites();
+
+    /// <summary>Reads the web console's "Allow writes" toggle from ~/.daxter/console-config.json (shared volume).</summary>
+    internal static bool ConsoleConfigAllowsWrites()
+    {
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath();
+            var path = Path.Combine(home, ".daxter", "console-config.json");
+            if (!File.Exists(path)) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.TryGetProperty("AllowWrites", out var v)
+                && v.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Optional guardrail: set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block prod refresh/cache over MCP.</summary>
+    internal static bool ProdWritesBlocked()
+        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_BLOCK_PROD_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksLikeProd(DaxterConfig config) => config.IsProductionTarget();
 

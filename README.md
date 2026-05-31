@@ -228,11 +228,13 @@ above, as **33 tools** (`daxter_login` + 30 read + 2 gated write). Each accepts 
 the gateways", datasources, pipelines, RLS testing).
 
 Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
-default** — they only execute when `execute=true` **and** the server sets
-`DAXTER_MCP_ALLOW_WRITES=true`, and PROD-looking targets are always blocked. So the server
-is safe for autonomous use out of the box. "Production" = the active env is `prod`, the
-workspace name contains "prod", **or** the workspace is listed in `DAXTER_PROD_WORKSPACES`
-(use this when prod workspaces are unsuffixed, e.g. `Sales Analytics`).
+default** — they only execute when `execute=true` **and** writes are enabled, either via the
+**web console** (Configure → *Allow writes*, shared with the MCP server through the token
+volume) **or** the server env `DAXTER_MCP_ALLOW_WRITES=true`. So nothing runs out of the box
+until you opt in. Once writes are on, **PROD targets are allowed by default**; set
+`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them. ("Production" = the active env is `prod`,
+the workspace name contains "prod", **or** the workspace is listed in `DAXTER_PROD_WORKSPACES` —
+useful when prod workspaces are unsuffixed, e.g. `Sales Analytics`.)
 
 ## How it works
 

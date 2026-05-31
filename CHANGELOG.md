@@ -4,6 +4,22 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.6] - 2026-05-31
+
+### Changed
+- **MCP refresh/cache writes now honor the web console's "Allow writes" toggle.** The gate read
+  only the `DAXTER_MCP_ALLOW_WRITES` env var, so flipping *Allow writes* in the web console
+  (Configure) had no effect on the MCP server — it kept refusing even though the console showed
+  writes enabled. The gate now also reads the saved toggle from the shared
+  `~/.daxter/console-config.json`, so the web checkbox enables MCP refresh too (after a Claude
+  Desktop restart). The env var still works.
+- **PROD refresh/cache is now allowed by default (once writes are enabled).** The old "PROD-looking
+  targets are always blocked over MCP" rule is now **opt-in** — set `DAXTER_MCP_BLOCK_PROD_WRITES=true`
+  to re-block prod. Writes themselves remain **off by default**, so a prod refresh still requires an
+  explicit opt-in to writes first.
+  (`DaxterToolRuntime.WritesAllowed` = env OR console-config toggle; `ProdWritesBlocked` is the new
+  opt-out; regression-tested.)
+
 ## [1.7.5] - 2026-05-31
 
 ### Fixed

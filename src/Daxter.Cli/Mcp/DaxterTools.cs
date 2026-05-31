@@ -221,11 +221,12 @@ public static class DaxterTools
         CancellationToken ct = default)
         => DaxterToolRuntime.AuditRunAllSavedAsync(pipelineId, model, ct);
 
-    // ---- Gated write tools (DRY-RUN by default; disabled unless DAXTER_MCP_ALLOW_WRITES=true) ----
+    // ---- Gated write tools (DRY-RUN by default; enable writes via the web console toggle or DAXTER_MCP_ALLOW_WRITES) ----
 
     [McpServerTool(Name = "daxter_refresh"), Description(
         "Refresh a model/table/partition(s). DRY-RUN by default (returns the TMSL without running). " +
-        "To execute, set execute=true AND the server env DAXTER_MCP_ALLOW_WRITES=true; PROD-looking targets are always blocked. " +
+        "To execute, set execute=true AND enable writes (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true). " +
+        "PROD targets are allowed by default; set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block them. " +
         "scope=partition refreshes ONE partition; scope=partitions refreshes all of a table's partitions (or the subset in 'partitions'), processed in order.")]
     public static Task<string> Refresh(
         [Description("Scope: model | table | partition | partitions")] string scope = "model",
@@ -258,7 +259,8 @@ public static class DaxterTools
         }, execute, ct);
 
     [McpServerTool(Name = "daxter_clear_cache"), Description(
-        "Clear the model's data cache. DRY-RUN by default; requires execute=true AND DAXTER_MCP_ALLOW_WRITES=true.")]
+        "Clear the model's data cache. DRY-RUN by default; requires execute=true AND writes enabled " +
+        "(web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true).")]
     public static Task<string> ClearCache(
         [Description("Actually execute (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
