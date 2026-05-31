@@ -13,6 +13,14 @@ shell commands and edit the config file), or a person can do it manually.
 > 2. **In step 5, tell the user to fully quit & reopen Claude Desktop** — the `daxter` tools
 >    only load on that restart, so this is the last step that makes the MCP side work.
 
+> **Agent — keep it simple; the user may know nothing about DAXter, Docker, or MCP.** Narrate in
+> plain language and only at a high level — e.g. *"Setting things up… (step 2 of 5: creating your
+> config)"* — and **don't paste raw command output, JSON, or PowerShell** unless something errors
+> (then show just the relevant line). Boil it down to the only two things they actually do: **sign
+> in** (step 4) and **restart Claude Desktop** (step 5). When it's done, **reassure them it's all
+> working, show them the workspaces you found, and invite them to ask questions in plain English**
+> — don't quiz them or expose internals.
+
 > Replace `<...>` placeholders with real values. The image carries **no credentials** —
 > you supply them at runtime via `.env`.
 
@@ -236,7 +244,8 @@ server will reuse it automatically** — you only sign in once.
 > ```
 > If it lists workspaces, sign-in works and the connection is good. With the config merge from
 > step 3 also confirmed, **everything is verified** — so after the user restarts (step 5) you can
-> simply **tell them it's all working**, not ask them to run a test.
+> simply **tell them it's all working**, not ask them to run a test. **Keep the workspace names**
+> `ws ls` returns — you'll show them to the user in your final reassurance.
 
 ## 5. Restart Claude Desktop — last step, and you're done
 
@@ -246,10 +255,13 @@ server will reuse it automatically** — you only sign in once.
 
 > **Agent:** you can't do this part — tell the user the final step is to fully quit & reopen
 > Claude Desktop (the `daxter` tools load only at startup). You already proved sign-in + the data
-> path with `ws ls` (step 4) and the config merge (step 3), so **once they've restarted, just tell
-> them everything's working** — don't make them run a test or report back. **Don't look for an
-> `…mcp` container in `docker ps`** — Claude Desktop runs it over stdio, so it won't appear
-> (normal, not a failure). Only troubleshoot if the user reports an actual error.
+> path with `ws ls` (step 4) and the config merge (step 3), so **once they've restarted, reassure
+> them in plain language that it's all set, show them the workspaces you found, and invite them to
+> ask questions** — e.g. *"You're all set ✅ — I can see your workspaces: A, B, C. You can now ask
+> me about your Power BI in plain English, like 'what measures are in the Sales model?' or 'when
+> was X last refreshed?'"* Don't make them run a test or report back. **Don't look for an `…mcp`
+> container in `docker ps`** — Claude Desktop runs it over stdio, so it won't appear (normal, not
+> a failure). Only troubleshoot if the user reports an actual error.
 
 **Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray icon →
 Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config and launches
