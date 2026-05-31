@@ -58,4 +58,17 @@ public class PipelineRulesServiceTests
         Assert.Equal(0, r.Matched);
         Assert.Empty(r.Matches);
     }
+
+    [Fact]
+    public void ClassifyModel_buckets_by_rule_status()
+    {
+        PipelineParamMatrix M(params ParamRow[] rows) => new(Stages, rows, []);
+        var hasRules = new ModelMatrix("A", M(new ParamRow("P", ["dev", "prod"], true)));   // differs across stages
+        var noRules  = new ModelMatrix("B", M(new ParamRow("P", ["same", "same"], false))); // identical
+        var noParams = new ModelMatrix("C", M());                                            // no readable params
+
+        Assert.Equal(ModelRuleStatus.HasRules, PipelineRulesService.ClassifyModel(hasRules));
+        Assert.Equal(ModelRuleStatus.NoRules, PipelineRulesService.ClassifyModel(noRules));
+        Assert.Equal(ModelRuleStatus.NoReadableParameters, PipelineRulesService.ClassifyModel(noParams));
+    }
 }

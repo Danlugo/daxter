@@ -4,6 +4,16 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.10] - 2026-05-31
+
+### Changed
+- **Audit "Models" tab is now a filterable, exportable table** (was a bulleted "models without rules"
+  list). It renders via the shared DAX-results grid — columns **Model · Status · Owner** — with a
+  **Show** dropdown to filter by **Have rules / No rules / No readable parameters** (each with a live
+  count) and **Export CSV** of the current view (leave it on *All* for the full list). The dataset
+  **owner** (`configuredBy`) is now captured during the scan, and a new
+  `PipelineRulesService.ClassifyModel` is the single, unit-tested place that buckets a model's status.
+
 ## [1.7.9] - 2026-05-31
 
 ### Changed

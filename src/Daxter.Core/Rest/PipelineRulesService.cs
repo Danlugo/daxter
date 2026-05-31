@@ -13,8 +13,11 @@ public sealed record ParamRow(string Name, IReadOnlyList<string?> Values, bool D
 /// <summary>A model's parameters compared across a pipeline's stages.</summary>
 public sealed record PipelineParamMatrix(IReadOnlyList<StageColumn> Stages, IReadOnlyList<ParamRow> Rows, IReadOnlyList<string> Notes);
 
-/// <summary>One model's parameter matrix within a pipeline-wide scan.</summary>
-public sealed record ModelMatrix(string Model, PipelineParamMatrix Matrix);
+/// <summary>One model's parameter matrix within a pipeline-wide scan (with its dataset owner).</summary>
+public sealed record ModelMatrix(string Model, PipelineParamMatrix Matrix, string? Owner = null);
+
+/// <summary>How a scanned model fares in the deployment-rule audit.</summary>
+public enum ModelRuleStatus { HasRules, NoRules, NoReadableParameters }
 /// <summary>The result of a pipeline-wide scan (all models, each with its parameter matrix).</summary>
 public sealed record PipelineScan(string PipelineId, IReadOnlyList<StageColumn> Stages, IReadOnlyList<ModelMatrix> Models);
 
@@ -142,11 +145,14 @@ public static class PipelineRulesService
         // Model inventory comes from the source (Dev) stage — same naming applies across stages.
         var groupId = await rest.ResolveGroupIdAsync(stages[0].Workspace, ct);
         var ds = await rest.DatasetsAsync(groupId, ct);
-        int ni = Col(ds, "name");
-        var models = ds.Rows.Select(r => ni >= 0 ? r[ni]?.ToString() ?? "" : "")
-            .Where(s => s.Length > 0)
-            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        int ni = Col(ds, "name"), owni = Col(ds, "configuredBy");
+        var owners = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in ds.Rows)
+        {
+            var nm = ni >= 0 ? r[ni]?.ToString() : null;
+            if (!string.IsNullOrEmpty(nm)) owners[nm!] = owni >= 0 ? r[owni]?.ToString() : null;
+        }
+        var models = owners.Keys.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
 
         // Run per-model in parallel — each model still serializes its own per-stage XMLA reads,
         // but N models are processed concurrently. PowerBiRestClient + ITokenProvider are thread-safe;
@@ -163,13 +169,14 @@ public static class PipelineRulesService
                     // Stages sequential here: the scan already runs many models in parallel, so
                     // parallelizing stages too would multiply concurrent XMLA connections.
                     var matrix = await ComputeAsync(rest, baseConfig, tokens, pipelineId, model, stageConcurrency: 1, ct);
-                    return new ModelMatrix(model, matrix);
+                    return new ModelMatrix(model, matrix, owners.GetValueOrDefault(model));
                 }
                 catch (Exception ex)
                 {
                     // Per-model failure shouldn't kill the whole scan — record the empty matrix.
                     return new ModelMatrix(model,
-                        new PipelineParamMatrix(stages, Array.Empty<ParamRow>(), new[] { ex.Message }));
+                        new PipelineParamMatrix(stages, Array.Empty<ParamRow>(), new[] { ex.Message }),
+                        owners.GetValueOrDefault(model));
                 }
             }
             finally
@@ -185,6 +192,13 @@ public static class PipelineRulesService
         var ordered = results.OrderBy(m => m.Model, StringComparer.OrdinalIgnoreCase).ToList();
         return new PipelineScan(pipelineId, stages, ordered);
     }
+
+    /// <summary>Buckets a scanned model: has deployment rules, has none, or had no readable parameters
+    /// (0 M parameters, or a dataset we couldn't read over XMLA).</summary>
+    public static ModelRuleStatus ClassifyModel(ModelMatrix m)
+        => m.Matrix.Rows.Count == 0 ? ModelRuleStatus.NoReadableParameters
+         : m.Matrix.Rows.All(r => !r.Differs) ? ModelRuleStatus.NoRules
+         : ModelRuleStatus.HasRules;
 
     /// <summary>
     /// Scans a single model across the pipeline's stages and returns it as a one-model

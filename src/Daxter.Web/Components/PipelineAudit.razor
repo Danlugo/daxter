@@ -11,7 +11,7 @@
 
 <div class="card audit">
     <div class="tabs">
-        <button class="tab @(tab == Tab.NoRules ? "active" : "")" @onclick="() => tab = Tab.NoRules">Models without rules</button>
+        <button class="tab @(tab == Tab.NoRules ? "active" : "")" @onclick="() => tab = Tab.NoRules">Models</button>
         <button class="tab @(tab == Tab.Check ? "active" : "")" @onclick="() => tab = Tab.Check">Parameter value check</button>
     </div>
 
@@ -55,38 +55,22 @@
 
         @if (tab == Tab.NoRules)
         {
-            var noRules = scan.Models
-                .Where(m => m.Matrix.Rows.Count > 0 && m.Matrix.Rows.All(r => !r.Differs))
-                .Select(m => m.Model)
-                .ToList();
-            <p>
-                @if (noRules.Count == 0)
-                {
-                    <strong class="ok-text">All scanned models have at least one parameter that differs across stages — none are rule-less.</strong>
-                }
-                else
-                {
-                    <strong>@noRules.Count of @scan.Models.Count model(s)</strong>
-                    <span> have no deployment rules detected — every parameter value matches across stages:</span>
-                }
+            <p class="muted">
+                <strong>@scan.Models.Count model(s)</strong> scanned across @scan.Stages.Count stage(s).
+                Use the filter; <strong>Export CSV</strong> downloads the current view — leave it on <em>All</em> for the full list.
             </p>
-            @if (noRules.Count > 0)
-            {
-                <ul class="model-list">
-                    @foreach (var m in noRules)
-                    {
-                        <li><a href="@($"pipelines?model={Uri.EscapeDataString(m)}")">@m</a></li>
-                    }
-                </ul>
-            }
-
-            @if (NoParamModels(scan) is { Count: > 0 } noParams)
-            {
-                <details class="param-notes">
-                    <summary class="muted">@noParams.Count model(s) had no readable parameters (omitted from the check)</summary>
-                    @foreach (var m in noParams) { <p class="muted">@m</p> }
-                </details>
-            }
+            <div class="row">
+                <div>
+                    <label>Show</label>
+                    <select class="combo" @bind="modelFilter">
+                        <option value="all">All (@scan.Models.Count)</option>
+                        <option value="hasrules">Have rules (@CountBy(scan, ModelRuleStatus.HasRules))</option>
+                        <option value="norules">No rules (@CountBy(scan, ModelRuleStatus.NoRules))</option>
+                        <option value="noparams">No readable parameters (@CountBy(scan, ModelRuleStatus.NoReadableParameters))</option>
+                    </select>
+                </div>
+            </div>
+            <ResultGrid Result="ModelsTable(scan)" Empty="No models match this filter." />
         }
         else
         {
@@ -317,8 +301,35 @@
     private void Cancel() => Scans.Cancel(PipelineId);
     private void Forget() => Scans.Clear(PipelineId);
 
-    private static List<string> NoParamModels(PipelineScan scan)
-        => scan.Models.Where(m => m.Matrix.Rows.Count == 0).Select(m => m.Model).ToList();
+    // ---- Models tab: filterable table (Model · Status · Owner) rendered via ResultGrid ----
+    private string modelFilter = "all";
+
+    private static int CountBy(PipelineScan scan, ModelRuleStatus s)
+        => scan.Models.Count(m => PipelineRulesService.ClassifyModel(m) == s);
+
+    private static string StatusLabel(ModelRuleStatus s) => s switch
+    {
+        ModelRuleStatus.HasRules => "Has rules",
+        ModelRuleStatus.NoRules => "No rules",
+        _ => "No readable parameters",
+    };
+
+    private QueryResult ModelsTable(PipelineScan scan)
+    {
+        var rows = scan.Models
+            .Select(m => (m, st: PipelineRulesService.ClassifyModel(m)))
+            .Where(x => modelFilter switch
+            {
+                "hasrules" => x.st == ModelRuleStatus.HasRules,
+                "norules" => x.st == ModelRuleStatus.NoRules,
+                "noparams" => x.st == ModelRuleStatus.NoReadableParameters,
+                _ => true,
+            })
+            .OrderBy(x => x.m.Model, StringComparer.OrdinalIgnoreCase)
+            .Select(x => new object?[] { x.m.Model, StatusLabel(x.st), x.m.Owner ?? "—" })
+            .ToList();
+        return new QueryResult(new[] { "Model", "Status", "Owner" }, rows);
+    }
 
     private static IEnumerable<string> AllParamNames(PipelineScan scan)
         => scan.Models.SelectMany(m => m.Matrix.Rows.Select(r => r.Name))

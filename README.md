@@ -82,7 +82,9 @@ they persist across restarts and upgrades.
 - **Audit** — a per-model deployment-rule board plus pipeline-wide checks: pick a stage,
   parameter, and expected value; **➕ Add rule** to stack several into a rule set; **▶ Run all
   rules**; and **★ save** a check (shared with the CLI/MCP and persisted to the volume). Scope
-  to every model in the pipeline or a single model.
+  to every model in the pipeline or a single model. The **Models** tab lists every scanned model
+  in a table — **Model · Status · Owner** — with a filter (have rules / no rules / no readable
+  parameters) and **CSV export**.
 - **⚙ Configure** (gear icon, top-right) — edit auth mode / tenant / defaults / prod workspaces /
   allow-writes and **Save**. Persists to the shared volume — the **single config source** the CLI
   and MCP server read too (no env file needed). Also shows the Claude Desktop MCP entry to paste.
