@@ -32,7 +32,7 @@ shell commands and edit the config file), or a person can do it manually.
 > ```bash
 > # Use an ABSOLUTE path to the env file so Docker finds it from any working directory.
 > # macOS / Linux:
-> docker run -d -p 8080:8080 --env-file "$HOME/daxter.env" \
+> docker run -d -p 8080:8080 --name daxter-web --env-file "$HOME/daxter.env" \
 >   -v daxter-tokens:/home/daxter/.daxter \
 >   ghcr.io/danlugo/daxter:latest web
 > # Windows (PowerShell): swap the env path → --env-file "C:\Users\<you>\daxter.env"
@@ -219,7 +219,7 @@ long-running container; the MCP config above does **not** start it):
 
 ```bash
 # macOS / Linux:
-docker run -d -p 8080:8080 --restart unless-stopped --env-file "$HOME/daxter.env" \
+docker run -d -p 8080:8080 --name daxter-web --restart unless-stopped --env-file "$HOME/daxter.env" \
   -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest web
 # Windows (PowerShell): swap the env path → --env-file "C:\Users\<you>\daxter.env"
 ```
@@ -303,6 +303,31 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 | Auth / connection errors | SP creds correct? Tenant setting *Allow service principals…* enabled? SP added to the workspace? Workspace on Premium/PPU/Fabric with XMLA enabled? |
 | First call is slow | Cold start (container + token); subsequent calls are fast. |
 | Wrong workspace queried | Name the workspace in your request, or set `DAXTER_WORKSPACE` / `DAXTER_ENV` in `.env`. |
+
+## Remove / uninstall DAXter
+
+Undo the pieces in any order. **Steps 1–2 fully stop DAXter; 3–5 are optional cleanup** (reclaim
+disk, erase your cached sign-in). DAXter only *reads* from Power BI — removing it just stops local
+access and changes nothing in your tenant.
+
+1. **Unhook it from Claude Desktop.** Open the config (macOS
+   `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows
+   `%APPDATA%\Claude\claude_desktop_config.json`), delete the `"daxter": { … }` entry under
+   `mcpServers`, save, then **fully quit & reopen Claude Desktop** so the tools disappear. (A
+   `.bak` from setup sits next to the file if you'd rather restore the previous version.)
+2. **Stop the web console** (if you started it):
+   ```bash
+   docker rm -f daxter-web
+   ```
+3. **Erase the cached sign-in** *(optional — this signs you out; you'd sign in again to reuse DAXter)*:
+   ```bash
+   docker volume rm daxter-tokens
+   ```
+4. **Remove the image** *(optional — frees the download)*:
+   ```bash
+   docker rmi ghcr.io/danlugo/daxter:latest
+   ```
+5. **Delete your env file** — `~/daxter.env` (macOS/Linux) or `C:\Users\<you>\daxter.env` (Windows).
 
 ## Agent checklist
 

@@ -4,6 +4,26 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-05-30
+
+### Docs
+- **Install-guide overhaul (`SETUP.md`)** for an agent-driven, non-technical-user experience:
+  - **Sign in (step 4) before the final restart (step 5)** — Claude Desktop loads the `daxter`
+    config on its first restart and the cached token is already there, so the tools work first try.
+  - **The agent self-verifies** the whole path with the CLI (`ws ls`) instead of asking the user
+    to run a test, then reassures them it's working and shows their workspaces.
+  - **"Keep it simple" guidance** — narrate high-level ("step 2 of 5…"), hide raw command output
+    unless something errors; reduce it to the two human actions (sign in, restart).
+  - **`docker info` daemon-running gate** before install; **web console** is the primary,
+    single sign-in path (separate process, absolute `--env-file`, configurable port, persistence);
+    **Windows PowerShell** config-merge; **`DAXTER_TENANT_ID`** recommended with a placeholder-trap
+    opt-out; clarified that **no `…mcp` container in `docker ps` is normal** (stdio).
+- **New "Remove / uninstall DAXter" section** — unhook from Claude Desktop, stop the web console,
+  and optional cleanup (token volume, image, env file).
+- Web console container is now named **`daxter-web`** for an easy stop/remove.
+- **Recommended setup prompt** points the agent at the **raw** `SETUP.md` for exact commands and
+  names "Claude Code" + the two user hand-offs explicitly.
+
 ## [1.7.1] - 2026-05-30
 
 ### Changed

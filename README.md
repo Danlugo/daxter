@@ -56,7 +56,7 @@ pick your defaults, no terminal back-and-forth:
 
 ```bash
 # --env-file takes an absolute path so Docker finds it from any working directory:
-docker run -d -p 8080:8080 --env-file "$HOME/daxter.env" \
+docker run -d -p 8080:8080 --name daxter-web --env-file "$HOME/daxter.env" \
   -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080
 ```
@@ -129,8 +129,8 @@ volume mount:
 
 ```bash
 docker pull ghcr.io/danlugo/daxter:latest
-docker rm -f daxter                          # your container name
-docker run -d -p 8080:8080 --env-file "$HOME/daxter.env" \
+docker rm -f daxter-web                      # your web-console container
+docker run -d -p 8080:8080 --name daxter-web --env-file "$HOME/daxter.env" \
   -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest web
 ```
