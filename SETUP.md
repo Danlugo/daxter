@@ -233,7 +233,11 @@ server will reuse it automatically** — you only sign in once.
 > fail with `The authority (including the tenant ID) must be in a well-formed URI format`.
 
 > **Agent:** you can't do this part — tell the user it's the final step and ask them to fully
-> quit & reopen Claude Desktop now (the `daxter` tools won't appear until they do).
+> quit & reopen Claude Desktop now (the `daxter` tools won't appear until they do). **Don't try
+> to verify the MCP server from the shell** — it runs *inside* Claude Desktop over stdio, so it
+> **won't show in `docker ps`** (its absence means nothing). Just ask the user to run **"List my
+> workspaces"** in the Claude Desktop chat and treat a normal result as success — don't preface
+> it with a long "if it's broken" checklist; only walk through fixes if they report a real error.
 
 **Fully quit and reopen.** *Fully quit* means **Cmd+Q** (macOS) or **right-click the tray icon →
 Quit** (Windows) — **closing the window is not enough**. Claude reads the MCP config and launches
@@ -241,10 +245,12 @@ the `daxter` container **only at startup** — so the tools don't appear until y
 you signed in first (step 4), the container finds your cached token immediately and the tools work
 on the first try. (Docker must be running. Redo this restart **every time you change `daxter.env`**.)
 
-**Verify:** in a chat, type **"List my workspaces"** and name one as your default (or just mention
-a workspace per request, e.g. `Sales - QA`). Try it: **"List the tables in the `<your model>`
-model"**. If a tool says *"Not signed in,"* reopen **<http://localhost:8080> → Status → Sign in**.
-See [`examples/mcp.md`](examples/mcp.md) for a prompt per tool.
+**Verify:** in a chat, type **"List my workspaces"** — it should return your workspaces right away
+(your token is already cached). Name one as your default (or just mention a workspace per request,
+e.g. `Sales - QA`), then try **"List the tables in the `<your model>` model"**. That's it — you're
+done. *(Only if a tool says "Not signed in" — which shouldn't happen — reopen
+**<http://localhost:8080> → Status → Sign in**.)* See [`examples/mcp.md`](examples/mcp.md) for a
+prompt per tool.
 
 ## Multiple clients / environments
 
@@ -268,6 +274,7 @@ the env, e.g. `Sales - QA`; unsuffixed = prod).
 | Edited the env file but nothing changed | The container reads `--env-file` only at startup. Fully quit & reopen Claude Desktop (closing the window isn't enough). |
 | `can't be saved — path is outside the session folder` | You're editing `daxter.env` in Claude Desktop's built-in editor. Use a normal editor (Notepad, VS Code, `nano`). |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
+| No `…mcp` container in `docker ps` | **Normal — not a failure.** Claude Desktop runs the MCP server over **stdio** (`docker run -i --rm … mcp`), not as a standalone long-lived container, so it won't show in `docker ps`. Confirm it loaded by running **"List my workspaces"** in the Claude Desktop chat — not from the shell. |
 | `pull access denied` from GHCR | The package is public; this only appears if it was made private — `docker login ghcr.io` or build from source. |
 | Auth / connection errors | SP creds correct? Tenant setting *Allow service principals…* enabled? SP added to the workspace? Workspace on Premium/PPU/Fabric with XMLA enabled? |
 | First call is slow | Cold start (container + token); subsequent calls are fast. |
