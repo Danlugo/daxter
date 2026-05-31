@@ -4,6 +4,18 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.8] - 2026-05-31
+
+### Docs
+- **Install guide is now env-file-free.** Building on the v1.7.7 config unification, `SETUP.md` no
+  longer has you create a `daxter.env` or pass `--env-file`: the Claude Desktop MCP entry is just
+  the image + the `daxter-tokens` volume, and you sign in / set defaults (tenant, workspace,
+  allow-writes) in the **web console**, which saves them to the volume the CLI/MCP/console all read.
+  Install drops from 5 steps to 4. Env vars move to an **Advanced: service principal / headless**
+  section (still a supported fallback for injecting an SP secret without writing it to the volume).
+- **README, CLAUDE.md, `examples/mcp.md`** updated to match — the web-console runs and the MCP
+  config block drop `--env-file`; "Allow writes" is enabled via ⚙ Configure (or the env fallback).
+
 ## [1.7.7] - 2026-05-31
 
 ### Changed

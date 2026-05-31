@@ -55,8 +55,8 @@ Prefer a UI? `daxter web` serves a local Blazor console — the simplest way to 
 pick your defaults, no terminal back-and-forth:
 
 ```bash
-# --env-file takes an absolute path so Docker finds it from any working directory:
-docker run -d -p 8080:8080 --name daxter-web --env-file "$HOME/daxter.env" \
+# No env file needed — sign in and set defaults in the console; they persist to the volume.
+docker run -d -p 8080:8080 --name daxter-web \
   -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080
 ```
@@ -83,8 +83,9 @@ they persist across restarts and upgrades.
   parameter, and expected value; **➕ Add rule** to stack several into a rule set; **▶ Run all
   rules**; and **★ save** a check (shared with the CLI/MCP and persisted to the volume). Scope
   to every model in the pipeline or a single model.
-- **⚙ Configure** (gear icon, top-right) — edit auth mode / defaults / prod workspaces and
-  **Save** (persisted to the volume); also generates the env file + Claude Desktop MCP entry.
+- **⚙ Configure** (gear icon, top-right) — edit auth mode / tenant / defaults / prod workspaces /
+  allow-writes and **Save**. Persists to the shared volume — the **single config source** the CLI
+  and MCP server read too (no env file needed). Also shows the Claude Desktop MCP entry to paste.
 - **Logs** — recent activity (operations with row counts + timing, sign-in, errors); secrets redacted.
 
 ## Examples
@@ -130,7 +131,7 @@ volume mount:
 ```bash
 docker pull ghcr.io/danlugo/daxter:latest
 docker rm -f daxter-web                      # your web-console container
-docker run -d -p 8080:8080 --name daxter-web --env-file "$HOME/daxter.env" \
+docker run -d -p 8080:8080 --name daxter-web \
   -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest web
 ```
@@ -210,9 +211,8 @@ models directly. Add to `claude_desktop_config.json`:
   "daxter": {
     "command": "/usr/local/bin/docker",
     "args": ["run", "-i", "--rm",
-             "--env-file", "/path/to/Daxter/.env",
              "-v", "daxter-tokens:/home/daxter/.daxter",
-             "daxter:latest", "mcp"]
+             "ghcr.io/danlugo/daxter:latest", "mcp"]
   }
 }
 ```

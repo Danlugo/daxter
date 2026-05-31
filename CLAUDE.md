@@ -65,7 +65,9 @@ isn't installed.
 ```
 src/Daxter.Core/    # UI-free engine
   Auth/             # MSAL token provider, XmlaAccessToken, ITokenProvider
-  Configuration/    # DaxterConfig (env + profiles + IsProductionTarget)
+  Configuration/    # DaxterConfig.FromEnvironment — single config source: explicit arg >
+                    #   PersistedSettings (~/.daxter/console-config.json, written by the web
+                    #   console) > env var > default. CLI + MCP + Web all resolve through it.
   Connection/       # XmlaConnectionString, Adomd session + factory (roles/EUN for RLS)
   Query/  Metadata/ # QueryResult; ModelMetadataService, ModelDiffService
   Maintenance/      # MaintenanceService (TMSL refresh / ClearCache)
@@ -93,7 +95,7 @@ or shared CLI helpers, not duplicated.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `ci:`, `refactor:`).
 - **Releases:** tag `vMAJOR.MINOR.PATCH`; pushing the tag publishes
   `ghcr.io/danlugo/daxter:<tag>` + `:latest`. Update `CHANGELOG.md` first.
-- **Docs to keep current on change:** `README.md`, `examples/cli.md`, `examples/mcp.md`,
+- **Docs to keep current on change:** `README.md`, `SETUP.md`, `examples/cli.md`, `examples/mcp.md`,
   `CHANGELOG.md`, and `docs/` (`PRODUCT.md`, `ARCHITECTURE.md`, `ROADMAP.md`).
 
 ## Adding a capability (typical flow)

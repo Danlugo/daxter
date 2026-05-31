@@ -82,17 +82,18 @@ Deployment rules are inferred by comparing a model's parameter values across pip
 ## Gated write tools (off by default)
 
 `daxter_refresh` and `daxter_clear_cache` are **dry-run by default** and only execute when
-`execute=true` **and** the server is launched with `DAXTER_MCP_ALLOW_WRITES=true`.
-PROD-looking targets are always refused.
+`execute=true` **and** writes are enabled. PROD targets are allowed by default once writes are on
+(set `DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them).
 
 | Ask | Behavior |
 |-----|----------|
 | "Show me the TMSL to refresh the Sales table" | `daxter_refresh` (dry run — returns TMSL) |
 | "Refresh the Sales table" (writes disabled) | refused with instructions to enable |
-| "Refresh the Sales table, execute it" (writes enabled, non-prod) | runs the refresh |
+| "Refresh the Sales table, execute it" (writes enabled) | runs the refresh |
 
-To enable writes, add `-e DAXTER_MCP_ALLOW_WRITES=true` to the server's `docker run` args
-(or `DAXTER_MCP_ALLOW_WRITES=true` in its env file), then restart the client.
+To enable writes, tick **⚙ Configure → Allow writes** in the web console (it saves to the shared
+volume the MCP server reads) — or set `DAXTER_MCP_ALLOW_WRITES=true` in the server env — then
+restart Claude Desktop.
 
 ## Targeting environments / other workspaces
 
