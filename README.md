@@ -21,7 +21,7 @@ no service principal required to start).
 
 ### 1. One-click extension (easiest)
 
-1. Download **[`daxter-<version>.mcpb`](https://github.com/Danlugo/daxter/releases/latest)**, **double-click it** (or drag into **Settings → Extensions**), review, and **Install**. The `daxter` tools appear right away — restart Claude Desktop once if they don't.
+1. Download **[`daxter.mcpb`](https://github.com/Danlugo/daxter/releases/latest/download/daxter.mcpb)** (this link is always the latest), **double-click it** (or drag into **Settings → Extensions**), review, and **Install**. The `daxter` tools appear right away — restart Claude Desktop once if they don't.
 2. In a chat: **"Sign in to Power BI"** → Claude returns a URL + code; sign in as yourself.
 3. Ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
 

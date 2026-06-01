@@ -20,12 +20,14 @@ container exactly as it does for the CLI and web console.
 ```bash
 # from the repo root
 npx @anthropic-ai/mcpb@latest validate extension/manifest.json
-npx @anthropic-ai/mcpb@latest pack extension extension/daxter-<version>.mcpb
+npx @anthropic-ai/mcpb@latest pack extension extension/daxter.mcpb
 ```
 
-`mcpb pack` zips `manifest.json` into `daxter-<version>.mcpb`. Attach that file to the matching
-GitHub Release. (Signing is optional: `mcpb sign` — unsigned bundles install with a one-time
-"unverified" prompt.)
+`mcpb pack` zips `manifest.json` into **`daxter.mcpb`** — a **versionless** filename on purpose, so the
+permanent link **`https://github.com/Danlugo/daxter/releases/latest/download/daxter.mcpb`** always
+serves the current bundle (the docs point there; new users never pick a version). Attach `daxter.mcpb`
+to each GitHub Release and bump `manifest.json` `version` to match the image tag. (Signing is optional:
+`mcpb sign` — unsigned bundles install with a one-time "unverified" prompt.)
 
 ## Notes / gotchas
 
