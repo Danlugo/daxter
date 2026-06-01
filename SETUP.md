@@ -44,6 +44,14 @@ That's the whole thing for reading/querying — name the workspace in your reque
 
 No JSON editing, no env file. The extension is only a **launcher** for the same Docker image, so the .NET/XMLA engine still runs in the container on any OS. Auth is **sign-in only** — no credentials are stored in the extension. For an agent-driven setup, a hand-configured server, or service-principal / headless automation, use the manual steps below.
 
+> **Tool permissions — set them in one click.** Claude Desktop asks before each tool by default.
+> To approve them all at once, open **Settings → Extensions → daxter → Tool permissions** and set the
+> **group dropdown** (top-right, *Custom ▾*) to **Allow** — that covers all tools in one action, no
+> per-tool toggling. This is safe: the two write tools (`daxter_refresh`, `daxter_clear_cache`) are
+> **dry-run by default** and **stay gated** — they won't change anything unless writes are *also*
+> enabled (web console *Allow writes*, or `DAXTER_MCP_ALLOW_WRITES=true`). Want extra caution? Set the
+> group to **Allow** and switch just those two write tools to **Ask**.
+
 ## 0. Prerequisites
 
 - **Docker Desktop** installed and **running** — *running*, not just installed; you'll verify
