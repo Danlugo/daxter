@@ -19,17 +19,26 @@ your Power BI in plain language.
 **You need:** Docker Desktop running, and a Power BI account (you sign in **as yourself** —
 no service principal required to start).
 
-**Set it up — let Claude do it.** Point **Claude Code** (which can run commands; a plain
-Claude Desktop *chat* can't execute the steps) at the setup guide:
+### 1. One-click extension (easiest)
+
+1. Download **[`daxter-<version>.mcpb`](https://github.com/Danlugo/daxter/releases/latest)**, **double-click it** (or drag into **Settings → Extensions**), review, and **Install**. The `daxter` tools appear right away — restart Claude Desktop once if they don't.
+2. In a chat: **"Sign in to Power BI"** → Claude returns a URL + code; sign in as yourself.
+3. Ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
+
+No JSON, no env file — the extension just **launches the same Docker image**, so the .NET/XMLA
+engine runs in the container on any OS. To set a default workspace or enable writes, use the
+**web console** (below) once; otherwise name the workspace in your request.
+
+### 2. Let Claude Code set it up
+
+Point **Claude Code** (which can run commands; a plain Claude Desktop *chat* can't execute the
+steps) at the setup guide:
 
 > *"Using **Claude Code**, set up the DAXter MCP server for my Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md — **fetch the raw file (`raw.githubusercontent.com/Danlugo/daxter/main/SETUP.md`) so you get the exact commands, not a summary**, then run all the Docker/config commands and **start the web console**. I'll do the browser sign-in at localhost and the final Claude Desktop restart."*
 
 It auto-pulls the public image and merges the `daxter` server into your Claude Desktop config
-(no build, no credentials to obtain). Then **fully quit & reopen Claude Desktop** and, in a chat:
-
-1. **"Sign in to Power BI"** → Claude shows a URL + code; sign in as yourself.
-2. **"List my workspaces"** → pick one as your default.
-3. Ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
+(no build, no credentials to obtain). Then **fully quit & reopen Claude Desktop** and sign in
+as above.
 
 Full walkthrough (Windows notes, multi-client, service-principal automation) is in
 **[`SETUP.md`](SETUP.md)**; a prompt per tool in [`examples/mcp.md`](examples/mcp.md).
