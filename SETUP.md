@@ -4,6 +4,14 @@ Goal: get the **`daxter` MCP server** working in **Claude Desktop** on a fresh m
 This guide is written so a **Claude agent can follow it top to bottom** (it can run the
 shell commands and edit the config file), or a person can do it manually.
 
+## Choose your install
+
+- **Installing it yourself (easiest):** the **[Claude Desktop Extension (`.mcpb`)](#easiest-path--the-claude-desktop-extension-mcpb)** — one click, no terminal, no JSON.
+- **Asking Claude to set it up:** the **[manual flow](#0-prerequisites)** (steps 0–4) — Claude runs Docker, merges the config, starts the web console, and verifies sign-in. *(Claude can't click the Extensions dialog, so this is its path.)*
+- **Headless / CI / service principal:** **[Advanced](#advanced-service-principal--headless)**.
+
+All paths run the **same image and `daxter-tokens` volume**; auth is interactive **sign-in** (the `.env` / service-principal route is **CLI-only**). The agent callouts below apply to the **manual flow**.
+
 > **No env file, no credentials to paste.** The image ships with zero secrets. You sign in and
 > set your defaults in the **web console**, which saves them to a config file on the mounted
 > volume that the CLI, the MCP server, and the console all read. (Headless / service-principal
@@ -26,13 +34,15 @@ shell commands and edit the config file), or a person can do it manually.
 
 ## Easiest path — the Claude Desktop Extension (`.mcpb`)
 
-If your Claude Desktop has **Settings → Extensions**, skip the manual config in step 2:
+If your Claude Desktop has **Settings → Extensions**, this is the whole install — no terminal, no JSON:
 
 1. Make sure **Docker Desktop is running** — the extension launches DAXter in its container (see [Prerequisites](#0-prerequisites)).
-2. Download **`daxter-<version>.mcpb`** from the [latest release](https://github.com/Danlugo/daxter/releases/latest) and **double-click it** (or drag it into **Settings → Extensions**) → **Install**.
-3. **Sign in:** ask Claude *"sign me in to Power BI"* — it runs `daxter_login`, returns a device-code link, and caches your token in the `daxter-tokens` volume. *(Or run the web console once — step 3 below.)*
+2. Download **`daxter-<version>.mcpb`** from the [latest release](https://github.com/Danlugo/daxter/releases/latest), **double-click it** (or drag it into **Settings → Extensions**), review the details, and **Install**. The `daxter` tools appear right away — *if they don't, fully restart Claude Desktop once to refresh the extension registry.*
+3. **Sign in:** ask Claude *"sign me in to Power BI"* — it runs `daxter_login`, returns a device-code link, and caches your token in the `daxter-tokens` volume.
 
-No JSON editing, no env file. The extension is only a **launcher** for the same Docker image, so the .NET/XMLA engine still runs in the container on any OS. Auth is **sign-in only** — no credentials are stored in the extension. For a hand-configured server, or service-principal / headless automation, use the manual steps below.
+That's the whole thing for reading/querying — name the workspace in your request and go. **To set a default workspace, override the tenant, or enable writes (refresh from chat),** run the web console once ([step 3](#3-sign-in-to-power-bi-and-set-your-defaults)); those settings persist to the same volume the extension uses.
+
+No JSON editing, no env file. The extension is only a **launcher** for the same Docker image, so the .NET/XMLA engine still runs in the container on any OS. Auth is **sign-in only** — no credentials are stored in the extension. For an agent-driven setup, a hand-configured server, or service-principal / headless automation, use the manual steps below.
 
 ## 0. Prerequisites
 
@@ -247,6 +257,7 @@ target environments by naming the workspace per request (the name encodes the en
 | `The authority ... must be in a well-formed URI format` | A tenant id was set to a placeholder/malformed value. Fix it in the web console **⚙ Configure → tenant** (a real GUID, no `<>`/quotes/spaces) and **Save**, then fully restart Claude Desktop. |
 | Claude: **"Could not load app settings… not valid JSON"** | The config file has a **UTF-8 BOM** (older Windows PowerShell's `Set-Content -Encoding UTF8` adds one). Rewrite it BOM-free, then fully restart: `$p="$env:APPDATA\Claude\claude_desktop_config.json"; [System.IO.File]::WriteAllText($p,[System.IO.File]::ReadAllText($p),(New-Object System.Text.UTF8Encoding $false))` — keeps your `daxter` entry. (Step 2's merge writes BOM-free.) |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
+| **Extension** installed but tools missing | Restart Claude Desktop **once** to refresh the extension registry; confirm Docker Desktop is running (the extension launches the container on demand). |
 | No `…mcp` container in `docker ps` | **Normal — not a failure.** Claude Desktop runs the MCP server over **stdio** (`docker run -i --rm … mcp`), not as a standalone long-lived container, so it won't show in `docker ps`. Confirm it loaded by running **"List my workspaces"** in the Claude Desktop chat — not from the shell. |
 | `pull access denied` from GHCR | The package is public; this only appears if it was made private — `docker login ghcr.io` or build from source. |
 | Auth / connection errors | Right tenant/workspace in **⚙ Configure**? Workspace on Premium/PPU/Fabric with XMLA enabled? For SP: *Allow service principals…* enabled and the SP a workspace member? |
