@@ -24,6 +24,16 @@ shell commands and edit the config file), or a person can do it manually.
 > **restart Claude Desktop** (step 4). When it's done, **reassure them it's all working, show the
 > workspaces you found, and invite them to ask questions in plain English** — don't quiz them.
 
+## Easiest path — the Claude Desktop Extension (`.mcpb`)
+
+If your Claude Desktop has **Settings → Extensions**, skip the manual config in step 2:
+
+1. Make sure **Docker Desktop is running** — the extension launches DAXter in its container (see [Prerequisites](#0-prerequisites)).
+2. Download **`daxter-<version>.mcpb`** from the [latest release](https://github.com/Danlugo/daxter/releases/latest) and **double-click it** (or drag it into **Settings → Extensions**) → **Install**.
+3. **Sign in:** ask Claude *"sign me in to Power BI"* — it runs `daxter_login`, returns a device-code link, and caches your token in the `daxter-tokens` volume. *(Or run the web console once — step 3 below.)*
+
+No JSON editing, no env file. The extension is only a **launcher** for the same Docker image, so the .NET/XMLA engine still runs in the container on any OS. Auth is **sign-in only** — no credentials are stored in the extension. For a hand-configured server, or service-principal / headless automation, use the manual steps below.
+
 ## 0. Prerequisites
 
 - **Docker Desktop** installed and **running** — *running*, not just installed; you'll verify
