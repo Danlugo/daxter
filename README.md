@@ -13,37 +13,32 @@ Power BI model*, in a single container image.
 
 ## Use it in Claude Desktop
 
-The easiest way to use DAXter is as an **MCP server** — then you just **ask Claude** about
-your Power BI in plain language.
-
-**You need:** Docker Desktop running, and a Power BI account (you sign in **as yourself** —
-no service principal required to start).
+Run DAXter as an **MCP server**, then just **ask Claude** about your Power BI in plain language.
+**You need:** Docker Desktop running and a Power BI account (you sign in **as yourself** — no
+service principal required to start).
 
 ### 1. One-click extension (easiest)
 
-1. Download **[`daxter.mcpb`](https://github.com/Danlugo/daxter/releases/latest/download/daxter.mcpb)** (this link is always the latest), **double-click it** (or drag into **Settings → Extensions**), review, and **Install**. The `daxter` tools appear right away — restart Claude Desktop once if they don't.
-2. In a chat: **"Sign in to Power BI"** → Claude returns a URL + code; sign in as yourself.
-3. Ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
+1. Download **[`daxter.mcpb`](https://github.com/Danlugo/daxter/releases/latest/download/daxter.mcpb)** — this link always serves the latest.
+2. In Claude Desktop open **Settings → Extensions → Advanced settings → Install Extension…**, pick `daxter.mcpb` (or **drag the file onto the Extensions page**), and **Install**. *(On macOS double-clicking the file also opens the installer; on Windows use this Settings flow — double-click may not be wired up.)*
+3. Ask Claude **"sign me in to Power BI"** → it returns a device-code link; sign in as yourself. Then ask away — *"What measures are in the Sales model? Run `EVALUATE TOPN(10, Sales)`. When was it last refreshed? Who has access?"*
 
-No JSON, no env file — the extension just **launches the same Docker image**, so the .NET/XMLA
-engine runs in the container on any OS. To set a default workspace or enable writes, use the
-**web console** (below) once; otherwise name the workspace in your request.
+The extension just **launches the same Docker image** — the .NET/XMLA engine runs in the
+container, no JSON and no env file. To set a default workspace or enable writes, use the **web
+console** (below) once; otherwise name the workspace in your request.
 
-### 2. Let Claude Code set it up
+### 2. Let Claude Code set it up (manual config)
 
-Point **Claude Code** (which can run commands; a plain Claude Desktop *chat* can't execute the
-steps) at the setup guide:
+Point **Claude Code** (which can run commands; a plain Claude Desktop *chat* can't) at the guide —
+it pulls the image and merges the `daxter` server into your config:
 
 > *"Using **Claude Code**, set up the DAXter MCP server for my Claude Desktop by following https://github.com/Danlugo/daxter/blob/main/SETUP.md — **fetch the raw file (`raw.githubusercontent.com/Danlugo/daxter/main/SETUP.md`) so you get the exact commands, not a summary**, then run all the Docker/config commands and **start the web console**. I'll do the browser sign-in at localhost and the final Claude Desktop restart."*
 
-It auto-pulls the public image and merges the `daxter` server into your Claude Desktop config
-(no build, no credentials to obtain). Then **fully quit & reopen Claude Desktop** and sign in
-as above.
+Then **fully quit & reopen Claude Desktop** and sign in as above. Full walkthrough (Windows notes,
+multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per tool →
+[`examples/mcp.md`](examples/mcp.md).
 
-Full walkthrough (Windows notes, multi-client, service-principal automation) is in
-**[`SETUP.md`](SETUP.md)**; a prompt per tool in [`examples/mcp.md`](examples/mcp.md).
-
-**What it does today**
+## What it does
 
 | Module | Commands |
 |--------|----------|
@@ -52,201 +47,78 @@ Full walkthrough (Windows notes, multi-client, service-principal automation) is 
 | **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
-| **Pipeline** | `pipeline ls/stages/operations` + `pipeline rules --pipeline X --model Y` (deployment rules — inferred from per-stage parameter differences) + `pipeline audit --pipeline X` (list models without rules; or `--mode check --stage X --param Y --value Z [--model M]` to find matching models) + saved rule sets (`--saved "name"`, `--list-saved`, `--run-all-saved`) |
+| **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the full product plan and
+The MCP server exposes these at **full parity** as **33 tools** (`daxter_login` + 30 read + 2 gated
+write). See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
-## Web console (easiest sign-in)
+## Web console
 
-Prefer a UI? `daxter web` serves a local Blazor console — the simplest way to **sign in** and
-pick your defaults, no terminal back-and-forth:
+`daxter web` serves a local Blazor console — the simplest way to **sign in**, set defaults, browse
+models, run DAX (with autocomplete + formatting), audit deployment rules, and read logs:
 
 ```bash
-# No env file needed — sign in and set defaults in the console; they persist to the volume.
 docker run -d -p 8080:8080 --name daxter-web \
   -v daxter-tokens:/home/daxter/.daxter \
   ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080
 ```
 
-1. Open **http://localhost:8080** → **Status** → **Sign in** — opens the Microsoft device-login
-   page (clickable link) with a one-click-copy code; the page updates itself once you finish.
-2. **⚙ Configure** (gear icon, top-right) → set your default workspace/dataset and **Save**.
-3. **Explore** → browse workspaces → datasets → tables; or **DAX Query** → write and run DAX.
+Open it → **Status → Sign in** (device-code) → **⚙ Configure** to set defaults / *Allow writes*. The
+`daxter-tokens` volume holds your **token and settings** — the single config source the CLI and MCP
+server read too. Full page-by-page tour in [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
-The `-v …:/home/daxter/.daxter` volume holds your **sign-in token and Configure settings**, so
-they persist across restarts and upgrades.
+## CLI
 
-- **Status** — health checks, sign-in, and a **Version & updates** check.
-- **Explore** — a drill-down browser (workspace → dataset → table → **M code** / partitions,
-  measures, RLS, **Test RLS**, permissions, …). **Test RLS** runs a DAX query while impersonating
-  a role and/or user (UPN) so you can see exactly what they'd see (requires admin on the model).
-- **DAX Query** — a dedicated query editor with **field autocomplete + signature help**,
-  **syntax highlighting**, **⌗ Format**, and live validation. "Run DAX" / "Top N rows" / a clicked
-  Recent query from Explore open here pre-filled.
-- **Gateways** — on-premises data gateways visible to the signed-in identity (REST).
-- **Pipelines** — deployment pipelines with their stages (Dev → Test → Prod workspaces) and
-  recent operations (REST).
-- **Audit** — a per-model deployment-rule board plus pipeline-wide checks: pick a stage,
-  parameter, and expected value; **➕ Add rule** to stack several into a rule set; **▶ Run all
-  rules**; and **★ save** a check (shared with the CLI/MCP and persisted to the volume). Scope
-  to every model in the pipeline or a single model. The **Models** tab lists every scanned model
-  in a table — **Model · Status · Owner** — with a filter (have rules / no rules / no readable
-  parameters) and **CSV export**.
-- **⚙ Configure** (gear icon, top-right) — edit auth mode / tenant / defaults / prod workspaces /
-  allow-writes and **Save**. Persists to the shared volume — the **single config source** the CLI
-  and MCP server read too (no env file needed). Also shows the Claude Desktop MCP entry to paste.
-- **Logs** — recent activity (operations with row counts + timing, sign-in, errors); secrets redacted.
+Pull the prebuilt **multi-arch** image (`linux/amd64` + `linux/arm64`, native on Apple Silicon and
+x86 — published to GHCR on every release) and run:
 
-## Examples
+```bash
+docker pull ghcr.io/danlugo/daxter:latest
+./bin/daxter query 'EVALUATE TOPN(10, Sales)'     # DAX → table
+./bin/daxter model measures --with-expr -o csv    # metadata → CSV
+./bin/daxter ws gateways                          # REST inventory
+```
 
-- **CLI / client** → [`examples/cli.md`](examples/cli.md) — every command with a runnable example.
-- **MCP** → [`examples/mcp.md`](examples/mcp.md) — example prompts for all 33 tools (query, metadata, columns, inventory, gateways, datasources, pipelines, deployment-rule audits, RLS testing, refresh, …).
+`bin/daxter` runs the image with the token volume, mounts the current dir at `/work`, loads `./.env`,
+and attaches a TTY when interactive. Output is `-o table` (default), `csv`, or `json`; results to
+**stdout**, status to **stderr**. Configure via the web console or env vars
+(`DAXTER_WORKSPACE`, `DAXTER_DATASET`, auth — see [`SETUP.md`](SETUP.md#advanced-service-principal--headless)).
+Build from source with `make image`; ship offline with `make save` / `make load`. Every command has a
+runnable example in **[`examples/cli.md`](examples/cli.md)**.
+
+> XMLA addresses use **names**, not the GUIDs in portal URLs. List model names with
+> `./bin/daxter dmv 'SELECT [CATALOG_NAME] FROM $SYSTEM.DBSCHEMA_CATALOGS'`, then set
+> `DAXTER_WORKSPACE` / `--dataset` accordingly.
+
+## MCP server
+
+The same image is a **Model Context Protocol** server (stdio) via the `mcp` subcommand — add it with
+the [extension](#1-one-click-extension-easiest) or the config block in [`SETUP.md`](SETUP.md). Tools
+accept optional `workspace`/`dataset` (name **or** id); results are JSON, capped to 1,000 rows. The
+write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only execute when
+`execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
+`DAXTER_MCP_ALLOW_WRITES=true`. Once on, **PROD is allowed by default**; set
+`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block it. Prompts per tool → [`examples/mcp.md`](examples/mcp.md).
+
+## Authentication
+
+- **Device code (default, interactive)** — sign in as yourself; the token caches in the
+  `daxter-tokens` volume, so later runs are silent. Best for operations that need *your* permissions
+  (e.g. gateway names). Requires an app registration with public client flows (or the built-in default).
+- **Service principal (automation)** — set `DAXTER_AUTH_MODE=service-principal` +
+  `DAXTER_TENANT_ID`/`DAXTER_CLIENT_ID`/`DAXTER_CLIENT_SECRET`. The tenant admin must enable *"Allow
+  service principals to use Power BI APIs"* and the SP must be a workspace member.
+
+See the [`examples/cli.md`](examples/cli.md#authenticate) auth walkthrough.
 
 ## Requirements
 
 - Docker (Desktop or Engine).
-- A Power BI workspace on **Premium / PPU / Fabric** capacity with the **XMLA endpoint
-  enabled** (Admin portal → Capacity settings → XMLA Endpoint = Read or Read/Write).
-- An Entra ID identity with access to the workspace (see [Authentication](#authentication)).
-
-## Install
-
-**Pull the prebuilt image** — published to GHCR by CI on every release, **multi-arch
-(`linux/amd64` + `linux/arm64`)** so it runs native on Apple Silicon and x86 (no build needed):
-
-```bash
-docker pull ghcr.io/danlugo/daxter:latest
-docker run --rm ghcr.io/danlugo/daxter:latest --help
-```
-
-The image ships with **no credentials** — pass them at runtime via an env file (the
-variables are documented in [Configure](#configure) below) plus a volume for the cached
-token:
-
-```bash
-docker run --rm --env-file .env -v daxter-tokens:/home/daxter/.daxter \
-  ghcr.io/danlugo/daxter:latest query 'EVALUATE ROW("ok", 1)'
-```
-
-Prefer to **build it yourself**: `make image`. For a guided, end-to-end setup (including
-Claude Desktop), see **[`SETUP.md`](SETUP.md)**; for `-e` flags, device-code login, and the
-`bin/daxter` wrapper, see [`examples/cli.md`](examples/cli.md).
-
-## Upgrade
-
-Your sign-in token and settings live on the `daxter-tokens` volume — **not** in the image — so
-upgrading never touches them. Pull the new image and recreate the container with the **same**
-volume mount:
-
-```bash
-docker pull ghcr.io/danlugo/daxter:latest
-docker rm -f daxter-web                      # your web-console container
-docker run -d -p 8080:8080 --name daxter-web \
-  -v daxter-tokens:/home/daxter/.daxter \
-  ghcr.io/danlugo/daxter:latest web
-```
-
-The web console's **Status** page shows the running version and checks GitHub for newer
-releases. Or just ask Claude: *"upgrade my DAXter container and keep the volume."*
-
-## Configure
-
-Copy the template and fill it in:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DAXTER_WORKSPACE` | yes | Workspace name (or full `powerbi://…` data source) |
-| `DAXTER_DATASET` | no | Semantic model name (`Initial Catalog`) |
-| `DAXTER_AUTH_MODE` | no | `device-code` (default) or `service-principal` |
-| `DAXTER_TENANT_ID` | SP / optional | Entra tenant id or domain |
-| `DAXTER_CLIENT_ID` | SP / optional | App registration (client) id |
-| `DAXTER_CLIENT_SECRET` | SP only | Client secret — keep it only in `.env` |
-
-## Usage
-
-The `bin/daxter` wrapper runs the image with the token cache volume, mounts the current
-directory at `/work` (so `-f file.dax` works), loads `./.env`, and attaches a TTY when
-interactive:
-
-```bash
-./bin/daxter query 'EVALUATE TOPN(10, Sales)'     # DAX → table
-./bin/daxter model measures --with-expr -o csv    # metadata → CSV
-./bin/daxter ws gateways                          # inventory via REST
-```
-
-Results go to **stdout**, status to **stderr**; `-o` is `table` (default), `csv`, or `json`.
-**Every command is in [`examples/cli.md`](examples/cli.md)**; MCP prompts in
-[`examples/mcp.md`](examples/mcp.md).
-
-## Authentication
-
-**Device code (default, interactive).** `daxter login` prints a URL and code; open it in
-any browser and sign in. The token is cached in the `daxter-tokens` volume, so subsequent
-runs are silent until it expires. Requires an app registration with **public client flows
-enabled** (set `DAXTER_CLIENT_ID`, or rely on the built-in default). Use this to run **as
-yourself** for operations that need *your* user permissions rather than the SP's — e.g.
-**gateway names** (only returned for gateways the caller administers). See the device-code
-example in [`examples/cli.md`](examples/cli.md#authenticate).
-
-**Service principal (automation).** Set `DAXTER_AUTH_MODE=service-principal` plus
-`DAXTER_TENANT_ID`, `DAXTER_CLIENT_ID`, `DAXTER_CLIENT_SECRET`. The tenant admin must
-enable *"Allow service principals to use Power BI APIs"* and the SP must be a member of
-the workspace.
-
-## Passing the image around
-
-Easiest: **pull from GHCR** (see [Install](#install)) — CI publishes
-`ghcr.io/danlugo/daxter:latest` and a tag per release (`:v1.7.0`, …) on every `v*` tag.
-
-Offline / air-gapped: ship a tarball:
-
-```bash
-make save           # → daxter-image.tar.gz
-# on another machine:
-make load           # docker load < daxter-image.tar.gz
-```
-
-## MCP server
-
-The same image doubles as a **Model Context Protocol** server (stdio) via the `mcp`
-subcommand — so Claude Desktop, Cursor, or Claude Code can query and inspect your
-models directly. Add to `claude_desktop_config.json`:
-
-```jsonc
-"mcpServers": {
-  "daxter": {
-    "command": "/usr/local/bin/docker",
-    "args": ["run", "-i", "--rm",
-             "-v", "daxter-tokens:/home/daxter/.daxter",
-             "ghcr.io/danlugo/daxter:latest", "mcp"]
-  }
-}
-```
-
-By default you **sign in as yourself**: ask Claude to "sign in to Power BI" and it calls
-`daxter_login`, which returns a device-code URL you complete in the browser; then list
-workspaces and pick one. (A service principal is the alternative for automation.)
-[`SETUP.md`](SETUP.md) walks through it on a new machine. The MCP tools are at **full parity
-with the CLI** — the query, metadata, ops, and inventory operations from the feature matrix
-above, as **33 tools** (`daxter_login` + 30 read + 2 gated write). Each accepts optional
-`workspace`/`dataset` arguments; results are JSON, capped to 1,000 rows.
-**See [`examples/mcp.md`](examples/mcp.md) for an example prompt per tool** (including "list
-the gateways", datasources, pipelines, RLS testing).
-
-Plus **gated** write tools (`daxter_refresh`, `daxter_clear_cache`) that are **dry-run by
-default** — they only execute when `execute=true` **and** writes are enabled, either via the
-**web console** (Configure → *Allow writes*, shared with the MCP server through the token
-volume) **or** the server env `DAXTER_MCP_ALLOW_WRITES=true`. So nothing runs out of the box
-until you opt in. Once writes are on, **PROD targets are allowed by default**; set
-`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them. ("Production" = the active env is `prod`,
-the workspace name contains "prod", **or** the workspace is listed in `DAXTER_PROD_WORKSPACES` —
-useful when prod workspaces are unsuffixed, e.g. `Sales Analytics`.)
+- A workspace on **Premium / PPU / Fabric** with the **XMLA endpoint enabled** (Admin portal →
+  Capacity settings → XMLA Endpoint = Read or Read/Write).
+- An Entra ID identity with access to the workspace.
 
 ## How it works
 
@@ -258,45 +130,29 @@ useful when prod workspaces are unsuffixed, e.g. `Sales Analytics`.)
 | CLI | `System.CommandLine` 2.0 |
 | Output | Spectre.Console (table), CSV (RFC 4180), JSON |
 
-Multi-stage build — the `sdk:8.0` stage restores + **tests** + publishes; the slim
-`runtime:8.0` stage ships only the app as a non-root user. Full design in
+Multi-stage build — the `sdk:8.0` stage restores + **tests** + publishes; the slim `runtime:8.0`
+stage ships only the app as a non-root user. Full design in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 **Image security.** A scanner (e.g. `docker scout`) will flag CVEs on the image — these are
-**inherited from the .NET runtime's Debian base packages** (`perl`, `gnutls28`, …), **not** from
-DAXter's code, and they sit in paths a .NET app never executes (no `perl` at runtime; .NET TLS uses
-OpenSSL, not `gnutls`). They clear when the .NET base image is refreshed; a future move to a
-[chiseled base](https://learn.microsoft.com/dotnet/core/docker/container-images) would remove them
-outright. DAXter's own layers add no critical/high vulnerabilities.
-
-## Finding workspace & model names
-
-XMLA addresses use **names**, not the GUIDs you see in portal/OneLake URLs
-(`…/groups/<guid>/…` or `…/dataset/<guid>/…` will not resolve). To discover names:
-
-```bash
-# Connect at the workspace level (no dataset) and list models:
-./bin/daxter dmv 'SELECT [CATALOG_NAME] FROM $SYSTEM.DBSCHEMA_CATALOGS'
-```
-
-Set `DAXTER_WORKSPACE` to the workspace name (e.g. `Sales Analytics`) and
-`DAXTER_DATASET` (or `--dataset`) to a model name from that list.
+**inherited from the .NET runtime's Debian base** (`perl`, `gnutls28`, …), **not** DAXter's code, and
+sit in paths a .NET app never executes. They clear when the base image is refreshed; a future
+[chiseled base](https://learn.microsoft.com/dotnet/core/docker/container-images) would remove them.
+DAXter's own layers add no critical/high vulnerabilities.
 
 ## Limitations
 
-- Query, metadata, maintenance (refresh/cache), and inventory are supported. **Model
-  editing** (create/alter/delete measures, tables, roles) is intentionally out of scope.
-- The workspace must expose an XMLA endpoint (Premium/PPU/Fabric). Pro datasets do not
-  (REST commands like `ws`/`refresh history` still work on Pro).
-- TMSL refresh / `cache clear` need the XMLA endpoint set to **Read/Write**; `refresh
-  trigger` (REST) works with read-only XMLA.
+- Query, metadata, maintenance (refresh/cache), and inventory are supported. **Model editing**
+  (create/alter/delete measures, tables, roles) is intentionally out of scope.
+- The workspace must expose an XMLA endpoint (Premium/PPU/Fabric). Pro datasets don't (REST commands
+  like `ws` / `refresh history` still work on Pro).
+- TMSL refresh / `cache clear` need XMLA set to **Read/Write**; `refresh trigger` (REST) works with
+  read-only XMLA.
 - `test-rls` impersonation requires the connecting identity to be a workspace/model admin.
 - Tenant-wide audit (Scanner/Admin API) requires a Fabric admin identity — not included.
-- Interactive `login` needs a TTY (`docker run -it`); the wrapper handles this.
 
 ## Contributing & development
 
-Docker-only — no local .NET SDK required. Build/test commands, the repo layout, and
-conventions live in **[`CLAUDE.md`](CLAUDE.md)**; design in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); roadmap in
+Docker-only — no local .NET SDK required. Build/test commands, repo layout, and conventions live in
+**[`CLAUDE.md`](CLAUDE.md)**; design in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); roadmap in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
