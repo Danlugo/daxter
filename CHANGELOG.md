@@ -4,6 +4,22 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.12] - 2026-06-01
+
+### Added
+- **MCP tools now carry behavior annotations.** The 30 read tools are marked `ReadOnly = true`, the
+  two mutating tools (`daxter_refresh`, `daxter_clear_cache`) `Destructive = true`, and every tool
+  gets a human-readable `Title`. Clients (e.g. Claude Desktop's per-tool permission list) can show a
+  friendly name and distinguish reads from writes — and can auto-allow read-only tools where they
+  support it. Writes remain gated regardless (dry-run unless writes are explicitly enabled).
+
+### Docs
+- **`SETUP.md`** — note how to grant tool permissions in one action via the Extensions **group
+  dropdown** (set to *Allow*), clarifying that allowing a tool does **not** bypass the write gate.
+- Ship the Claude Desktop extension bundle (`daxter.mcpb`) — install via **Settings → Extensions →
+  Advanced settings → Install Extension** (the reliable path on Windows, incl. Microsoft Store
+  builds where the file association isn't registered).
+
 ## [1.7.11] - 2026-06-01
 
 ### Fixed
