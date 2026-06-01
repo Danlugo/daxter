@@ -4,6 +4,27 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.11] - 2026-06-01
+
+### Fixed
+- **Dataset/workspace names with an apostrophe now work everywhere** (e.g. `Reseller's Margin`).
+  The name was written into the XMLA `Initial Catalog` **unquoted**, so a `'` corrupted the
+  OLE-DB connection-string parse and `AdomdConnection` threw in its constructor — breaking
+  `daxter_list_tables`, `daxter_query`, and `daxter_refresh` on those models. Connection-string
+  values are now quoted per the ADO.NET rule (enclosed in the quote character the value doesn't
+  contain; embedded quotes doubled). **Behavior change:** pass the name *raw* — any previous
+  workaround of doubling the apostrophe (`Reseller''s Margin`) must be removed.
+- **Real errors now surface from every MCP tool.** The runtime guard only relayed
+  `DaxterException`, so any other failure (like the connection-string parse error above) showed
+  the opaque *"An error occurred invoking …"*. It now returns the underlying message, and the
+  `AdomdConnection` constructor is inside the connection try/catch so its parse errors are wrapped.
+
+### Added
+- **`dataset` and `workspace` arguments accept a name *or* an id (GUID).** A GUID is resolved to
+  its canonical name (the XMLA endpoint addresses by name) and used raw in the TMSL refresh target;
+  a plain name still resolves with no extra REST round-trip. Fixes GUID inputs that previously
+  failed with `PowerBIEntityNotFound` / "not found".
+
 ## [1.7.10] - 2026-05-31
 
 ### Changed

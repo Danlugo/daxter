@@ -23,10 +23,11 @@ internal static class DaxterToolRuntime
     private static readonly JsonResultFormatter Json = new();
 
     /// <summary>
-    /// Runs a tool body and turns user-actionable <see cref="DaxterException"/>s into a
-    /// returned message (the MCP SDK otherwise hides thrown-exception text behind a generic
-    /// "An error occurred invoking …"). So guidance like "Not signed in — use daxter_login"
-    /// reaches the model.
+    /// Runs a tool body and turns any thrown exception into a returned message (the MCP SDK
+    /// otherwise hides thrown-exception text behind a generic "An error occurred invoking …").
+    /// <see cref="DaxterException"/> carries user-actionable guidance ("Not signed in — use
+    /// daxter_login"); any other exception (e.g. an ADOMD connection-string parse error) still
+    /// surfaces its underlying message instead of the opaque generic one.
     /// </summary>
     private static async Task<string> Guard(Func<Task<string>> op)
     {
@@ -38,13 +39,17 @@ internal static class DaxterToolRuntime
         {
             return ex.Message;
         }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     public static Task<string> XmlaAsync(
         string? workspace, string? dataset, Func<IXmlaSession, QueryResult> op, CancellationToken ct)
         => Guard(async () =>
         {
-            var config = Config(workspace, dataset);
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             var factory = new AdomdXmlaSessionFactory(config, Provider(config));
             using var session = await factory.CreateAsync(ct);
             return Format(op(session));
@@ -68,9 +73,9 @@ internal static class DaxterToolRuntime
         string? workspace, string? dataset, string other, CancellationToken ct)
         => Guard(async () =>
         {
-            var config = Config(workspace, dataset);
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             var left = new AdomdXmlaSessionFactory(config, Provider(config));
-            var rightConfig = WithDataset(config, other);
+            var rightConfig = await ResolveTargetsAsync(WithDataset(config, other), ct);
             var right = new AdomdXmlaSessionFactory(rightConfig, Provider(rightConfig));
 
             using var leftSession = await left.CreateAsync(ct);
@@ -88,7 +93,7 @@ internal static class DaxterToolRuntime
         string? workspace, string? dataset, Func<MaintenanceService, string> build, bool execute, CancellationToken ct)
         => Guard(async () =>
         {
-            var config = Config(workspace, dataset);
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             if (string.IsNullOrWhiteSpace(config.Dataset))
             {
                 throw new DaxterException("A dataset is required for maintenance operations.");
@@ -144,7 +149,7 @@ internal static class DaxterToolRuntime
     public static Task<string> ExportAsync(string? workspace, string? dataset, CancellationToken ct)
         => Guard(async () =>
         {
-            var config = Config(workspace, dataset);
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             var token = await Provider(config).GetTokenAsync(ct);
             var bim = new ModelExportService(config, token).ExportBim();
             return bim.Length <= ExportCap
@@ -167,7 +172,7 @@ internal static class DaxterToolRuntime
                 throw new DaxterException("Provide a DAX query to evaluate under the identity.");
             }
 
-            var config = Config(workspace, dataset);
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             var factory = new AdomdXmlaSessionFactory(config, Provider(config), role, user);
             using var session = await factory.CreateAsync(ct);
             return Format(session.Execute(query));
@@ -175,6 +180,51 @@ internal static class DaxterToolRuntime
 
     private static DaxterConfig Config(string? workspace, string? dataset)
         => DaxterConfig.FromEnvironment(workspace: workspace, dataset: dataset);
+
+    /// <summary>
+    /// The XMLA endpoint addresses a workspace and dataset by NAME, but a caller may pass a GUID
+    /// id for either. When one is a GUID, resolve it to its canonical name via REST so both the
+    /// XMLA connection string and the TMSL refresh target use the real name. Plain names pass
+    /// through untouched — no REST round-trip in the common case.
+    /// </summary>
+    private static async Task<DaxterConfig> ResolveTargetsAsync(DaxterConfig config, CancellationToken ct)
+    {
+        var wsIsId = !string.IsNullOrWhiteSpace(config.Workspace) && Guid.TryParse(config.Workspace!.Trim(), out _);
+        var dsIsId = !string.IsNullOrWhiteSpace(config.Dataset) && Guid.TryParse(config.Dataset!.Trim(), out _);
+        if (!wsIsId && !dsIsId)
+        {
+            return config;
+        }
+
+        using var rest = new PowerBiRestClient(Provider(config));
+        var workspace = config.Workspace;
+        if (wsIsId)
+        {
+            workspace = await rest.GroupNameByIdAsync(config.Workspace!.Trim(), ct);
+        }
+
+        var dataset = config.Dataset;
+        if (dsIsId)
+        {
+            var groupId = wsIsId
+                ? config.Workspace!.Trim()
+                : await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            dataset = await rest.DatasetNameByIdAsync(groupId, config.Dataset!.Trim(), ct);
+        }
+
+        return WithWorkspaceDataset(config, workspace, dataset);
+    }
+
+    private static DaxterConfig WithWorkspaceDataset(DaxterConfig c, string workspace, string? dataset) => new()
+    {
+        Workspace = workspace,
+        Dataset = dataset,
+        TenantId = c.TenantId,
+        ClientId = c.ClientId,
+        ClientSecret = c.ClientSecret,
+        AuthMode = c.AuthMode,
+        Environment = c.Environment,
+    };
 
     private static ITokenProvider Provider(DaxterConfig config)
         // Headless: never block on an interactive device-code prompt the user can't see —

@@ -45,4 +45,26 @@ public class XmlaConnectionStringTests
         Assert.DoesNotContain("Roles=", conn);
         Assert.DoesNotContain("EffectiveUserName=", conn);
     }
+
+    // Regression: a model name with an apostrophe was injected into Initial Catalog unquoted,
+    // corrupting the OLE-DB parse so the AdomdConnection ctor threw before connecting. The value
+    // must be enclosed in double quotes (no caller-side doubling needed).
+    [Theory]
+    [InlineData("Reseller's Margin", "Initial Catalog=\"Reseller's Margin\";")]  // single quote → wrap in double quotes
+    [InlineData("Has;Semicolon", "Initial Catalog=\"Has;Semicolon\";")]          // semicolon → must quote
+    [InlineData("Say \"Hi\"", "Initial Catalog='Say \"Hi\"';")]                  // double quote → wrap in single quotes
+    [InlineData("Mix'd \"both\"", "Initial Catalog=\"Mix'd \"\"both\"\"\";")]    // both → double the embedded double quotes
+    [InlineData("Plain Model", "Initial Catalog=Plain Model;")]                  // no special chars → untouched
+    public void Build_quotes_dataset_with_special_characters(string dataset, string expectedFragment)
+    {
+        var conn = XmlaConnectionString.Build("WS", dataset);
+        Assert.Contains(expectedFragment, conn);
+    }
+
+    [Fact]
+    public void Build_quotes_workspace_with_apostrophe()
+    {
+        var conn = XmlaConnectionString.Build("O'Brien Workspace", "Model");
+        Assert.Contains("Data Source=\"powerbi://api.powerbi.com/v1.0/myorg/O'Brien Workspace\";", conn);
+    }
 }

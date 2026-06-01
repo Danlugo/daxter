@@ -34,25 +34,59 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> DatasetsAsync(string groupId, CancellationToken ct = default)
         => ToTable(await GetAsync($"groups/{groupId}/datasets", ct), "id", "name", "configuredBy");
 
-    public async Task<string> ResolveGroupIdAsync(string workspaceName, CancellationToken ct = default)
+    /// <summary>Resolves a workspace given either its name or its id (a GUID is its own group id).</summary>
+    public async Task<string> ResolveGroupIdAsync(string workspaceNameOrId, CancellationToken ct = default)
     {
-        var root = await GetAsync($"groups?$filter=name eq '{Odata(workspaceName)}'", ct);
+        if (Guid.TryParse(workspaceNameOrId.Trim(), out _))
+        {
+            return workspaceNameOrId.Trim();
+        }
+
+        var root = await GetAsync($"groups?$filter=name eq '{Odata(workspaceNameOrId)}'", ct);
         var id = FirstValue(root, "id");
-        return id ?? throw new DaxterException($"Workspace not found via REST: {workspaceName}");
+        return id ?? throw new DaxterException($"Workspace not found via REST: {workspaceNameOrId}");
     }
 
-    public async Task<string> ResolveDatasetIdAsync(string groupId, string datasetName, CancellationToken ct = default)
+    /// <summary>Resolves a dataset id given either its name or its id (a GUID), within a workspace.</summary>
+    public async Task<string> ResolveDatasetIdAsync(string groupId, string datasetNameOrId, CancellationToken ct = default)
     {
+        var needle = datasetNameOrId.Trim();
         var root = await GetAsync($"groups/{groupId}/datasets", ct);
         foreach (var item in Value(root).EnumerateArray())
         {
-            if (item.TryGetProperty("name", out var n) && string.Equals(n.GetString(), datasetName, StringComparison.OrdinalIgnoreCase))
+            var byName = item.TryGetProperty("name", out var n) && string.Equals(n.GetString(), needle, StringComparison.OrdinalIgnoreCase);
+            var byId = item.TryGetProperty("id", out var i) && string.Equals(i.GetString(), needle, StringComparison.OrdinalIgnoreCase);
+            if (byName || byId)
             {
                 return item.GetProperty("id").GetString()!;
             }
         }
 
-        throw new DaxterException($"Dataset not found in workspace: {datasetName}");
+        throw new DaxterException($"Dataset not found in workspace: {datasetNameOrId}");
+    }
+
+    /// <summary>Canonical workspace name for an id (used to build the XMLA endpoint, which addresses by name).</summary>
+    public async Task<string> GroupNameByIdAsync(string groupId, CancellationToken ct = default)
+    {
+        var root = await GetAsync($"groups?$filter=id eq '{Odata(groupId)}'", ct);
+        return FirstValue(root, "name") ?? throw new DaxterException($"Workspace id not found via REST: {groupId}");
+    }
+
+    /// <summary>Canonical dataset name for an id within a workspace (XMLA Initial Catalog addresses by name).</summary>
+    public async Task<string> DatasetNameByIdAsync(string groupId, string datasetId, CancellationToken ct = default)
+    {
+        var needle = datasetId.Trim();
+        var root = await GetAsync($"groups/{groupId}/datasets", ct);
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            if (item.TryGetProperty("id", out var i) && string.Equals(i.GetString(), needle, StringComparison.OrdinalIgnoreCase)
+                && item.TryGetProperty("name", out var n))
+            {
+                return n.GetString() ?? throw new DaxterException($"Dataset id has no name: {datasetId}");
+            }
+        }
+
+        throw new DaxterException($"Dataset id not found in workspace: {datasetId}");
     }
 
     public async Task<QueryResult> ReportsAsync(string groupId, CancellationToken ct = default)

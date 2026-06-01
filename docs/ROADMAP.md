@@ -76,7 +76,7 @@ daxter admin inventory | scan | activity | orphans  # 20 (optional)
 - **Phase 2 — Maintenance:** ✅ DONE — refresh model/table (#11), partition newest-first (#12), clear cache (#13), refresh trigger + history via REST (#10 REST half). `--dry-run`/`--yes`/`--force` rails. Validated live (history + dry-run).
 - **Phase 3 — REST inventory:** ✅ DONE — `ws ls/datasets/reports/lineage/permissions/gateways/datasources`. Validated live (lineage + reports). Resolves group id #3 (REST half).
 - **Phase 4 — Export & diff:** ✅ DONE — `model export` (.bim via TOM, validated live on Linux), `model diff` (measure differences via DMV). Added Microsoft.AnalysisServices (AMO/TOM).
-- **Phase 5 — Test RLS:** ✅ DONE — `test-rls` via XMLA `Roles`/`EffectiveUserName`. Path validated live (reached engine under role `ICR`); full use requires the connecting identity to be a workspace/model admin.
+- **Phase 5 — Test RLS:** ✅ DONE — `test-rls` via XMLA `Roles`/`EffectiveUserName`. Path validated live (reached engine under a test role); full use requires the connecting identity to be a workspace/model admin.
 - **Phase 6 — Pipelines:** ✅ DONE — `pipeline ls/stages/operations` (#19, the env→workspace mapping). Fine-grained parameter rules and Admin/Scanner audit (#20) deferred (need a Fabric admin identity; the public API doesn't expose per-artifact rules cleanly).
 - **Deferred — Model editing (#21)** (write, opt-in; intentionally out of scope for now).
 

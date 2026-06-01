@@ -31,24 +31,53 @@ public static class XmlaConnectionString
             ? trimmed
             : PowerBiPrefix + trimmed;
 
-        var connection = $"Data Source={dataSource};";
+        var connection = $"Data Source={EncodeValue(dataSource)};";
 
         if (!string.IsNullOrWhiteSpace(dataset))
         {
-            connection += $"Initial Catalog={dataset.Trim()};";
+            connection += $"Initial Catalog={EncodeValue(dataset)};";
         }
 
         // RLS testing: connect under a role and/or impersonate a user.
         if (!string.IsNullOrWhiteSpace(roles))
         {
-            connection += $"Roles={roles.Trim()};";
+            connection += $"Roles={EncodeValue(roles)};";
         }
 
         if (!string.IsNullOrWhiteSpace(effectiveUserName))
         {
-            connection += $"EffectiveUserName={effectiveUserName.Trim()};";
+            connection += $"EffectiveUserName={EncodeValue(effectiveUserName)};";
         }
 
         return connection;
+    }
+
+    // Connection-string values that contain a semicolon or a quote character must be
+    // enclosed in quotes, or the OLE-DB / ADOMD parser misreads them — e.g. an apostrophe
+    // in a model name (like "Reseller's Margin") corrupts the parse and the AdomdConnection
+    // ctor throws before we ever connect. Per the ADO.NET rule, enclose in the quote
+    // character the value does NOT contain; if it contains both, enclose in double quotes
+    // and double the embedded ones. A value with no special characters is left untouched.
+    private static readonly char[] MustQuote = [';', '\'', '"'];
+
+    private static string EncodeValue(string raw)
+    {
+        var value = raw.Trim();
+        if (value.IndexOfAny(MustQuote) < 0)
+        {
+            return value;
+        }
+
+        if (!value.Contains('"', StringComparison.Ordinal))
+        {
+            return $"\"{value}\"";
+        }
+
+        if (!value.Contains('\'', StringComparison.Ordinal))
+        {
+            return $"'{value}'";
+        }
+
+        return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
     }
 }

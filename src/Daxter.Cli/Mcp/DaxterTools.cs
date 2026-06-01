@@ -20,8 +20,8 @@ public static class DaxterTools
     [McpServerTool(Name = "daxter_query"), Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON.")]
     public static Task<string> Query(
         [Description("The DAX or MDX query, e.g. EVALUATE TOPN(10, Sales)")] string query,
-        [Description("Workspace name (optional; defaults to server config)")] string? workspace = null,
-        [Description("Dataset / model name (optional; defaults to server config)")] string? dataset = null,
+        [Description("Workspace name or id/GUID (optional; defaults to server config)")] string? workspace = null,
+        [Description("Dataset / model name or id/GUID (optional; defaults to server config). Pass names with apostrophes as-is.")] string? dataset = null,
         CancellationToken ct = default)
         => DaxterToolRuntime.XmlaAsync(workspace, dataset, s => s.Execute(query), ct);
 

@@ -97,6 +97,9 @@ restart Claude Desktop.
 
 ## Targeting environments / other workspaces
 
-Every tool takes `workspace` (and `dataset`). Examples:
+Every tool takes `workspace` (and `dataset`). Each accepts either the **name or the id (GUID)** —
+DAXter resolves a GUID to its canonical name for you. Pass names **exactly as they appear**, including
+**apostrophes** (`Reseller's Margin`) — no escaping or doubling needed. Examples:
 - "List measures in **Marketing - QA**" → `daxter_measures` with `workspace: "Marketing - QA"`
 - "Query **Sales Analytics** (prod): EVALUATE ROW(\"x\",1)" → `daxter_query` with `workspace: "Sales Analytics"`
+- "Refresh dataset `11111111-2222-3333-4444-555555555555`" → `daxter_refresh` with `dataset: "<that id>"`
