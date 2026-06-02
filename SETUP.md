@@ -51,6 +51,12 @@ No JSON editing, no env file. The extension is only a **launcher** for the same 
 > **dry-run by default** and **stay gated** — they won't change anything unless writes are *also*
 > enabled (web console *Allow writes*, or `DAXTER_MCP_ALLOW_WRITES=true`). Want extra caution? Set the
 > group to **Allow** and switch just those two write tools to **Ask**.
+>
+> **Model-edit tools** (`daxter_edit_*`, `daxter_delete_*`, `daxter_set_*`, `daxter_create_*`,
+> `daxter_edit_tmsl`) are also **dry-run by default** and sit behind a **separate, stricter gate** —
+> web console *Allow model edits*, or `DAXTER_MCP_ALLOW_MODEL_EDIT=true`. ⚠ Applying an edit is
+> **irreversible for PBIX download** (a `.bim` backup is written first) and needs the workspace XMLA
+> endpoint set to **Read/Write**.
 
 ## 0. Prerequisites
 
