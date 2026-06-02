@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Daxter.Core;
+using Daxter.Core.Editing;
 using Daxter.Core.Maintenance;
 using ModelContextProtocol.Server;
 
@@ -266,4 +267,136 @@ public static class DaxterTools
         [Description("Actually execute (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => svc.BuildClearCache(), execute, ct);
+
+    // ---- Gated MODEL-EDIT tools (DRY-RUN by default; require execute=true AND model edits enabled —
+    //      web console "Allow model edits" or DAXTER_MCP_ALLOW_MODEL_EDIT=true. IRREVERSIBLE for PBIX
+    //      download; a .bim backup is written before every apply.) ----
+
+    private const string EditNote =
+        " DRY-RUN by default (returns the TMSL). To apply, set execute=true AND enable model edits " +
+        "(web console Configure → Allow model edits, or DAXTER_MCP_ALLOW_MODEL_EDIT=true). Editing a " +
+        "Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download; a .bim backup is taken first.";
+
+    [McpServerTool(Name = "daxter_edit_measure", Destructive = true, Title = "Create / alter measure"),
+     Description("Create or alter a measure (DAX) on a table." + EditNote)]
+    public static Task<string> EditMeasure(
+        [Description("Table that owns the measure.")] string table,
+        [Description("Measure name.")] string name,
+        [Description("DAX expression.")] string dax,
+        [Description("Format string, e.g. $#,0.00 (optional).")] string? formatString = null,
+        [Description("Display folder (optional).")] string? displayFolder = null,
+        [Description("Description (optional).")] string? description = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.BuildMeasureUpsert(table, name, dax, formatString, displayFolder, description), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_measure", Destructive = true, Title = "Delete measure"),
+     Description("Delete a measure from a table." + EditNote)]
+    public static Task<string> DeleteMeasure(
+        [Description("Table that owns the measure.")] string table,
+        [Description("Measure name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildMeasureDelete(table, name), execute, ct);
+
+    [McpServerTool(Name = "daxter_set_parameter", Destructive = true, Title = "Set parameter / M expression"),
+     Description("Create or alter a shared M expression / parameter (model-level)." + EditNote)]
+    public static Task<string> SetParameter(
+        [Description("Parameter / expression name.")] string name,
+        [Description("The M expression (Power Query).")] string mExpression,
+        [Description("Description (optional).")] string? description = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.BuildExpressionUpsert(name, mExpression, description), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_parameter", Destructive = true, Title = "Delete parameter / M expression"),
+     Description("Delete a shared M expression / parameter." + EditNote)]
+    public static Task<string> DeleteParameter(
+        [Description("Parameter / expression name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildExpressionDelete(name), execute, ct);
+
+    [McpServerTool(Name = "daxter_edit_role", Destructive = true, Title = "Create / alter RLS role"),
+     Description("Create or alter a security (RLS/OLS) role with members and an optional table filter." + EditNote)]
+    public static Task<string> EditRole(
+        [Description("Role name.")] string name,
+        [Description("Model permission: read | readRefresh | refresh | administrator | none (default read).")] string? modelPermission = null,
+        [Description("Comma-separated member UPNs / group names (optional).")] string? members = null,
+        [Description("Table to apply an RLS filter to (optional).")] string? filterTable = null,
+        [Description("DAX filter expression for filterTable, e.g. [Region] = \"US\" (optional).")] string? filterDax = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildRoleUpsert(
+            name, modelPermission,
+            (members ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(m => new RoleMember(m)),
+            string.IsNullOrWhiteSpace(filterTable) ? null : [new TableFilter(filterTable, filterDax ?? "")]), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_role", Destructive = true, Title = "Delete RLS role"),
+     Description("Delete a security role." + EditNote)]
+    public static Task<string> DeleteRole(
+        [Description("Role name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildRoleDelete(name), execute, ct);
+
+    [McpServerTool(Name = "daxter_edit_calculated_column", Destructive = true, Title = "Create / alter calculated column"),
+     Description("Create or alter a calculated column (DAX) on a table." + EditNote)]
+    public static Task<string> EditCalculatedColumn(
+        [Description("Table that owns the column.")] string table,
+        [Description("Column name.")] string name,
+        [Description("DAX expression.")] string dax,
+        [Description("Data type: string | int64 | double | decimal | dateTime | boolean (optional; inferred if omitted).")] string? dataType = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.BuildCalculatedColumnUpsert(table, name, dax, dataType), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_column", Destructive = true, Title = "Delete column"),
+     Description("Delete a column from a table." + EditNote)]
+    public static Task<string> DeleteColumn(
+        [Description("Table that owns the column.")] string table,
+        [Description("Column name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildColumnDelete(table, name), execute, ct);
+
+    [McpServerTool(Name = "daxter_set_partition_source", Destructive = true, Title = "Set partition (M) source"),
+     Description("Set a partition's Power Query (M) source expression." + EditNote)]
+    public static Task<string> SetPartitionSource(
+        [Description("Table that owns the partition.")] string table,
+        [Description("Partition name.")] string partition,
+        [Description("The M (Power Query) expression for the partition source.")] string mExpression,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.BuildPartitionSourceSet(table, partition, mExpression), execute, ct);
+
+    [McpServerTool(Name = "daxter_create_calculated_table", Destructive = true, Title = "Create calculated table"),
+     Description("Create or replace a calculated table (a table whose partition is a DAX expression)." + EditNote)]
+    public static Task<string> CreateCalculatedTable(
+        [Description("Table name.")] string name,
+        [Description("DAX table expression, e.g. CALENDARAUTO().")] string dax,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildCalculatedTableCreate(name, dax), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_table", Destructive = true, Title = "Delete table"),
+     Description("Delete an entire table (and its children)." + EditNote)]
+    public static Task<string> DeleteTable(
+        [Description("Table name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildTableDelete(name), execute, ct);
+
+    [McpServerTool(Name = "daxter_edit_tmsl", Destructive = true, Title = "Run raw TMSL edit"),
+     Description("Execute a raw TMSL command (createOrReplace / alter / delete / …) — the escape hatch for " +
+                 "edits not covered by the typed tools." + EditNote)]
+    public static Task<string> EditTmsl(
+        [Description("A TMSL command object, e.g. {\"createOrReplace\":{\"object\":{...},\"measure\":{...}}}.")] string tmsl,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, _ => tmsl, execute, ct);
 }

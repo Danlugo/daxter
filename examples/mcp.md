@@ -103,3 +103,20 @@ DAXter resolves a GUID to its canonical name for you. Pass names **exactly as th
 - "List measures in **Marketing - QA**" → `daxter_measures` with `workspace: "Marketing - QA"`
 - "Query **Sales Analytics** (prod): EVALUATE ROW(\"x\",1)" → `daxter_query` with `workspace: "Sales Analytics"`
 - "Refresh dataset `11111111-2222-3333-4444-555555555555`" → `daxter_refresh` with `dataset: "<that id>"`
+
+## Editing the model (gated, dry-run by default)
+
+The edit tools (`daxter_edit_measure`, `daxter_delete_measure`, `daxter_set_parameter`,
+`daxter_edit_role`, `daxter_edit_calculated_column`, `daxter_set_partition_source`,
+`daxter_create_calculated_table`, `daxter_delete_*`, raw `daxter_edit_tmsl`) return the **TMSL
+preview** unless `execute=true`. ⚠ Applying is **irreversible for PBIX download**; a `.bim` backup is
+written first. To apply, enable *Allow model edits* in the web console (or
+`DAXTER_MCP_ALLOW_MODEL_EDIT=true`).
+
+| Ask | Tool |
+|-----|------|
+| "Add a measure `Revenue = SUM(Sales[Amount])` to the Sales table (preview)" | `daxter_edit_measure` (dry run) |
+| "Now apply it" | `daxter_edit_measure` with `execute: true` |
+| "Create an RLS role `US` filtering Geography to US" | `daxter_edit_role` |
+| "Add a calculated column `Margin = [Revenue]-[Cost]` on Sales" | `daxter_edit_calculated_column` |
+| "Delete the measure `Old KPI`" | `daxter_delete_measure` |

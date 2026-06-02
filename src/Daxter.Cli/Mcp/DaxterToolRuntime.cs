@@ -3,6 +3,7 @@ using Daxter.Core.Audit;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Daxter.Core.Editing;
 using Daxter.Core.Export;
 using Daxter.Core.Formatting;
 using Daxter.Core.Maintenance;
@@ -124,6 +125,60 @@ internal static class DaxterToolRuntime
             return "EXECUTED:\n" + command;
         });
 
+    /// <summary>
+    /// Gated model edit: builds the TMSL and returns it as a dry-run unless <paramref name="execute"/>
+    /// is set AND BOTH writes (Allow writes) AND model editing (<c>DAXTER_MCP_ALLOW_MODEL_EDIT</c>) are
+    /// enabled. Before applying, exports a <c>.bim</c> backup — the only "undo", since an XMLA write
+    /// permanently blocks downloading the model as a PBIX.
+    /// </summary>
+    public static Task<string> ModelEditAsync(
+        string? workspace, string? dataset, Func<ModelEditService, string> build, bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
+            if (string.IsNullOrWhiteSpace(config.Dataset))
+            {
+                throw new DaxterException("A dataset is required for model edits.");
+            }
+
+            var factory = new AdomdXmlaSessionFactory(config, Provider(config));
+            using var session = await factory.CreateAsync(ct);
+            var service = new ModelEditService(session, config.Dataset!);
+            var tmsl = build(service);
+
+            const string caveat =
+                "\n\n⚠ Editing a Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download — the " +
+                "model can no longer be downloaded as a .pbix. A .bim backup is taken before applying.";
+
+            if (!execute)
+            {
+                return "DRY RUN — not executed:\n" + tmsl + caveat;
+            }
+
+            if (!WritesAllowed())
+            {
+                return "REFUSED — writes are disabled. Enable them in the web console " +
+                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + tmsl;
+            }
+
+            if (!ModelEditAllowed())
+            {
+                return "REFUSED — model editing is disabled (a separate, stricter gate than refresh writes). " +
+                       "Enable it in the web console (Configure → Allow model edits) or set " +
+                       "DAXTER_MCP_ALLOW_MODEL_EDIT=true, then retry." + caveat + "\n" + tmsl;
+            }
+
+            if (LooksLikeProd(config) && ProdWritesBlocked())
+            {
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + tmsl;
+            }
+
+            var token = await Provider(config).GetTokenAsync(ct);
+            var backup = new ModelBackupService(config, token).Backup();
+            service.Execute(tmsl);
+            return $"EXECUTED (backup: {backup}):\n" + tmsl;
+        });
+
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" or "newest-first" or "newest" => PartitionOrder.NewestFirst,
@@ -136,6 +191,13 @@ internal static class DaxterToolRuntime
     internal static bool WritesAllowed()
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase)
            || PersistedSettings.Load().AllowWrites;
+
+    /// <summary>Model editing is enabled by <c>DAXTER_MCP_ALLOW_MODEL_EDIT=true</c> OR the web console's
+    /// "Allow model edits" toggle — a separate, stricter gate than refresh writes (edits are irreversible
+    /// for PBIX download).</summary>
+    internal static bool ModelEditAllowed()
+        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase)
+           || PersistedSettings.Load().AllowModelEdit;
 
     /// <summary>Optional guardrail: set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block prod refresh/cache over MCP.</summary>
     internal static bool ProdWritesBlocked()

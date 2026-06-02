@@ -16,7 +16,8 @@ public sealed record PersistedSettings(
     string? Workspace = null,
     string? Dataset = null,
     string? ProdWorkspaces = null,
-    bool AllowWrites = false)
+    bool AllowWrites = false,
+    bool AllowModelEdit = false)
 {
     /// <summary>Path on the shared volume. Honors HOME (the token volume is mounted at <c>$HOME/.daxter</c>).</summary>
     public static string FilePath => Path.Combine(

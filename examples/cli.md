@@ -125,6 +125,29 @@ Mutating commands print the exact TMSL/REST call and refuse to run without `--ye
 ./bin/daxter pipeline operations --pipeline <id>  # recent deploy operations
 ```
 
+## Editing the model (`model edit`)
+
+Dry-run by default — prints the TMSL. Add `--yes` to apply (`--force` for a prod-looking target).
+⚠ Editing a Desktop-authored model over XMLA is **irreversible for PBIX download**; a `.bim` backup is
+written to `~/.daxter/backups/` before every apply, and the workspace XMLA endpoint must be **Read/Write**.
+
+```bash
+# Preview, then apply, a measure:
+./bin/daxter model edit measure -t Sales -n Revenue --dax "SUM(Sales[Amount])" --format "\$#,0.00"
+./bin/daxter model edit measure -t Sales -n Revenue --dax "SUM(Sales[Amount])" --yes
+
+# Parameter / shared M expression, RLS role, calculated column, partition source, calculated table:
+./bin/daxter model edit parameter -n ServerName --m '"sql.contoso.com" meta [IsParameterQuery=true]' --yes
+./bin/daxter model edit role -n US --permission read --members "dana@contoso.com" \
+  --filter-table Geography --filter '[Country] = "US"' --yes
+./bin/daxter model edit column -t Sales -n Margin --dax "[Revenue]-[Cost]" --data-type double --yes
+./bin/daxter model edit calc-table -n DimDate --dax "CALENDARAUTO()" --yes
+
+# Deletes + raw TMSL escape hatch:
+./bin/daxter model edit delete-measure -t Sales -n "Old KPI" --yes
+./bin/daxter model edit tmsl --tmsl '{"delete":{"object":{"database":"Retail Model","table":"Sales","measure":"X"}}}' --yes
+```
+
 ## Targeting other clients / workspaces
 
 ```bash

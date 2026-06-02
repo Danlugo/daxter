@@ -4,6 +4,31 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-06-02
+
+### Added
+- **Model editing** — DAXter can now create/alter/delete model objects over XMLA (TMSL), reversing the
+  previous "editing is out of scope" stance. Covered objects: **measures, parameters / shared M
+  expressions, RLS/OLS roles, calculated columns, partition (M) sources, calculated tables**, plus
+  delete of each and a **raw TMSL** escape hatch. The new `Daxter.Core/Editing/ModelEditService` builds
+  the exact TMSL that executes (so the dry-run preview == what's applied), reusing the existing XMLA
+  command path.
+  - **CLI:** `daxter model edit measure|parameter|role|column|source|calc-table|delete-*|tmsl`
+    (`--dry-run` default; `--yes` to apply; `--force` for prod).
+  - **MCP:** 12 new tools (`daxter_edit_measure`, `daxter_delete_measure`, `daxter_set_parameter`,
+    `daxter_edit_role`, `daxter_edit_calculated_column`, `daxter_set_partition_source`,
+    `daxter_create_calculated_table`, `daxter_delete_*`, `daxter_edit_tmsl`), all annotated
+    `Destructive` and **dry-run by default** — 45 tools total.
+  - **Web:** *Allow model edits* toggle on the Configure page.
+- **Safety, by design:**
+  - **Dry-run by default** everywhere — you preview the TMSL before anything runs.
+  - **Dedicated, stricter gate** separate from refresh writes: `DAXTER_MCP_ALLOW_MODEL_EDIT=true` or
+    the web console *Allow model edits* (refresh's *Allow writes* alone is not enough).
+  - **Automatic `.bim` backup** to `~/.daxter/backups/` before every apply — your practical "undo".
+  - **PROD guard** still applies (`--force` / `DAXTER_MCP_BLOCK_PROD_WRITES`).
+  - ⚠ **Editing a Power BI Desktop model over XMLA is irreversible for PBIX download** — keep your
+    original `.pbix`; requires the workspace XMLA endpoint set to **Read/Write**.
+
 ## [1.7.12] - 2026-06-01
 
 ### Added

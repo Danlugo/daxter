@@ -23,6 +23,7 @@ public sealed class ConfigState
     public string? Dataset { get; set; }
     public string? ProdWorkspaces { get; set; }
     public bool AllowWrites { get; set; }
+    public bool AllowModelEdit { get; set; }
 
     public bool Persisted { get; private set; }
 
@@ -49,6 +50,7 @@ public sealed class ConfigState
         Dataset = Env("DAXTER_DATASET");
         ProdWorkspaces = Env("DAXTER_PROD_WORKSPACES");
         AllowWrites = string.Equals(Env("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
+        AllowModelEdit = string.Equals(Env("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool LoadPersisted()
@@ -58,14 +60,14 @@ public sealed class ConfigState
         AuthMode = s.AuthMode ?? AuthMode;
         TenantId = s.TenantId; ClientId = s.ClientId; ClientSecret = s.ClientSecret;
         Workspace = s.Workspace; Dataset = s.Dataset;
-        ProdWorkspaces = s.ProdWorkspaces; AllowWrites = s.AllowWrites;
+        ProdWorkspaces = s.ProdWorkspaces; AllowWrites = s.AllowWrites; AllowModelEdit = s.AllowModelEdit;
         return true;
     }
 
     /// <summary>Persists the current values to the mounted volume (the single source the CLI/MCP also read).</summary>
     public string Save()
     {
-        new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset, ProdWorkspaces, AllowWrites).Save();
+        new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset, ProdWorkspaces, AllowWrites, AllowModelEdit).Save();
         Persisted = true;
         return ConfigPath;
     }

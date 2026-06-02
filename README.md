@@ -44,14 +44,15 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 |--------|----------|
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
 | **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
+| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table` (+ `delete-*`, raw `tmsl`) — TMSL, **dry-run by default**, gated, `.bim` backup before apply |
 | **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
 | **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-The MCP server exposes these at **full parity** as **33 tools** (`daxter_login` + 30 read + 2 gated
-write). See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
+The MCP server exposes these at **full parity** as **45 tools** (`daxter_login` + 30 read + 14 gated
+write/edit). See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 
 ## Web console
@@ -100,7 +101,11 @@ accept optional `workspace`/`dataset` (name **or** id); results are JSON, capped
 write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only execute when
 `execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
 `DAXTER_MCP_ALLOW_WRITES=true`. Once on, **PROD is allowed by default**; set
-`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block it. Prompts per tool → [`examples/mcp.md`](examples/mcp.md).
+`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block it. The **model-edit** tools (`daxter_edit_*`,
+`daxter_delete_*`, `daxter_set_*`, `daxter_create_*`, raw `daxter_edit_tmsl`) sit behind a **separate,
+stricter gate** — `DAXTER_MCP_ALLOW_MODEL_EDIT=true` or the web console *Allow model edits* — and take
+a `.bim` backup before applying (XMLA edits are irreversible for PBIX download). Prompts per tool →
+[`examples/mcp.md`](examples/mcp.md).
 
 ## Authentication
 
@@ -142,8 +147,11 @@ DAXter's own layers add no critical/high vulnerabilities.
 
 ## Limitations
 
-- Query, metadata, maintenance (refresh/cache), and inventory are supported. **Model editing**
-  (create/alter/delete measures, tables, roles) is intentionally out of scope.
+- **Model editing** (measures, parameters, RLS/OLS roles, calculated columns, partition M sources,
+  calculated tables, + raw TMSL) is supported — **dry-run by default**, behind a dedicated gate, with
+  a `.bim` backup before every apply. ⚠ Editing a Power BI Desktop–authored model over XMLA is
+  **irreversible for PBIX download** (keep your original .pbix) and requires the workspace XMLA
+  endpoint set to **Read/Write**.
 - The workspace must expose an XMLA endpoint (Premium/PPU/Fabric). Pro datasets don't (REST commands
   like `ws` / `refresh history` still work on Pro).
 - TMSL refresh / `cache clear` need XMLA set to **Read/Write**; `refresh trigger` (REST) works with

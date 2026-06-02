@@ -4,6 +4,7 @@ using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Daxter.Core.Editing;
 using Daxter.Core.Formatting;
 using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
@@ -228,10 +229,122 @@ internal static class Program
             () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
             RequireArg(pr, otherArg, "other dataset"), ct));
 
-        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions, columns, export, diff).")
+        return new Command("model", "Inspect model metadata (measures, M code, RLS, partitions, columns, export, diff); edit with `model edit`.")
         {
             measures, measure, mcode, parameters, partitions, columns, rls, export, diff,
+            BuildModelEditCommand(connectionOptions),
         };
+    }
+
+    private static Command BuildModelEditCommand(ConnectionOptions connectionOptions)
+    {
+        var dryRun = new Option<bool>("--dry-run") { Description = "Print the TMSL without applying." };
+        var yes = new Option<bool>("--yes") { Description = "Apply the edit (required for mutations)." };
+        var force = new Option<bool>("--force") { Description = "Allow applying against a PROD-looking target." };
+        var table = new Option<string?>("--table", "-t") { Description = "Table name." };
+        var name = new Option<string?>("--name", "-n") { Description = "Object name (measure / column / parameter / role / table)." };
+        var dax = new Option<string?>("--dax") { Description = "DAX expression." };
+        var m = new Option<string?>("--m") { Description = "M (Power Query) expression." };
+        var format = new Option<string?>("--format") { Description = "Measure format string, e.g. $#,0.00." };
+        var folder = new Option<string?>("--folder") { Description = "Display folder." };
+        var desc = new Option<string?>("--description") { Description = "Description." };
+        var dataType = new Option<string?>("--data-type") { Description = "Column data type (inferred if omitted)." };
+        var perm = new Option<string?>("--permission") { Description = "Role model permission: read|readRefresh|refresh|administrator|none." };
+        var membersOpt = new Option<string?>("--members") { Description = "Comma-separated member UPNs / groups." };
+        var filterTable = new Option<string?>("--filter-table") { Description = "Table to apply an RLS filter to." };
+        var filterDax = new Option<string?>("--filter") { Description = "DAX filter expression for --filter-table." };
+        var partition = new Option<string?>("--partition") { Description = "Partition name." };
+        var tmslOpt = new Option<string?>("--tmsl") { Description = "Raw TMSL command (escape hatch)." };
+
+        Command Edit(string n, string d, Func<ParseResult, ModelEditService, string> build, params Option[] opts)
+        {
+            var c = new Command(n, d) { dryRun, yes, force };
+            foreach (var o in opts) c.Add(o);
+            connectionOptions.AddTo(c);
+            c.SetAction((pr, ct) => RunModelEditAsync(() => connectionOptions.Resolve(pr),
+                svc => build(pr, svc), pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            return c;
+        }
+
+        return new Command("edit",
+            "Edit the model (measures, parameters, roles, calculated columns, partition sources, tables). " +
+            "DRY-RUN unless --yes. IRREVERSIBLE for PBIX download; a .bim backup is written before applying.")
+        {
+            Edit("measure", "Create or alter a measure.",
+                (pr, svc) => svc.BuildMeasureUpsert(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
+                    RequireOption(pr, dax, "--dax"), pr.GetValue(format), pr.GetValue(folder), pr.GetValue(desc)),
+                table, name, dax, format, folder, desc),
+            Edit("delete-measure", "Delete a measure.",
+                (pr, svc) => svc.BuildMeasureDelete(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
+                table, name),
+            Edit("parameter", "Create or alter a shared M expression / parameter.",
+                (pr, svc) => svc.BuildExpressionUpsert(RequireOption(pr, name, "--name"), RequireOption(pr, m, "--m"), pr.GetValue(desc)),
+                name, m, desc),
+            Edit("delete-parameter", "Delete a shared M expression / parameter.",
+                (pr, svc) => svc.BuildExpressionDelete(RequireOption(pr, name, "--name")),
+                name),
+            Edit("role", "Create or alter an RLS/OLS role.",
+                (pr, svc) => svc.BuildRoleUpsert(RequireOption(pr, name, "--name"), pr.GetValue(perm),
+                    (pr.GetValue(membersOpt) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => new RoleMember(x)),
+                    string.IsNullOrWhiteSpace(pr.GetValue(filterTable)) ? null : [new TableFilter(pr.GetValue(filterTable)!, pr.GetValue(filterDax) ?? "")]),
+                name, perm, membersOpt, filterTable, filterDax),
+            Edit("delete-role", "Delete an RLS/OLS role.",
+                (pr, svc) => svc.BuildRoleDelete(RequireOption(pr, name, "--name")),
+                name),
+            Edit("column", "Create or alter a calculated column.",
+                (pr, svc) => svc.BuildCalculatedColumnUpsert(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
+                    RequireOption(pr, dax, "--dax"), pr.GetValue(dataType)),
+                table, name, dax, dataType),
+            Edit("delete-column", "Delete a column.",
+                (pr, svc) => svc.BuildColumnDelete(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
+                table, name),
+            Edit("source", "Set a partition's M (Power Query) source.",
+                (pr, svc) => svc.BuildPartitionSourceSet(RequireOption(pr, table, "--table"), RequireOption(pr, partition, "--partition"), RequireOption(pr, m, "--m")),
+                table, partition, m),
+            Edit("calc-table", "Create or replace a calculated table.",
+                (pr, svc) => svc.BuildCalculatedTableCreate(RequireOption(pr, name, "--name"), RequireOption(pr, dax, "--dax")),
+                name, dax),
+            Edit("delete-table", "Delete an entire table.",
+                (pr, svc) => svc.BuildTableDelete(RequireOption(pr, name, "--name")),
+                name),
+            Edit("tmsl", "Execute a raw TMSL command (escape hatch).",
+                (pr, _) => RequireOption(pr, tmslOpt, "--tmsl"),
+                tmslOpt),
+        };
+    }
+
+    private static async Task<int> RunModelEditAsync(
+        Func<DaxterConfig> configFactory,
+        Func<ModelEditService, string> build,
+        bool dryRun, bool yes, bool force, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var provider = BuildTokenProvider(config);
+            var factory = BuildSessionFactory(config);
+
+            using var session = await factory.CreateAsync(ct);
+            var service = new ModelEditService(session, config.Dataset!);
+            var tmsl = build(service);
+
+            Console.Error.WriteLine(
+                "⚠ Editing a Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download. " +
+                "A .bim backup is written before applying.");
+
+            return ApplySafety(config, tmsl, dryRun, yes, force, () =>
+            {
+                var token = provider.GetTokenAsync(ct).GetAwaiter().GetResult();
+                var backup = new ModelBackupService(config, token).Backup();
+                Console.Error.WriteLine($"Backup written: {backup}");
+                service.Execute(tmsl);
+            }, successMessage: "Model edit applied.");
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
     }
 
     private static async Task<int> RunExportAsync(
