@@ -238,6 +238,7 @@ public static class DaxterTools
         [Description("Refresh type: full|automatic|calculate|dataOnly|clearValues")] string? type = null,
         [Description("Partition order for scope=partitions: newest-first | oldest-first")] string? order = null,
         [Description("Actually execute (default false = dry run).")] bool execute = false,
+        [Description("Retry the refresh up to N times on transient failure (default 0; e.g. 3). Linear backoff.")] int retries = 0,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => scope.Trim().ToLowerInvariant() switch
         {
@@ -258,15 +259,16 @@ public static class DaxterTools
                     partitions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                     MaintenanceService.ParseRefreshType(type), maxParallelism: 1),
             _ => throw new DaxterException($"Unknown scope '{scope}'. Use model | table | partition | partitions."),
-        }, execute, ct);
+        }, execute, ct, retries);
 
     [McpServerTool(Name = "daxter_clear_cache", Destructive = true, Title = "Clear data cache"), Description(
         "Clear the model's data cache. DRY-RUN by default; requires execute=true AND writes enabled " +
         "(web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true).")]
     public static Task<string> ClearCache(
         [Description("Actually execute (default false = dry run).")] bool execute = false,
+        [Description("Retry up to N times on transient failure (default 0).")] int retries = 0,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => svc.BuildClearCache(), execute, ct);
+        => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => svc.BuildClearCache(), execute, ct, retries);
 
     // ---- Gated MODEL-EDIT tools (DRY-RUN by default; require execute=true AND model edits enabled —
     //      web console "Allow model edits" or DAXTER_MCP_ALLOW_MODEL_EDIT=true. IRREVERSIBLE for PBIX

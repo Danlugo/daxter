@@ -4,6 +4,22 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-06-03
+
+### Fixed
+- **Partition refresh `--order` now actually orders.** `refresh partitions --order newest-first|oldest-first`
+  previously put all partitions into a *single* TMSL `refresh` operation, and the engine reordered them
+  (observed: oldest-first regardless of the flag). Each partition now gets its **own** `refresh` operation
+  inside the `maxParallelism: 1` sequence, so they process strictly in the requested order.
+
+### Added
+- **Retry on transient failure for refreshes.** New `--retries N` on the CLI (`refresh model/table/
+  partition/partitions/trigger`, `cache clear`) and a `retries` argument on the `daxter_refresh` /
+  `daxter_clear_cache` MCP tools. On a transient error (connection drop, timeout, throttling) the
+  operation is retried up to N more times with linear backoff (5 s, 10 s, … capped at 30 s); each retry
+  is logged. Default `0` (single attempt). *Note: this retries the operation within the process — it
+  cannot recover from the process being killed externally.* Backed by `Daxter.Core.RetryPolicy`.
+
 ## [1.8.1] - 2026-06-03
 
 ### Fixed

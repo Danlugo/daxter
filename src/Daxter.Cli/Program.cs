@@ -941,23 +941,24 @@ internal static class Program
         var yes = new Option<bool>("--yes") { Description = "Execute the operation (required for mutations)." };
         var force = new Option<bool>("--force") { Description = "Allow execution against a PROD-looking target." };
         var topOption = new Option<int>("--top") { Description = "Rows of refresh history.", DefaultValueFactory = _ => 10 };
+        var retriesOption = new Option<int>("--retries") { Description = "Retry on transient failure: number of extra attempts (default 0; e.g. 3). Linear backoff." };
 
-        var model = new Command("model", "Refresh the whole model (TMSL).") { typeOption, dryRun, yes, force };
+        var model = new Command("model", "Refresh the whole model (TMSL).") { typeOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(model);
         model.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
             svc => svc.BuildModelRefresh(MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
-        var table = new Command("table", "Refresh one table (TMSL).") { tableOption, typeOption, dryRun, yes, force };
+        var table = new Command("table", "Refresh one table (TMSL).") { tableOption, typeOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(table);
         table.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
             svc => svc.BuildTableRefresh(RequireOption(pr, tableOption, "--table"),
                 MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
         var partition = new Command("partition", "Refresh one named partition of a table (TMSL).")
         {
-            tableOption, partitionOption, typeOption, dryRun, yes, force,
+            tableOption, partitionOption, typeOption, dryRun, yes, force, retriesOption,
         };
         connectionOptions.AddTo(partition);
         partition.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
@@ -965,11 +966,11 @@ internal static class Program
                 RequireOption(pr, tableOption, "--table"),
                 RequireOption(pr, partitionOption, "--partition"),
                 MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
         var partitions = new Command("partitions", "Refresh a table's partitions in order, or a --partitions subset (TMSL, sequential).")
         {
-            tableOption, partitionsListOption, orderOption, typeOption, dryRun, yes, force,
+            tableOption, partitionsListOption, orderOption, typeOption, dryRun, yes, force, retriesOption,
         };
         connectionOptions.AddTo(partitions);
         partitions.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
@@ -985,12 +986,12 @@ internal static class Program
                         subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                         type, maxParallelism: 1);
             },
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
-        var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force };
+        var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(trigger);
         trigger.SetAction((pr, ct) => RunRefreshTriggerAsync(() => connectionOptions.Resolve(pr),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
         var history = new Command("history", "Show recent refresh history (REST).") { topOption, outputOption };
         connectionOptions.AddTo(history);
@@ -1021,7 +1022,7 @@ internal static class Program
     private static async Task<int> RunTmslAsync(
         Func<DaxterConfig> configFactory,
         Func<MaintenanceService, string> build,
-        bool dryRun, bool yes, bool force, CancellationToken ct)
+        bool dryRun, bool yes, bool force, CancellationToken ct, int retries = 0)
     {
         try
         {
@@ -1033,7 +1034,9 @@ internal static class Program
             var service = new MaintenanceService(session, config.Dataset!);
             var command = build(service);
 
-            return ApplySafety(config, command, dryRun, yes, force, () => service.Execute(command));
+            return ApplySafety(config, command, dryRun, yes, force, () =>
+                RetryPolicy.Execute(() => service.Execute(command), retries,
+                    onRetry: (a, m, ex) => Console.Error.WriteLine($"daxter: transient failure (retry {a}/{m}): {ex.Message}")));
         }
         catch (Exception ex)
         {
@@ -1042,7 +1045,7 @@ internal static class Program
     }
 
     private static async Task<int> RunRefreshTriggerAsync(
-        Func<DaxterConfig> configFactory, bool dryRun, bool yes, bool force, CancellationToken ct)
+        Func<DaxterConfig> configFactory, bool dryRun, bool yes, bool force, CancellationToken ct, int retries = 0)
     {
         try
         {
@@ -1055,7 +1058,8 @@ internal static class Program
             var description = $"POST groups/{groupId}/datasets/{datasetId}/refreshes (full, REST)";
 
             return ApplySafety(config, description, dryRun, yes, force,
-                () => rest.TriggerRefreshAsync(groupId, datasetId, ct).GetAwaiter().GetResult(),
+                () => RetryPolicy.Execute(() => rest.TriggerRefreshAsync(groupId, datasetId, ct).GetAwaiter().GetResult(), retries,
+                    onRetry: (a, m, ex) => Console.Error.WriteLine($"daxter: transient failure (retry {a}/{m}): {ex.Message}")),
                 successMessage: "Refresh triggered (async). Check `daxter refresh history`.");
         }
         catch (Exception ex)

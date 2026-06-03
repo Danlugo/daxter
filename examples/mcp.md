@@ -90,6 +90,7 @@ Deployment rules are inferred by comparing a model's parameter values across pip
 | "Show me the TMSL to refresh the Sales table" | `daxter_refresh` (dry run — returns TMSL) |
 | "Refresh the Sales table" (writes disabled) | refused with instructions to enable |
 | "Refresh the Sales table, execute it" (writes enabled) | runs the refresh |
+| "Refresh all Sales partitions newest-first, retry 3× on failure" | `daxter_refresh` with `scope: "partitions"`, `order: "newest-first"`, `execute: true`, `retries: 3` |
 
 To enable writes, tick **⚙ Configure → Allow writes** in the web console (it saves to the shared
 volume the MCP server reads) — or set `DAXTER_MCP_ALLOW_WRITES=true` in the server env — then

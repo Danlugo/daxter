@@ -101,24 +101,38 @@ public sealed class MaintenanceService
 
     private static string RefreshTmsl(RefreshType type, IReadOnlyList<Dictionary<string, string>> objects, int? maxParallelism = null)
     {
-        var refresh = new Dictionary<string, object>
+        // A plain refresh processes its objects in an engine-chosen order. To honour the listed
+        // order, wrap a Sequence (maxParallelism = 1 = strictly sequential) and give each object its
+        // OWN refresh operation — a single refresh with many objects does NOT preserve order, the
+        // engine reorders the objects within it.
+        object payload;
+        if (maxParallelism is { } mp)
         {
-            ["type"] = TypeName(type),
-            ["objects"] = objects,
-        };
+            var operations = objects.Select(o => new Dictionary<string, object>
+            {
+                ["refresh"] = new Dictionary<string, object>
+                {
+                    ["type"] = TypeName(type),
+                    ["objects"] = new[] { o },
+                },
+            }).ToArray();
 
-        // A plain refresh processes objects in parallel. To honour the listed order, wrap it in a
-        // Sequence with maxParallelism (1 = strictly sequential). See TMSL Sequence command.
-        object payload = maxParallelism is { } mp
-            ? new Dictionary<string, object>
+            payload = new Dictionary<string, object>
             {
                 ["sequence"] = new Dictionary<string, object>
                 {
                     ["maxParallelism"] = mp,
-                    ["operations"] = new[] { new Dictionary<string, object> { ["refresh"] = refresh } },
+                    ["operations"] = operations,
                 },
-            }
-            : new Dictionary<string, object> { ["refresh"] = refresh };
+            };
+        }
+        else
+        {
+            payload = new Dictionary<string, object>
+            {
+                ["refresh"] = new Dictionary<string, object> { ["type"] = TypeName(type), ["objects"] = objects },
+            };
+        }
 
         return JsonSerializer.Serialize(payload, Json);
     }

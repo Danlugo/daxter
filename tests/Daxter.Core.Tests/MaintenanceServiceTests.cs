@@ -85,6 +85,26 @@ public class MaintenanceServiceTests
     }
 
     [Fact]
+    public void Partitions_refresh_gives_each_partition_its_own_ordered_operation()
+    {
+        // Regression: a single refresh with many objects does NOT honor order — the engine reorders
+        // the objects. Each partition must be its OWN refresh operation inside the sequence.
+        var session = new FakeSession(q =>
+            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
+                ? new QueryResult(["ID"], [[1L]])
+                : new QueryResult(["Name"], [["2025Q1"], ["2026Q1"], ["2025Q3"]]));
+
+        var tmsl = new MaintenanceService(session, "DB")
+            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full, maxParallelism: 1);
+
+        // One "refresh" operation per partition (3), not one refresh holding all three.
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(tmsl, "\"refresh\"").Count);
+        // And they appear newest → oldest.
+        Assert.True(tmsl.IndexOf("2026Q1", StringComparison.Ordinal) < tmsl.IndexOf("2025Q3", StringComparison.Ordinal));
+        Assert.True(tmsl.IndexOf("2025Q3", StringComparison.Ordinal) < tmsl.IndexOf("2025Q1", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Partitions_refresh_has_no_sequence_by_default()
     {
         var session = new FakeSession(q =>

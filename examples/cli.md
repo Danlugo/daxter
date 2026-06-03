@@ -87,9 +87,14 @@ Mutating commands print the exact TMSL/REST call and refuse to run without `--ye
 ./bin/daxter refresh model --yes                 # full model refresh (TMSL)
 ./bin/daxter refresh table --table Sales --yes   # one table
 ./bin/daxter refresh partitions --table Sales --order newest-first --dry-run
+./bin/daxter refresh partitions --table Sales --order newest-first --yes --retries 3  # retry on transient failure
 ./bin/daxter refresh trigger --yes               # whole-model refresh via REST
 ./bin/daxter cache clear --dry-run               # ClearCache XML preview
 ```
+
+> **`--retries N`** (on any `refresh …` and `cache clear`) re-attempts on a *transient* failure
+> (connection drop, timeout, throttling) up to N more times with linear backoff (5 s, 10 s, … cap 30 s);
+> default 0. It retries the operation **within the run** — it can't recover from the process being killed.
 
 ## Workspace inventory (REST)
 

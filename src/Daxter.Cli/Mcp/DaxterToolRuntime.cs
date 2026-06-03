@@ -91,7 +91,8 @@ internal static class DaxterToolRuntime
     /// <c>DAXTER_MCP_BLOCK_PROD_WRITES=true</c> to re-block them.
     /// </summary>
     public static Task<string> MaintenanceAsync(
-        string? workspace, string? dataset, Func<MaintenanceService, string> build, bool execute, CancellationToken ct)
+        string? workspace, string? dataset, Func<MaintenanceService, string> build, bool execute,
+        CancellationToken ct, int retries = 0)
         => Guard(async () =>
         {
             var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
@@ -121,8 +122,11 @@ internal static class DaxterToolRuntime
                 return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + command;
             }
 
-            service.Execute(command);
-            return "EXECUTED:\n" + command;
+            var notes = new List<string>();
+            RetryPolicy.Execute(() => service.Execute(command), retries,
+                onRetry: (attempt, total, ex) => notes.Add($"transient failure (retry {attempt}/{total}): {ex.Message}"));
+            var prefix = notes.Count > 0 ? string.Join("\n", notes) + "\n" : "";
+            return $"{prefix}EXECUTED:\n" + command;
         });
 
     /// <summary>
