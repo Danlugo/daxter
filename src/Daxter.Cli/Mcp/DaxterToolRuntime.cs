@@ -141,10 +141,9 @@ internal static class DaxterToolRuntime
                 throw new DaxterException("A dataset is required for model edits.");
             }
 
-            var factory = new AdomdXmlaSessionFactory(config, Provider(config));
-            using var session = await factory.CreateAsync(ct);
-            var service = new ModelEditService(session, config.Dataset!);
-            var tmsl = build(service);
+            var token = await Provider(config).GetTokenAsync(ct);
+            using var service = new ModelEditService(config, token);
+            var change = build(service);   // stages the change in-memory (TOM); not yet saved
 
             const string caveat =
                 "\n\n⚠ Editing a Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download — the " +
@@ -152,31 +151,30 @@ internal static class DaxterToolRuntime
 
             if (!execute)
             {
-                return "DRY RUN — not executed:\n" + tmsl + caveat;
+                return "DRY RUN — not applied:\n" + change + caveat;
             }
 
             if (!WritesAllowed())
             {
                 return "REFUSED — writes are disabled. Enable them in the web console " +
-                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + tmsl;
+                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + change;
             }
 
             if (!ModelEditAllowed())
             {
                 return "REFUSED — model editing is disabled (a separate, stricter gate than refresh writes). " +
                        "Enable it in the web console (Configure → Allow model edits) or set " +
-                       "DAXTER_MCP_ALLOW_MODEL_EDIT=true, then retry." + caveat + "\n" + tmsl;
+                       "DAXTER_MCP_ALLOW_MODEL_EDIT=true, then retry." + caveat + "\n" + change;
             }
 
             if (LooksLikeProd(config) && ProdWritesBlocked())
             {
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + tmsl;
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + change;
             }
 
-            var token = await Provider(config).GetTokenAsync(ct);
             var backup = new ModelBackupService(config, token).Backup();
-            service.Execute(tmsl);
-            return $"EXECUTED (backup: {backup}):\n" + tmsl;
+            service.Apply();
+            return $"APPLIED (backup: {backup}):\n" + change;
         });
 
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch

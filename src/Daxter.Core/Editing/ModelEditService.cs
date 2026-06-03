@@ -1,235 +1,273 @@
-using System.Text.Json;
+using Daxter.Core.Auth;
+using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Tom = Microsoft.AnalysisServices.Tabular;
 
 namespace Daxter.Core.Editing;
 
-/// <summary>A role member (UPN, group, or service principal) for an RLS/OLS role.</summary>
+/// <summary>A role member (UPN / group / service principal) for an RLS/OLS role.</summary>
 public sealed record RoleMember(string Name);
 
 /// <summary>A table-level RLS filter: <paramref name="FilterDax"/> applied to <paramref name="Table"/>.</summary>
 public sealed record TableFilter(string Table, string FilterDax);
 
 /// <summary>
-/// Builds (and optionally executes) TMSL model-edit commands over an open XMLA session — measures,
-/// parameters/shared expressions, RLS/OLS roles, calculated columns, partition (M) sources, and
-/// calculated tables, plus delete of each, plus a raw-TMSL escape hatch. Build and execute are
-/// separate so a caller can <b>preview the exact TMSL as a dry-run</b> before applying — mirroring
-/// <see cref="Maintenance.MaintenanceService"/>. The previewed TMSL <i>is</i> what executes.
+/// Edits a Power BI model via the <b>Tabular Object Model (TOM)</b>: connects, mutates the in-memory
+/// model, and applies with <c>SaveChanges()</c> — the engine-sanctioned write path (hand-built
+/// surgical TMSL like <c>createOrReplace.measure</c> is rejected by the service). Each operation
+/// modifies the model and returns a human-readable <b>change description</b>; the caller decides
+/// dry-run (discard) vs apply (<see cref="Apply"/>).
 ///
 /// SAFETY: editing a Power BI Desktop–authored model over XMLA is <b>irreversible for PBIX
-/// download</b>. Callers MUST enforce the model-edit write gate and take a .bim backup <i>before</i>
-/// calling <see cref="Execute"/>. <c>createOrReplace</c> requires the full definition of the target
-/// object — surgical object paths (measure/column/partition/role/expression) avoid clobbering siblings.
+/// download</b>, and needs the workspace XMLA endpoint set to <b>Read/Write</b>. The caller MUST
+/// enforce the model-edit gate and take a .bim backup before <see cref="Apply"/>.
 /// </summary>
-public sealed class ModelEditService
+public sealed class ModelEditService : IDisposable
 {
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    private readonly Tom.Server _server;
+    private readonly Tom.Model _model;
+    private string? _rawTmsl;
 
-    private readonly IXmlaSession _session;
-    private readonly string _database;
-
-    public ModelEditService(IXmlaSession session, string database)
+    public ModelEditService(DaxterConfig config, XmlaAccessToken token)
     {
-        _session = session ?? throw new ArgumentNullException(nameof(session));
-        if (string.IsNullOrWhiteSpace(database))
+        if (string.IsNullOrWhiteSpace(config.Dataset))
         {
             throw new DaxterException("A dataset is required for model edits.");
         }
 
-        _database = database;
+        _server = new Tom.Server
+        {
+            AccessToken = new Microsoft.AnalysisServices.AccessToken(token.Token, token.ExpiresOn, null),
+        };
+        try
+        {
+            _server.Connect(XmlaConnectionString.Build(config.Workspace, null));
+        }
+        catch (Exception ex)
+        {
+            _server.Dispose();
+            throw new DaxterException($"Could not connect for model edit: {ex.Message}", ex);
+        }
+
+        var db = _server.Databases.FindByName(config.Dataset)
+                 ?? throw Cleanup(new DaxterException($"Dataset not found in workspace: {config.Dataset}"));
+        _model = db.Model;
     }
 
     // ---- measures ----
 
-    /// <summary>TMSL to create-or-replace a measure on a table (upsert).</summary>
-    public string BuildMeasureUpsert(
-        string table, string name, string dax,
+    public string UpsertMeasure(string table, string name, string dax,
         string? formatString = null, string? displayFolder = null, string? description = null)
     {
-        Require(table, "table");
-        Require(name, "name");
-        if (string.IsNullOrWhiteSpace(dax))
-        {
-            throw new DaxterException("A DAX expression is required to create or alter a measure.");
-        }
-
-        var measure = new Dictionary<string, object> { ["name"] = name, ["expression"] = dax };
-        Put(measure, "formatString", formatString);
-        Put(measure, "displayFolder", displayFolder);
-        Put(measure, "description", description);
-        return CreateOrReplace(Path(("table", table), ("measure", name)), "measure", measure);
+        Require(dax, "dax");
+        var t = Table(table);
+        var m = t.Measures.Find(name);
+        var verb = m is null ? "create" : "alter";
+        if (m is null) { m = new Tom.Measure { Name = name }; t.Measures.Add(m); }
+        m.Expression = dax;
+        if (formatString is not null) m.FormatString = formatString;
+        if (displayFolder is not null) m.DisplayFolder = displayFolder;
+        if (description is not null) m.Description = description;
+        return $"{verb} measure [{name}] on table [{table}]  =  {dax}";
     }
 
-    /// <summary>TMSL to delete a measure from a table.</summary>
-    public string BuildMeasureDelete(string table, string name)
-        => Delete(Path(("table", RequireV(table, "table")), ("measure", RequireV(name, "name"))));
+    public string DeleteMeasure(string table, string name)
+    {
+        var t = Table(table);
+        var m = t.Measures.Find(name) ?? throw new DaxterException($"Measure not found: [{name}] on [{table}].");
+        t.Measures.Remove(m);
+        return $"delete measure [{name}] from table [{table}]";
+    }
 
     // ---- parameters / shared M expressions ----
 
-    /// <summary>TMSL to create-or-replace a shared M expression / parameter (model-level).</summary>
-    public string BuildExpressionUpsert(string name, string mExpression, string? description = null)
+    public string UpsertExpression(string name, string mExpression, string? description = null)
     {
         Require(name, "name");
-        if (string.IsNullOrWhiteSpace(mExpression))
-        {
-            throw new DaxterException("An M expression is required to create or alter a parameter/expression.");
-        }
-
-        var expr = new Dictionary<string, object> { ["name"] = name, ["kind"] = "m", ["expression"] = mExpression };
-        Put(expr, "description", description);
-        return CreateOrReplace(Path(("expression", name)), "expression", expr);
+        Require(mExpression, "m");
+        var e = _model.Expressions.Find(name);
+        var verb = e is null ? "create" : "alter";
+        if (e is null) { e = new Tom.NamedExpression { Name = name }; _model.Expressions.Add(e); }
+        e.Kind = Tom.ExpressionKind.M;
+        e.Expression = mExpression;
+        if (description is not null) e.Description = description;
+        return $"{verb} parameter/expression [{name}] (M)";
     }
 
-    /// <summary>TMSL to delete a shared M expression / parameter.</summary>
-    public string BuildExpressionDelete(string name)
-        => Delete(Path(("expression", RequireV(name, "name"))));
+    public string DeleteExpression(string name)
+    {
+        var e = _model.Expressions.Find(name) ?? throw new DaxterException($"Parameter/expression not found: [{name}].");
+        _model.Expressions.Remove(e);
+        return $"delete parameter/expression [{name}]";
+    }
 
     // ---- RLS / OLS roles ----
 
-    /// <summary>TMSL to create-or-replace a security role with members and table filters.</summary>
-    public string BuildRoleUpsert(
-        string name, string? modelPermission = null,
+    public string UpsertRole(string name, string? modelPermission = null,
         IEnumerable<RoleMember>? members = null, IEnumerable<TableFilter>? tableFilters = null)
     {
         Require(name, "name");
-        var role = new Dictionary<string, object>
+        var r = _model.Roles.Find(name);
+        var verb = r is null ? "create" : "alter";
+        if (r is null) { r = new Tom.ModelRole { Name = name }; _model.Roles.Add(r); }
+        r.ModelPermission = ParsePermission(modelPermission);
+
+        var mem = (members ?? []).Where(x => !string.IsNullOrWhiteSpace(x.Name)).ToList();
+        if (mem.Count > 0)
         {
-            ["name"] = name,
-            ["modelPermission"] = string.IsNullOrWhiteSpace(modelPermission) ? "read" : modelPermission,
-        };
+            r.Members.Clear();
+            foreach (var x in mem)
+            {
+                r.Members.Add(new Tom.ExternalModelRoleMember { MemberName = x.Name, IdentityProvider = "AzureAD" });
+            }
+        }
 
-        var mem = members?.Where(m => !string.IsNullOrWhiteSpace(m.Name))
-            .Select(m => new Dictionary<string, object> { ["memberName"] = m.Name }).ToList();
-        if (mem is { Count: > 0 }) role["members"] = mem;
+        foreach (var f in (tableFilters ?? []).Where(f => !string.IsNullOrWhiteSpace(f.Table)))
+        {
+            var tp = r.TablePermissions.Find(f.Table);
+            if (tp is null) { tp = new Tom.TablePermission { Table = Table(f.Table) }; r.TablePermissions.Add(tp); }
+            tp.FilterExpression = f.FilterDax ?? "";
+        }
 
-        var tp = tableFilters?.Where(f => !string.IsNullOrWhiteSpace(f.Table))
-            .Select(f => new Dictionary<string, object> { ["name"] = f.Table, ["filterExpression"] = f.FilterDax ?? "" }).ToList();
-        if (tp is { Count: > 0 }) role["tablePermissions"] = tp;
-
-        return CreateOrReplace(Path(("role", name)), "role", role);
+        return $"{verb} role [{name}] (permission={r.ModelPermission}, members={mem.Count})";
     }
 
-    /// <summary>TMSL to delete a security role.</summary>
-    public string BuildRoleDelete(string name)
-        => Delete(Path(("role", RequireV(name, "name"))));
+    public string DeleteRole(string name)
+    {
+        var r = _model.Roles.Find(name) ?? throw new DaxterException($"Role not found: [{name}].");
+        _model.Roles.Remove(r);
+        return $"delete role [{name}]";
+    }
 
     // ---- calculated columns ----
 
-    /// <summary>TMSL to create-or-replace a calculated column on a table.</summary>
-    public string BuildCalculatedColumnUpsert(string table, string name, string dax, string? dataType = null)
+    public string UpsertCalculatedColumn(string table, string name, string dax, string? dataType = null)
     {
-        Require(table, "table");
-        Require(name, "name");
-        if (string.IsNullOrWhiteSpace(dax))
+        Require(dax, "dax");
+        var t = Table(table);
+        var existing = t.Columns.Find(name);
+        var verb = existing is null ? "create" : "alter";
+        if (existing is not null && existing is not Tom.CalculatedColumn)
         {
-            throw new DaxterException("A DAX expression is required for a calculated column.");
+            throw new DaxterException($"Column [{name}] on [{table}] exists and is not a calculated column.");
         }
 
-        var column = new Dictionary<string, object> { ["name"] = name, ["type"] = "calculated", ["expression"] = dax };
-        Put(column, "dataType", dataType);
-        return CreateOrReplace(Path(("table", table), ("column", name)), "column", column);
+        var c = existing as Tom.CalculatedColumn;
+        if (c is null) { c = new Tom.CalculatedColumn { Name = name }; t.Columns.Add(c); }
+        c.Expression = dax;
+        if (!string.IsNullOrWhiteSpace(dataType)) c.DataType = ParseDataType(dataType);
+        return $"{verb} calculated column [{name}] on table [{table}]  =  {dax}";
     }
 
-    /// <summary>TMSL to delete a column from a table.</summary>
-    public string BuildColumnDelete(string table, string name)
-        => Delete(Path(("table", RequireV(table, "table")), ("column", RequireV(name, "name"))));
+    public string DeleteColumn(string table, string name)
+    {
+        var t = Table(table);
+        var c = t.Columns.Find(name) ?? throw new DaxterException($"Column not found: [{name}] on [{table}].");
+        t.Columns.Remove(c);
+        return $"delete column [{name}] from table [{table}]";
+    }
 
     // ---- partition (M) source ----
 
-    /// <summary>TMSL to set a partition's Power Query (M) source (create-or-replace the partition).</summary>
-    public string BuildPartitionSourceSet(string table, string partition, string mExpression)
+    public string SetPartitionSource(string table, string partition, string mExpression)
     {
-        Require(table, "table");
-        Require(partition, "partition");
-        if (string.IsNullOrWhiteSpace(mExpression))
-        {
-            throw new DaxterException("An M expression is required to set a partition source.");
-        }
-
-        var part = new Dictionary<string, object>
-        {
-            ["name"] = partition,
-            ["source"] = new Dictionary<string, object> { ["type"] = "m", ["expression"] = mExpression },
-        };
-        return CreateOrReplace(Path(("table", table), ("partition", partition)), "partition", part);
+        Require(mExpression, "m");
+        var t = Table(table);
+        var p = t.Partitions.Find(partition) ?? throw new DaxterException($"Partition not found: [{partition}] on [{table}].");
+        p.Source = new Tom.MPartitionSource { Expression = mExpression };
+        return $"set M source on partition [{partition}] of table [{table}]";
     }
 
     // ---- tables ----
 
-    /// <summary>TMSL to create-or-replace a calculated table (a table whose single partition is a DAX expression).</summary>
-    public string BuildCalculatedTableCreate(string name, string dax)
+    public string CreateCalculatedTable(string name, string dax)
     {
         Require(name, "name");
-        if (string.IsNullOrWhiteSpace(dax))
+        Require(dax, "dax");
+        var existing = _model.Tables.Find(name);
+        var verb = existing is null ? "create" : "replace";
+        var t = existing ?? new Tom.Table { Name = name };
+        if (existing is null) _model.Tables.Add(t);
+        t.Partitions.Clear();
+        t.Partitions.Add(new Tom.Partition
         {
-            throw new DaxterException("A DAX expression is required for a calculated table.");
-        }
+            Name = name,
+            Source = new Tom.CalculatedPartitionSource { Expression = dax },
+        });
+        return $"{verb} calculated table [{name}]  =  {dax}";
+    }
 
-        var table = new Dictionary<string, object>
+    public string DeleteTable(string name)
+    {
+        var t = _model.Tables.Find(name) ?? throw new DaxterException($"Table not found: [{name}].");
+        _model.Tables.Remove(t);
+        return $"delete table [{name}]";
+    }
+
+    // ---- raw TMSL escape hatch ----
+
+    public string Raw(string tmsl)
+    {
+        Require(tmsl, "tmsl");
+        _rawTmsl = tmsl;
+        return "raw TMSL:\n" + tmsl;
+    }
+
+    // ---- apply ----
+
+    /// <summary>Applies the staged change — <c>SaveChanges()</c> for typed edits, or <c>Execute</c> for raw TMSL.</summary>
+    public void Apply()
+    {
+        if (_rawTmsl is not null)
         {
-            ["name"] = name,
-            ["partitions"] = new List<object>
+            var results = _server.Execute(_rawTmsl);
+            foreach (Microsoft.AnalysisServices.XmlaResult r in results)
             {
-                new Dictionary<string, object>
+                foreach (Microsoft.AnalysisServices.XmlaMessage msg in r.Messages)
                 {
-                    ["name"] = name,
-                    ["source"] = new Dictionary<string, object> { ["type"] = "calculated", ["expression"] = dax },
-                },
-            },
-        };
-        return CreateOrReplace(Path(("table", name)), "table", table);
-    }
+                    if (msg is Microsoft.AnalysisServices.XmlaError err)
+                    {
+                        throw new DaxterException($"TMSL failed: {err.Description}");
+                    }
+                }
+            }
 
-    /// <summary>TMSL to delete an entire table (and its children).</summary>
-    public string BuildTableDelete(string name)
-        => Delete(Path(("table", RequireV(name, "name"))));
-
-    // ---- execution / validation ----
-
-    /// <summary>Fail fast with a clear message if the target table isn't in the model.</summary>
-    public void EnsureTableExists(string table)
-    {
-        Require(table, "table");
-        var result = _session.Execute("SELECT [Name] FROM $SYSTEM.TMSCHEMA_TABLES");
-        var exists = result.Rows.Any(r =>
-            string.Equals(r.ElementAtOrDefault(0)?.ToString(), table, StringComparison.OrdinalIgnoreCase));
-        if (!exists)
-        {
-            throw new DaxterException($"Table not found in model: '{table}'.");
+            return;
         }
+
+        _model.SaveChanges();
     }
 
-    /// <summary>Executes a TMSL command (the mutation). The caller MUST gate and back up first.</summary>
-    public void Execute(string command) => _session.ExecuteCommand(command);
+    public void Dispose() => _server.Dispose();
 
-    // ---- TMSL helpers ----
+    // ---- helpers ----
 
-    /// <summary>Builds an object path rooted at the current database: <c>{ database, k1:v1, k2:v2, … }</c>.</summary>
-    private Dictionary<string, string> Path(params (string Key, string Value)[] parts)
+    private Tom.Table Table(string name)
     {
-        var path = new Dictionary<string, string> { ["database"] = _database };
-        foreach (var (k, v) in parts) path[k] = v;
-        return path;
+        Require(name, "table");
+        return _model.Tables.Find(name) ?? throw new DaxterException($"Table not found in model: [{name}].");
     }
 
-    private static string CreateOrReplace(Dictionary<string, string> path, string bodyKey, Dictionary<string, object> body)
-        => Serialize(new Dictionary<string, object>
-        {
-            ["createOrReplace"] = new Dictionary<string, object> { ["object"] = path, [bodyKey] = body },
-        });
-
-    private static string Delete(Dictionary<string, string> path)
-        => Serialize(new Dictionary<string, object>
-        {
-            ["delete"] = new Dictionary<string, object> { ["object"] = path },
-        });
-
-    private static string Serialize(object payload) => JsonSerializer.Serialize(payload, Json);
-
-    private static void Put(Dictionary<string, object> target, string key, string? value)
+    private static Tom.ModelPermission ParsePermission(string? value) => value?.Trim().ToLowerInvariant() switch
     {
-        if (!string.IsNullOrWhiteSpace(value)) target[key] = value;
-    }
+        null or "" or "read" => Tom.ModelPermission.Read,
+        "readrefresh" => Tom.ModelPermission.ReadRefresh,
+        "refresh" => Tom.ModelPermission.Refresh,
+        "administrator" or "admin" => Tom.ModelPermission.Administrator,
+        "none" => Tom.ModelPermission.None,
+        _ => throw new DaxterException($"Unknown model permission '{value}'. Use read|readRefresh|refresh|administrator|none."),
+    };
+
+    private static Tom.DataType ParseDataType(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "string" or "text" => Tom.DataType.String,
+        "int64" or "int" or "integer" or "whole" => Tom.DataType.Int64,
+        "double" or "float" => Tom.DataType.Double,
+        "decimal" => Tom.DataType.Decimal,
+        "datetime" or "date" => Tom.DataType.DateTime,
+        "boolean" or "bool" => Tom.DataType.Boolean,
+        _ => throw new DaxterException($"Unknown data type '{value}'. Use string|int64|double|decimal|dateTime|boolean."),
+    };
 
     private static void Require(string value, string field)
     {
@@ -239,9 +277,9 @@ public sealed class ModelEditService
         }
     }
 
-    private static string RequireV(string value, string field)
+    private DaxterException Cleanup(DaxterException ex)
     {
-        Require(value, field);
-        return value;
+        _server.Dispose();
+        return ex;
     }
 }

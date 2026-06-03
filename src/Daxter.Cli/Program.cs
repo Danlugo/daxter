@@ -271,44 +271,44 @@ internal static class Program
             "DRY-RUN unless --yes. IRREVERSIBLE for PBIX download; a .bim backup is written before applying.")
         {
             Edit("measure", "Create or alter a measure.",
-                (pr, svc) => svc.BuildMeasureUpsert(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
+                (pr, svc) => svc.UpsertMeasure(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
                     RequireOption(pr, dax, "--dax"), pr.GetValue(format), pr.GetValue(folder), pr.GetValue(desc)),
                 table, name, dax, format, folder, desc),
             Edit("delete-measure", "Delete a measure.",
-                (pr, svc) => svc.BuildMeasureDelete(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
+                (pr, svc) => svc.DeleteMeasure(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
                 table, name),
             Edit("parameter", "Create or alter a shared M expression / parameter.",
-                (pr, svc) => svc.BuildExpressionUpsert(RequireOption(pr, name, "--name"), RequireOption(pr, m, "--m"), pr.GetValue(desc)),
+                (pr, svc) => svc.UpsertExpression(RequireOption(pr, name, "--name"), RequireOption(pr, m, "--m"), pr.GetValue(desc)),
                 name, m, desc),
             Edit("delete-parameter", "Delete a shared M expression / parameter.",
-                (pr, svc) => svc.BuildExpressionDelete(RequireOption(pr, name, "--name")),
+                (pr, svc) => svc.DeleteExpression(RequireOption(pr, name, "--name")),
                 name),
             Edit("role", "Create or alter an RLS/OLS role.",
-                (pr, svc) => svc.BuildRoleUpsert(RequireOption(pr, name, "--name"), pr.GetValue(perm),
+                (pr, svc) => svc.UpsertRole(RequireOption(pr, name, "--name"), pr.GetValue(perm),
                     (pr.GetValue(membersOpt) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => new RoleMember(x)),
                     string.IsNullOrWhiteSpace(pr.GetValue(filterTable)) ? null : [new TableFilter(pr.GetValue(filterTable)!, pr.GetValue(filterDax) ?? "")]),
                 name, perm, membersOpt, filterTable, filterDax),
             Edit("delete-role", "Delete an RLS/OLS role.",
-                (pr, svc) => svc.BuildRoleDelete(RequireOption(pr, name, "--name")),
+                (pr, svc) => svc.DeleteRole(RequireOption(pr, name, "--name")),
                 name),
             Edit("column", "Create or alter a calculated column.",
-                (pr, svc) => svc.BuildCalculatedColumnUpsert(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
+                (pr, svc) => svc.UpsertCalculatedColumn(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
                     RequireOption(pr, dax, "--dax"), pr.GetValue(dataType)),
                 table, name, dax, dataType),
             Edit("delete-column", "Delete a column.",
-                (pr, svc) => svc.BuildColumnDelete(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
+                (pr, svc) => svc.DeleteColumn(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
                 table, name),
             Edit("source", "Set a partition's M (Power Query) source.",
-                (pr, svc) => svc.BuildPartitionSourceSet(RequireOption(pr, table, "--table"), RequireOption(pr, partition, "--partition"), RequireOption(pr, m, "--m")),
+                (pr, svc) => svc.SetPartitionSource(RequireOption(pr, table, "--table"), RequireOption(pr, partition, "--partition"), RequireOption(pr, m, "--m")),
                 table, partition, m),
             Edit("calc-table", "Create or replace a calculated table.",
-                (pr, svc) => svc.BuildCalculatedTableCreate(RequireOption(pr, name, "--name"), RequireOption(pr, dax, "--dax")),
+                (pr, svc) => svc.CreateCalculatedTable(RequireOption(pr, name, "--name"), RequireOption(pr, dax, "--dax")),
                 name, dax),
             Edit("delete-table", "Delete an entire table.",
-                (pr, svc) => svc.BuildTableDelete(RequireOption(pr, name, "--name")),
+                (pr, svc) => svc.DeleteTable(RequireOption(pr, name, "--name")),
                 name),
             Edit("tmsl", "Execute a raw TMSL command (escape hatch).",
-                (pr, _) => RequireOption(pr, tmslOpt, "--tmsl"),
+                (pr, svc) => svc.Raw(RequireOption(pr, tmslOpt, "--tmsl")),
                 tmslOpt),
         };
     }
@@ -322,23 +322,20 @@ internal static class Program
         {
             var config = configFactory();
             RequireDataset(config);
-            var provider = BuildTokenProvider(config);
-            var factory = BuildSessionFactory(config);
+            var token = await BuildTokenProvider(config).GetTokenAsync(ct);
 
-            using var session = await factory.CreateAsync(ct);
-            var service = new ModelEditService(session, config.Dataset!);
-            var tmsl = build(service);
+            using var service = new ModelEditService(config, token);
+            var change = build(service);   // stages the change in-memory (TOM); not yet saved
 
             Console.Error.WriteLine(
                 "⚠ Editing a Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download. " +
                 "A .bim backup is written before applying.");
 
-            return ApplySafety(config, tmsl, dryRun, yes, force, () =>
+            return ApplySafety(config, change, dryRun, yes, force, () =>
             {
-                var token = provider.GetTokenAsync(ct).GetAwaiter().GetResult();
                 var backup = new ModelBackupService(config, token).Backup();
                 Console.Error.WriteLine($"Backup written: {backup}");
-                service.Execute(tmsl);
+                service.Apply();
             }, successMessage: "Model edit applied.");
         }
         catch (Exception ex)

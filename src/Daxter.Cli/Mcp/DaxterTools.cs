@@ -273,7 +273,7 @@ public static class DaxterTools
     //      download; a .bim backup is written before every apply.) ----
 
     private const string EditNote =
-        " DRY-RUN by default (returns the TMSL). To apply, set execute=true AND enable model edits " +
+        " DRY-RUN by default (previews the change; raw TMSL shows the TMSL). To apply, set execute=true AND enable model edits " +
         "(web console Configure → Allow model edits, or DAXTER_MCP_ALLOW_MODEL_EDIT=true). Editing a " +
         "Power BI Desktop model over XMLA is IRREVERSIBLE for PBIX download; a .bim backup is taken first.";
 
@@ -289,7 +289,7 @@ public static class DaxterTools
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
-            svc => svc.BuildMeasureUpsert(table, name, dax, formatString, displayFolder, description), execute, ct);
+            svc => svc.UpsertMeasure(table, name, dax, formatString, displayFolder, description), execute, ct);
 
     [McpServerTool(Name = "daxter_delete_measure", Destructive = true, Title = "Delete measure"),
      Description("Delete a measure from a table." + EditNote)]
@@ -298,7 +298,7 @@ public static class DaxterTools
         [Description("Measure name.")] string name,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildMeasureDelete(table, name), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteMeasure(table, name), execute, ct);
 
     [McpServerTool(Name = "daxter_set_parameter", Destructive = true, Title = "Set parameter / M expression"),
      Description("Create or alter a shared M expression / parameter (model-level)." + EditNote)]
@@ -309,7 +309,7 @@ public static class DaxterTools
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
-            svc => svc.BuildExpressionUpsert(name, mExpression, description), execute, ct);
+            svc => svc.UpsertExpression(name, mExpression, description), execute, ct);
 
     [McpServerTool(Name = "daxter_delete_parameter", Destructive = true, Title = "Delete parameter / M expression"),
      Description("Delete a shared M expression / parameter." + EditNote)]
@@ -317,7 +317,7 @@ public static class DaxterTools
         [Description("Parameter / expression name.")] string name,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildExpressionDelete(name), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteExpression(name), execute, ct);
 
     [McpServerTool(Name = "daxter_edit_role", Destructive = true, Title = "Create / alter RLS role"),
      Description("Create or alter a security (RLS/OLS) role with members and an optional table filter." + EditNote)]
@@ -329,7 +329,7 @@ public static class DaxterTools
         [Description("DAX filter expression for filterTable, e.g. [Region] = \"US\" (optional).")] string? filterDax = null,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildRoleUpsert(
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.UpsertRole(
             name, modelPermission,
             (members ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(m => new RoleMember(m)),
             string.IsNullOrWhiteSpace(filterTable) ? null : [new TableFilter(filterTable, filterDax ?? "")]), execute, ct);
@@ -340,7 +340,7 @@ public static class DaxterTools
         [Description("Role name.")] string name,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildRoleDelete(name), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteRole(name), execute, ct);
 
     [McpServerTool(Name = "daxter_edit_calculated_column", Destructive = true, Title = "Create / alter calculated column"),
      Description("Create or alter a calculated column (DAX) on a table." + EditNote)]
@@ -352,7 +352,7 @@ public static class DaxterTools
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
-            svc => svc.BuildCalculatedColumnUpsert(table, name, dax, dataType), execute, ct);
+            svc => svc.UpsertCalculatedColumn(table, name, dax, dataType), execute, ct);
 
     [McpServerTool(Name = "daxter_delete_column", Destructive = true, Title = "Delete column"),
      Description("Delete a column from a table." + EditNote)]
@@ -361,7 +361,7 @@ public static class DaxterTools
         [Description("Column name.")] string name,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildColumnDelete(table, name), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteColumn(table, name), execute, ct);
 
     [McpServerTool(Name = "daxter_set_partition_source", Destructive = true, Title = "Set partition (M) source"),
      Description("Set a partition's Power Query (M) source expression." + EditNote)]
@@ -372,7 +372,7 @@ public static class DaxterTools
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
-            svc => svc.BuildPartitionSourceSet(table, partition, mExpression), execute, ct);
+            svc => svc.SetPartitionSource(table, partition, mExpression), execute, ct);
 
     [McpServerTool(Name = "daxter_create_calculated_table", Destructive = true, Title = "Create calculated table"),
      Description("Create or replace a calculated table (a table whose partition is a DAX expression)." + EditNote)]
@@ -381,7 +381,7 @@ public static class DaxterTools
         [Description("DAX table expression, e.g. CALENDARAUTO().")] string dax,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildCalculatedTableCreate(name, dax), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.CreateCalculatedTable(name, dax), execute, ct);
 
     [McpServerTool(Name = "daxter_delete_table", Destructive = true, Title = "Delete table"),
      Description("Delete an entire table (and its children)." + EditNote)]
@@ -389,7 +389,7 @@ public static class DaxterTools
         [Description("Table name.")] string name,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.BuildTableDelete(name), execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteTable(name), execute, ct);
 
     [McpServerTool(Name = "daxter_edit_tmsl", Destructive = true, Title = "Run raw TMSL edit"),
      Description("Execute a raw TMSL command (createOrReplace / alter / delete / …) — the escape hatch for " +
@@ -398,5 +398,5 @@ public static class DaxterTools
         [Description("A TMSL command object, e.g. {\"createOrReplace\":{\"object\":{...},\"measure\":{...}}}.")] string tmsl,
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
-        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, _ => tmsl, execute, ct);
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.Raw(tmsl), execute, ct);
 }

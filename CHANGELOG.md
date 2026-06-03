@@ -4,6 +4,21 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-06-03
+
+### Fixed
+- **Model editing now applies correctly via TOM `SaveChanges()`.** v1.8.0 built surgical TMSL
+  (`createOrReplace` of a `measure`/`column`/`expression`) by hand — which the Power BI engine
+  **rejects** ("Unrecognized JSON property: measure"). `ModelEditService` was rewritten to use the
+  Tabular Object Model: it connects, mutates the in-memory model, and applies with `SaveChanges()`
+  (the engine-sanctioned path). Dry-run now shows a concise **change preview** (raw TMSL still shows
+  the TMSL). The safety model is unchanged: dedicated gate, `.bim` backup before every apply, PROD
+  guard, irreversible-for-PBIX warning.
+- **Verified live** against a real model — create/alter/delete of measures, parameters, RLS roles,
+  calculated columns, calculated tables, and the raw-TMSL hatch all apply and read back; deletes
+  remove cleanly. Notes: RLS **role members must be real Entra identities**, and a **calculated
+  partition can't be converted to an M source** (engine rules, surfaced as clear errors).
+
 ## [1.8.0] - 2026-06-02
 
 ### Added
