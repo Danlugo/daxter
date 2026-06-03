@@ -44,7 +44,7 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 |--------|----------|
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
 | **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
-| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply |
+| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply. Available in **CLI · MCP · web (Model Edit page)** — one shared engine |
 | **Ops** | `refresh model/table/partitions` (queued through the shared worker) · `refresh status` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
@@ -74,7 +74,8 @@ time** (different models in parallel), honours partition order + `--retries`, an
 ## Web console
 
 `daxter web` serves a local Blazor console — the simplest way to **sign in**, set defaults, browse
-models, run DAX (with autocomplete + formatting), audit deployment rules, and read logs:
+models, run DAX (with autocomplete + formatting), **edit the model** (parameters/roles/relationships/
+tables, on the gated **Model Edit** page), audit deployment rules, and read logs:
 
 ```bash
 docker run -d -p 8080:8080 --name daxter-web \

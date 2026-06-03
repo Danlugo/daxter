@@ -4,6 +4,7 @@
 @inject ExploreActions Actions
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject UiBusy BusyState
 
 <PageTitle>DAXter — Explore</PageTitle>
 
@@ -437,24 +438,24 @@ else
 
     private async Task LoadWorkspaces()
     {
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task OnWorkspaceChanged()
     {
         datasets = new(); dataset = ""; selTable = null; selMeasure = null;
         if (string.IsNullOrEmpty(workspace)) return;
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try
         {
             datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
             Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ExploreContext); // valid workspace (it resolved)
         }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     // ---- commands ----
@@ -466,10 +467,10 @@ else
     private async Task BrowseTables()
     {
         PushBack();
-        modelView = ModelView.Tables; rlsPanel = false; result = null; error = null; busy = true; StateHasChanged();
+        modelView = ModelView.Tables; rlsPanel = false; result = null; error = null; busy = true; BusyState.Begin(); StateHasChanged();
         try { modelTables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task BrowseMeasures()
@@ -477,14 +478,14 @@ else
         PushBack();
         modelView = ModelView.Measures; rlsPanel = false; result = null; error = null;
         measureSearch = ""; expandedMeasures.Clear();
-        busy = true; StateHasChanged();
+        busy = true; BusyState.Begin(); StateHasChanged();
         try
         {
             measuresResult = await Ui.MeasuresWithTableAsync(workspace, dataset); // Name + DisplayFolder + Expression + Table
             modelMeasures = ColumnValues(measuresResult, "Name");
         }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private void SelectMeasure(string measure)
@@ -610,10 +611,10 @@ else
     private async Task Show(Func<Task<QueryResult>> op)
     {
         modelView = ModelView.None; rlsPanel = false;
-        busy = true; error = null; result = null; StateHasChanged();
+        busy = true; BusyState.Begin(); error = null; result = null; StateHasChanged();
         try { result = await op(); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     // ---- Back navigation ----
@@ -630,6 +631,7 @@ else
         wsView = s.WsView; modelView = s.ModelView; tableView = s.TableView;
         datasets = s.Datasets; modelTables = s.ModelTables; modelMeasures = s.ModelMeasures;
         measuresResult = s.MeasuresResult; result = s.Result; error = s.Error;
+        if (busy) BusyState.End();   // only release the overlay if a load was actually in flight
         busy = false; rlsPanel = false;
     }
 

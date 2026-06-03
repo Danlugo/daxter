@@ -3,6 +3,7 @@
 @inject JobService Jobs
 @inject UsageStore Usage
 @inject IJSRuntime JS
+@inject UiBusy BusyState
 @implements IDisposable
 
 <PageTitle>DAXter — Refresh</PageTitle>
@@ -301,24 +302,24 @@ else
 
     private async Task LoadWorkspaces()
     {
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task OnWorkspaceChanged()
     {
         datasets = new(); dataset = ""; ResetSelection();
         if (string.IsNullOrEmpty(workspace)) return;
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try
         {
             datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
             Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.RefreshContext);
         }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task OnDatasetChanged()
@@ -331,10 +332,10 @@ else
 
         // Tables are only needed for launching a refresh (writes on, non-prod).
         if (!Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task LoadHistory()
@@ -358,7 +359,7 @@ else
         if (!string.IsNullOrEmpty(selTable))
             Usage.Record(UsageStore.Table, selTable, $"{workspace}{Sep}{dataset}", UsageStore.RefreshContext);
         if (scope != Scope.Partitions || string.IsNullOrEmpty(selTable)) return;
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try
         {
             partitions = ColumnValues(await Ui.TablePartitionsAsync(workspace, dataset, selTable), "Name");
@@ -366,7 +367,7 @@ else
             if (partitions.Count == 1) { partMode = PartMode.Pick; selectedPartitions = new(partitions); }
         }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task SetScope(Scope s)

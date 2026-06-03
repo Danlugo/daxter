@@ -223,6 +223,19 @@ label.inline input, label.inline select { min-width:auto; }
 .code { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.8rem; overflow:auto; white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem; }
 .row { display:flex; gap:1.5rem; flex-wrap:wrap; margin:1rem 0; }
 .row label, .form label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:.2rem; }
+/* Model-edit form: wider, with a tall code-style M-expression box. */
+.me-form { max-width:880px; }
+.me-form textarea { width:100%; min-height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.84rem; }
+/* Clickable rows (pick a parameter/role/etc. to load it into the editor). */
+.grid tr.row-pick { cursor:pointer; }
+.grid tr.row-pick:hover td { background:var(--surface-2); }
+.grid tr.row-pick.active td { background:var(--accent-soft); }
+/* Full-page busy overlay — blocks clicks while an async load/apply runs. */
+.busy-overlay { position:fixed; inset:0; z-index:2000; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.45); cursor:wait; }
+.busy-overlay .spinner { width:46px; height:46px; border:4px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:daxter-spin .7s linear infinite; }
+@keyframes daxter-spin { to { transform:rotate(360deg); } }
+/* Apply confirmation card — accent border to draw the eye before a write. */
+.card.confirm-apply { border:2px solid var(--accent); }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

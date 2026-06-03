@@ -5,6 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddSingleton<ConfigState>();
+builder.Services.AddScoped<UiBusy>();
 builder.Services.AddScoped<DaxterUi>();
 builder.Services.AddScoped<ExploreActions>();
 

@@ -1,0 +1,901 @@
+@page "/model-edit"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+
+<PageTitle>DAXter — Model Edit</PageTitle>
+
+<h1>Model Edit</h1>
+<p class="muted">
+    Add, change, or remove model objects — parameters, roles, relationships, tables — over XMLA, using
+    the <strong>same engine as the CLI and MCP</strong>. <em>Preview</em> is a dry-run; <em>Apply</em>
+    writes (a <code>.bim</code> backup is saved first).
+</p>
+
+@if (!Ui.ModelEditEnabled)
+{
+    <div class="worker-status worker-none">
+        <span class="dot">●</span>
+        <span>Model editing is <strong>off</strong> — enable it in
+            <a href="configure">⚙ Configure → Allow model edits</a> to Apply. You can still
+            <em>Preview</em> (dry-run) below.</span>
+    </div>
+}
+
+<div class="cmd-group">
+    <label>Workspace
+        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
+            <option value="">— pick a workspace —</option>
+            @foreach (var w in workspaces) { <option value="@w">@w</option> }
+        </select>
+    </label>
+    <label>Dataset
+        <select @bind="dataset" @bind:after="OnDatasetChanged" disabled="@(string.IsNullOrEmpty(workspace))">
+            <option value="">— pick a model —</option>
+            @foreach (var d in datasets) { <option value="@d">@d</option> }
+        </select>
+    </label>
+</div>
+
+@if (!string.IsNullOrEmpty(dataset))
+{
+    <div class="tabs">
+        @foreach (var t in tabs)
+        {
+            <span class="tab @(tab == t ? "active" : "")" @onclick="() => SwitchTab(t)">@t</span>
+        }
+    </div>
+
+    @if (tab == "Parameters")
+    {
+        <div class="card">
+            <h3>Parameters / shared M expressions</h3>
+            @if (parameters.Count == 0)
+            {
+                <p class="muted">None in this model. Add one with the form below.</p>
+            }
+            else
+            {
+                <p class="muted">Click a parameter to load it into the form and see its definition. Use <em>New</em> to add one.</p>
+                <table class="grid"><tbody>
+                    @foreach (var p in parameters)
+                    {
+                        <tr class="row-pick @(selected == p.Name ? "active" : "")" @onclick="() => SelectParam(p)">
+                            <td>@p.Name</td>
+                            <td class="nowrap" @onclick:stopPropagation="true">
+                                <button class="btn-sm" @onclick="() => AskDelete(p.Name)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody></table>
+            }
+        </div>
+
+        <div class="card" id="me-editor">
+            <h3>@(editingExisting ? $"Edit parameter '{formName}'" : "New parameter / expression")</h3>
+            <div class="form me-form">
+                <label>Name
+                    <input @bind="formName" disabled="@editingExisting" placeholder="ServerName" />
+                </label>
+                <label>M expression
+                    <textarea @bind="formM" rows="12"
+                              placeholder='e.g.  "sql.contoso.com" meta [IsParameterQuery=true, Type="Text"]'></textarea>
+                </label>
+                <div class="cmd-group">
+                    <button class="btn-sm" @onclick="() => SaveParam(false)" disabled="@busy">Preview</button>
+                    <button class="btn" @onclick="() => SaveParam(true)"
+                            disabled="@(busy || !Ui.ModelEditEnabled)"
+                            title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                    <button class="btn-sm" @onclick="ClearForm" disabled="@busy" title="Start a new parameter">New</button>
+                </div>
+                @if (!Ui.ModelEditEnabled)
+                {
+                    <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save. (Preview works without it.)</p>
+                }
+            </div>
+            <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
+        </div>
+
+        @if (pendingDelete is not null)
+        {
+            <div class="card">
+                Delete parameter '<strong>@pendingDelete</strong>'?
+                <button class="btn-sm" @onclick="ConfirmDelete" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
+                <button class="btn-sm" @onclick="() => pendingDelete = null">cancel</button>
+            </div>
+        }
+    }
+    else if (tab == "Roles")
+    {
+        <div class="card">
+            <h3>RLS roles</h3>
+            @if (roles.Count == 0)
+            {
+                <p class="muted">No roles. Add one with the form below.</p>
+            }
+            else
+            {
+                <p class="muted">Click a role to load it (members + filters). Use <em>New</em> to add one.</p>
+                <table class="grid"><tbody>
+                    @foreach (var r in roles)
+                    {
+                        <tr class="row-pick @(selectedRole == r.Name ? "active" : "")" @onclick="() => SelectRole(r)">
+                            <td>@r.Name</td>
+                            <td class="muted">@r.Permission</td>
+                            <td class="nowrap" @onclick:stopPropagation="true">
+                                <button class="btn-sm" @onclick="() => AskDeleteRole(r.Name)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody></table>
+            }
+        </div>
+        <div class="card" id="me-editor">
+            <h3>@(roleEditing ? $"Edit role '{roleName}'" : "New role")</h3>
+            <div class="form me-form">
+                <label>Name <input @bind="roleName" disabled="@roleEditing" placeholder="Regional Manager" /></label>
+                <label>Permission
+                    <select @bind="rolePermission">
+                        <option value="read">read</option>
+                        <option value="none">none</option>
+                        <option value="readRefresh">readRefresh</option>
+                        <option value="refresh">refresh</option>
+                        <option value="administrator">administrator</option>
+                    </select>
+                </label>
+                <label>Members (one UPN/group per line; optional)
+                    <textarea @bind="roleMembers" rows="3" placeholder="jdoe@contoso.com"></textarea>
+                </label>
+                <label>Table filters (one per line: <code>Table =&gt; DAX</code>)
+                    <textarea @bind="roleFilters" rows="4" placeholder='Geography => [Country] = "US"'></textarea>
+                </label>
+                <div class="cmd-group">
+                    <button class="btn-sm" @onclick="() => SaveRole(false)" disabled="@busy">Preview</button>
+                    <button class="btn" @onclick="() => SaveRole(true)" disabled="@(busy || !Ui.ModelEditEnabled)"
+                            title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                    <button class="btn-sm" @onclick="ClearRole" disabled="@busy">New</button>
+                </div>
+                @if (!Ui.ModelEditEnabled)
+                {
+                    <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save.</p>
+                }
+            </div>
+            <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
+        </div>
+        @if (pendingDeleteRole is not null)
+        {
+            <div class="card">Delete role '<strong>@pendingDeleteRole</strong>'?
+                <button class="btn-sm" @onclick="ConfirmDeleteRole" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
+                <button class="btn-sm" @onclick="() => pendingDeleteRole = null">cancel</button>
+            </div>
+        }
+    }
+    else if (tab == "Relationships")
+    {
+        <div class="card">
+            <h3>Relationships</h3>
+            @if (rels.Count == 0)
+            {
+                <p class="muted">No relationships. Add one with the form below.</p>
+            }
+            else
+            {
+                <p class="muted">Click a relationship to load it. Use <em>New</em> to add one.</p>
+                <table class="grid">
+                    <thead><tr><th>Name</th><th>From</th><th>To</th><th>Active</th><th>Cross-filter</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var r in rels)
+                        {
+                            <tr class="row-pick @(selectedRel == r.Name ? "active" : "")" @onclick="() => SelectRel(r)">
+                                <td>@r.Name</td>
+                                <td class="muted">@r.From</td>
+                                <td class="muted">@r.To</td>
+                                <td>@r.Active</td>
+                                <td class="muted">@r.Cross</td>
+                                <td class="nowrap" @onclick:stopPropagation="true">
+                                    <button class="btn-sm" @onclick="() => AskDeleteRel(r.Name)">Delete</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+        <div class="card" id="me-editor">
+            <h3>@(relEditing ? $"Edit relationship '{relName}'" : "New relationship")</h3>
+            <div class="form me-form">
+                <label>From table
+                    <select @bind="relFromTable" @bind:after="OnRelFromTableChanged">
+                        <option value="">— pick a table —</option>
+                        @foreach (var t in relTables) { <option value="@t">@t</option> }
+                    </select>
+                </label>
+                <label>From column
+                    <select @bind="relFromCol" disabled="@(string.IsNullOrEmpty(relFromTable))">
+                        <option value="">— pick a column —</option>
+                        @foreach (var c in relFromCols) { <option value="@c">@c</option> }
+                    </select>
+                </label>
+                <label>To table
+                    <select @bind="relToTable" @bind:after="OnRelToTableChanged">
+                        <option value="">— pick a table —</option>
+                        @foreach (var t in relTables) { <option value="@t">@t</option> }
+                    </select>
+                </label>
+                <label>To column
+                    <select @bind="relToCol" disabled="@(string.IsNullOrEmpty(relToTable))">
+                        <option value="">— pick a column —</option>
+                        @foreach (var c in relToCols) { <option value="@c">@c</option> }
+                    </select>
+                </label>
+                <label>Name (optional) <input @bind="relName" placeholder="auto-derived if blank" /></label>
+                <label>Cross-filter
+                    <select @bind="relCross">
+                        <option value="single">single</option>
+                        <option value="both">both</option>
+                        <option value="automatic">automatic</option>
+                    </select>
+                </label>
+                <label class="checkbox"><input type="checkbox" @bind="relActive" /> Active</label>
+                <div class="cmd-group">
+                    <button class="btn-sm" @onclick="() => SaveRel(false)" disabled="@busy">Preview</button>
+                    <button class="btn" @onclick="() => SaveRel(true)" disabled="@(busy || !Ui.ModelEditEnabled)"
+                            title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                    <button class="btn-sm" @onclick="ClearRel" disabled="@busy">New</button>
+                </div>
+                @if (!Ui.ModelEditEnabled)
+                {
+                    <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save.</p>
+                }
+            </div>
+            <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
+        </div>
+        @if (pendingDeleteRel is not null)
+        {
+            <div class="card">Delete relationship '<strong>@pendingDeleteRel</strong>'?
+                <button class="btn-sm" @onclick="ConfirmDeleteRel" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
+                <button class="btn-sm" @onclick="() => pendingDeleteRel = null">cancel</button>
+            </div>
+        }
+    }
+    else if (tab == "Tables")
+    {
+        <div class="card">
+            <h3>Tables</h3>
+            @if (tables.Count == 0)
+            {
+                <p class="muted">No tables loaded.</p>
+            }
+            else
+            {
+                <p class="muted">Click a table to load its definition into the form. Use <em>Clear</em> to add a new one.</p>
+                <table class="grid"><tbody>
+                    @foreach (var tname in tables)
+                    {
+                        <tr class="row-pick @(selectedTable == tname ? "active" : "")" @onclick="() => SelectTable(tname)">
+                            <td>@tname</td>
+                            <td class="nowrap" @onclick:stopPropagation="true">
+                                <button class="btn-sm" @onclick="() => AskDeleteTable(tname)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody></table>
+            }
+        </div>
+        <div class="card" id="me-editor">
+            @if (tablePolicy)
+            {
+                <h3>Edit incremental refresh policy — '@tableName'</h3>
+                <p class="muted">This table is managed by an <strong>incremental refresh policy</strong>. Update its source M
+                    and window settings here — the policy and its partitions are preserved. (Creating/removing a policy is done in Tabular Editor.)</p>
+                <div class="form me-form">
+                    <label>Source (M template — references <code>RangeStart</code>/<code>RangeEnd</code>)
+                        <textarea @bind="tableM" rows="12"></textarea>
+                    </label>
+                    <label>Rolling window — periods <input type="number" min="1" @bind="policyRollPeriods" /></label>
+                    <label>Rolling window — granularity
+                        <select @bind="policyRollGran">
+                            <option value="Day">Day</option><option value="Month">Month</option>
+                            <option value="Quarter">Quarter</option><option value="Year">Year</option>
+                        </select>
+                    </label>
+                    <label>Incremental — periods <input type="number" min="1" @bind="policyIncrPeriods" /></label>
+                    <label>Incremental — granularity
+                        <select @bind="policyIncrGran">
+                            <option value="Day">Day</option><option value="Month">Month</option>
+                            <option value="Quarter">Quarter</option><option value="Year">Year</option>
+                        </select>
+                    </label>
+                    <label>Incremental — periods offset <input type="number" @bind="policyIncrOffset" /></label>
+                    <label>Polling expression (optional — detect data changes) <textarea @bind="policyPolling" rows="2"></textarea></label>
+                    <div class="cmd-group">
+                        <button class="btn-sm" @onclick="() => SavePolicy(false)" disabled="@busy">Preview</button>
+                        <button class="btn" @onclick="() => SavePolicy(true)" disabled="@(busy || !Ui.ModelEditEnabled)"
+                                title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                        <button class="btn-sm" @onclick="ClearTable" disabled="@busy">New table</button>
+                    </div>
+                    @if (!Ui.ModelEditEnabled)
+                    {
+                        <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save.</p>
+                    }
+                </div>
+                <p class="muted">⚠ Apply updates the refresh policy over XMLA — a <code>.bim</code> backup is saved first.</p>
+            }
+            else
+            {
+                <h3>@(tableEditing ? $"Edit table '{tableName}'" : "New / replace table")</h3>
+                <div class="form me-form">
+                    <label>Name <input @bind="tableName" placeholder="DimDate" /></label>
+                    <label>Kind
+                        <select @bind="tableKind">
+                            <option value="calculated">calculated (DAX)</option>
+                            <option value="import">import (M + columns)</option>
+                        </select>
+                    </label>
+                    @if (tableKind == "calculated")
+                    {
+                        <label>DAX <textarea @bind="tableDax" rows="6" placeholder="CALENDARAUTO()"></textarea></label>
+                    }
+                    else
+                    {
+                        <label>M (Power Query) <textarea @bind="tableM" rows="8" placeholder='let Source = ... in Source'></textarea></label>
+                        <label>Columns (one per line: <code>Name:dataType:sourceColumn</code>)
+                            <textarea @bind="tableColumns" rows="4" placeholder="RegionKey:int64:RegionKey&#10;Region:string:Region"></textarea>
+                        </label>
+                    }
+                    <div class="cmd-group">
+                        <button class="btn-sm" @onclick="() => SaveTable(false)" disabled="@busy">Preview</button>
+                        <button class="btn" @onclick="() => SaveTable(true)" disabled="@(busy || !Ui.ModelEditEnabled)"
+                                title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                        <button class="btn-sm" @onclick="ClearTable" disabled="@busy">Clear</button>
+                    </div>
+                    @if (!Ui.ModelEditEnabled)
+                    {
+                        <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save.</p>
+                    }
+                </div>
+                <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.
+                   “Create” replaces a same-named table.</p>
+            }
+        </div>
+        @if (pendingDeleteTable is not null)
+        {
+            <div class="card">Delete table '<strong>@pendingDeleteTable</strong>'?
+                <button class="btn-sm" @onclick="ConfirmDeleteTable" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
+                <button class="btn-sm" @onclick="() => pendingDeleteTable = null">cancel</button>
+            </div>
+        }
+    }
+}
+
+@if (pendingApplyOp is not null)
+{
+    <div class="card confirm-apply" id="me-confirm">
+        <h3>Confirm apply</h3>
+        <p class="muted">This writes over XMLA — a <code>.bim</code> backup is saved first. Review the change, then confirm or cancel:</p>
+        <pre class="code">@pendingApplyText</pre>
+        <div class="cmd-group">
+            <button class="btn" @onclick="DoApply" disabled="@busy">✓ Confirm apply</button>
+            <button class="btn-sm" @onclick="CancelApply" disabled="@busy">Cancel</button>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(result))
+{
+    <pre class="code @(resultOk ? "" : "bad-text")">@result</pre>
+}
+
+@code {
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+
+    private readonly string[] tabs = { "Parameters", "Roles", "Relationships", "Tables" };
+    private string tab = "Parameters";
+
+    private List<string> workspaces = new();
+    private List<string> datasets = new();
+    private string workspace = "";
+    private string dataset = "";
+
+    private sealed record Param(string Name, string M);
+    private List<Param> parameters = new();
+
+    private string formName = "";
+    private string formM = "";
+    private bool editingExisting;
+    private string? pendingDelete;
+
+    private string? result;
+    private bool resultOk;
+    private bool busy;
+    private bool applied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        workspaces = Names(await Ui.WorkspacesAsync());
+
+        // Deep-link recall (?ws=&ds= from a Frequent shortcut) — apply once, after the index is ready.
+        if (!string.IsNullOrEmpty(Qws) && !applied)
+        {
+            applied = true;
+            workspace = Qws!;
+            datasets = Names(await Ui.DatasetsAsync(workspace));
+            if (!string.IsNullOrEmpty(Qds))
+            {
+                dataset = Qds!;
+                await LoadObjects();
+            }
+        }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        dataset = "";
+        datasets = new();
+        parameters = new();
+        result = null;
+        ClearForm();
+        if (!string.IsNullOrEmpty(workspace))
+        {
+            datasets = Names(await Ui.DatasetsAsync(workspace));
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ModelEditContext);
+        }
+    }
+
+    private async Task OnDatasetChanged()
+    {
+        result = null;
+        ClearForm();
+        if (string.IsNullOrEmpty(dataset)) return;
+
+        Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ModelEditContext);
+        Nav.NavigateTo(
+            $"model-edit?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}",
+            forceLoad: false, replace: true);
+        await LoadObjects();
+    }
+
+    private async Task SwitchTab(string t)
+    {
+        tab = t;
+        result = null;
+        pendingDelete = pendingDeleteRole = pendingDeleteRel = pendingDeleteTable = null;
+        pendingApplyOp = null; pendingApplyText = null;   // don't carry a confirm card to another tab
+        await LoadForTab();
+    }
+
+    private async Task LoadObjects() => await LoadForTab();
+
+    private async Task LoadForTab()
+    {
+        if (string.IsNullOrEmpty(dataset)) return;
+        switch (tab)
+        {
+            case "Parameters": await LoadParameters(); break;
+            case "Roles": await LoadRoles(); break;
+            case "Relationships": await LoadRelationships(); break;
+            case "Tables": await LoadTables(); break;
+        }
+    }
+
+    private async Task LoadParameters()
+    {
+        var r = await Ui.ParametersAsync(workspace, dataset);   // columns: Name, Kind, Expression
+        var list = new List<Param>();
+        foreach (var row in r.Rows)
+        {
+            var name = row.Length > 0 ? row[0]?.ToString() ?? "" : "";
+            var m = row.Length > 2 ? row[2]?.ToString() ?? "" : "";
+            if (!string.IsNullOrEmpty(name)) list.Add(new Param(name, m));
+        }
+        parameters = list;
+    }
+
+    private bool scrollToForm;
+    private string? selected;
+
+    /// <summary>Clicking a row selects it: loads it into the form (edit mode), scrolls/focuses the
+    /// editor, and shows its current definition — no separate Preview/Edit clicks. Shared by every tab.</summary>
+    private void SelectParam(Param p)
+    {
+        selected = p.Name;
+        formName = p.Name;
+        formM = p.M;
+        editingExisting = true;
+        scrollToForm = true;
+        Show($"Parameter [{p.Name}] — current definition:\n\n{p.M}", true);
+    }
+
+    // Any tab's row-click sets scrollToForm; after render we scroll the #me-editor card into view + focus it.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (scrollToForm)
+        {
+            scrollToForm = false;
+            try { await JS.InvokeVoidAsync("daxterFocusForm", "me-editor"); } catch { /* JS not ready */ }
+        }
+        if (scrollToConfirm)
+        {
+            scrollToConfirm = false;
+            try { await JS.InvokeVoidAsync("daxterFocusForm", "me-confirm"); } catch { /* JS not ready */ }
+        }
+    }
+    private void ClearForm() { formName = ""; formM = ""; editingExisting = false; selected = null; }
+    private void AskDelete(string name) { pendingDelete = name; result = null; }
+
+    private async Task SaveParam(bool apply)
+    {
+        if (string.IsNullOrWhiteSpace(formName)) { Show("Name is required.", false); return; }
+        if (string.IsNullOrWhiteSpace(formM)) { Show("M expression is required.", false); return; }
+        var name = formName.Trim();
+        var m = formM;
+        Func<ModelEditService, string> op = svc => svc.UpsertExpression(name, m);
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    private async Task ConfirmDelete()
+    {
+        var name = pendingDelete!;
+        pendingDelete = null;
+        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteExpression(name), true), true);
+    }
+
+    private async Task Run(Func<Task<string>> op, bool apply)
+    {
+        busy = true;
+        result = null;
+        try
+        {
+            await BusyState.Run(async () =>
+            {
+                var msg = await op();
+                Show(msg, true);
+                if (apply) { await LoadForTab(); ClearActiveForm(); }
+            });
+        }
+        catch (Exception ex) { Show(ex.Message, false); }
+        finally { busy = false; }
+    }
+
+    private void Show(string msg, bool ok) { result = msg; resultOk = ok; }
+
+    /// <summary>Runs an async load behind the global busy overlay (MainLayout) so rapid row-clicks
+    /// can't queue overlapping XMLA reads. Surfaces any error to the result panel.</summary>
+    private Task Busy(Func<Task> work) => BusyState.Run(async () =>
+    {
+        try { await work(); }
+        catch (Exception ex) { Show(ex.Message, false); }
+    });
+
+    // ---- Apply confirmation: dry-run the change first, show it, and let the user Confirm or Cancel ----
+    private Func<ModelEditService, string>? pendingApplyOp;
+    private string? pendingApplyText;
+
+    private bool scrollToConfirm;
+
+    private Task ConfirmApply(Func<ModelEditService, string> op) => Busy(async () =>
+    {
+        pendingApplyText = await Ui.ModelEditAsync(workspace, dataset, op, apply: false);   // dry-run preview
+        pendingApplyOp = op;
+        scrollToConfirm = true;
+    });
+
+    private async Task DoApply()
+    {
+        var op = pendingApplyOp!;
+        pendingApplyOp = null;
+        pendingApplyText = null;
+        await Run(() => Ui.ModelEditAsync(workspace, dataset, op, apply: true), apply: true);
+    }
+
+    private void CancelApply() { pendingApplyOp = null; pendingApplyText = null; }
+
+    private void ClearActiveForm()
+    {
+        switch (tab)
+        {
+            case "Parameters": ClearForm(); break;
+            case "Roles": ClearRole(); break;
+            case "Relationships": ClearRel(); break;
+            case "Tables": ClearTable(); break;
+        }
+    }
+
+    // ---- Roles ----
+    private sealed record RoleRow(string Name, string Permission);
+    private List<RoleRow> roles = new();
+    private string roleName = "", rolePermission = "read", roleMembers = "", roleFilters = "";
+    private bool roleEditing;
+    private string? selectedRole;
+    private string? pendingDeleteRole;
+
+    private async Task LoadRoles()
+    {
+        var r = await Ui.RlsAsync(workspace, dataset);   // Name, ModelPermission
+        var list = new List<RoleRow>();
+        foreach (var row in r.Rows)
+        {
+            var name = row.Length > 0 ? row[0]?.ToString() ?? "" : "";
+            var perm = row.Length > 1 ? row[1]?.ToString() ?? "" : "";
+            if (!string.IsNullOrEmpty(name)) list.Add(new RoleRow(name, PermName(perm)));
+        }
+        roles = list;
+    }
+
+    private Task SelectRole(RoleRow r) => Busy(async () =>
+    {
+        selectedRole = r.Name;
+        roleName = r.Name;
+        rolePermission = r.Permission;
+        roleEditing = true;
+        scrollToForm = true;
+        var m = await Ui.RoleMembersAsync(workspace, dataset, r.Name);
+        roleMembers = string.Join("\n", m.Rows
+            .Select(row => row.Length > 0 ? row[0]?.ToString() ?? "" : "")
+            .Where(s => !string.IsNullOrEmpty(s)));
+        var f = await Ui.RoleFiltersAsync(workspace, dataset, r.Name);   // Table, FilterExpression
+        roleFilters = string.Join("\n", f.Rows
+            .Where(row => row.Length > 0 && !string.IsNullOrEmpty(row[0]?.ToString()))
+            .Select(row => $"{row[0]} => {(row.Length > 1 ? row[1] : "")}"));
+        Show($"Role [{r.Name}] loaded (permission {r.Permission}).", true);
+    });
+
+    private async Task SaveRole(bool apply)
+    {
+        if (string.IsNullOrWhiteSpace(roleName)) { Show("Role name is required.", false); return; }
+        var name = roleName.Trim();
+        var perm = rolePermission;
+        var members = roleMembers
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => new RoleMember(x)).ToList();
+        var filters = new List<TableFilter>();
+        foreach (var line in roleFilters.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var idx = line.IndexOf("=>", StringComparison.Ordinal);
+            if (idx < 0) { Show($"Bad filter line '{line}'. Use  Table => DAX.", false); return; }
+            var t = line[..idx].Trim();
+            var dax = line[(idx + 2)..].Trim();
+            if (!string.IsNullOrEmpty(t)) filters.Add(new TableFilter(t, dax));
+        }
+        Func<ModelEditService, string> op = svc => svc.UpsertRole(name, perm, members, filters);
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    private void AskDeleteRole(string n) { pendingDeleteRole = n; result = null; }
+    private async Task ConfirmDeleteRole()
+    {
+        var n = pendingDeleteRole!;
+        pendingDeleteRole = null;
+        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteRole(n), true), true);
+    }
+    private void ClearRole() { roleName = ""; rolePermission = "read"; roleMembers = ""; roleFilters = ""; roleEditing = false; selectedRole = null; }
+
+    private static string PermName(string raw)
+    {
+        var v = (raw ?? "").Trim().ToLowerInvariant();
+        return v switch
+        {
+            "1" or "none" => "none",
+            "2" or "read" => "read",
+            "3" or "readrefresh" => "readRefresh",
+            "4" or "refresh" => "refresh",
+            "5" or "administrator" or "admin" => "administrator",
+            "" => "read",
+            _ => v,
+        };
+    }
+
+    // ---- Relationships ----
+    private sealed record RelRow(string Name, string From, string To, string Active, string Cross);
+    private List<RelRow> rels = new();
+    private string relFromTable = "", relFromCol = "", relToTable = "", relToCol = "", relName = "", relCross = "single";
+    private bool relActive = true;
+    private bool relEditing;
+    private string? selectedRel;
+    private string? pendingDeleteRel;
+    private List<string> relTables = new();   // all tables, for the From/To table dropdowns
+    private List<string> relFromCols = new();
+    private List<string> relToCols = new();
+
+    private async Task LoadRelationships()
+    {
+        relTables = Names(await Ui.TablesAsync(workspace, dataset));   // populate the table dropdowns
+        var r = await Ui.RelationshipsAsync(workspace, dataset);   // Name, From, To, Active, CrossFilter
+        var list = new List<RelRow>();
+        foreach (var row in r.Rows)
+        {
+            string c(int i) => i < row.Length ? row[i]?.ToString() ?? "" : "";
+            var name = c(0);
+            if (!string.IsNullOrEmpty(name)) list.Add(new RelRow(name, c(1), c(2), c(3), c(4)));
+        }
+        rels = list;
+    }
+
+    private async Task OnRelFromTableChanged()
+    {
+        relFromCol = "";
+        relFromCols = string.IsNullOrEmpty(relFromTable) ? new() : Names(await Ui.ColumnsAsync(workspace, dataset, relFromTable));
+    }
+
+    private async Task OnRelToTableChanged()
+    {
+        relToCol = "";
+        relToCols = string.IsNullOrEmpty(relToTable) ? new() : Names(await Ui.ColumnsAsync(workspace, dataset, relToTable));
+    }
+
+    private Task SelectRel(RelRow r) => Busy(async () =>
+    {
+        selectedRel = r.Name;
+        relName = r.Name;
+        relEditing = true;
+        scrollToForm = true;
+        (relFromTable, relFromCol) = ParseRef(r.From);
+        (relToTable, relToCol) = ParseRef(r.To);
+        relCross = string.IsNullOrEmpty(r.Cross) ? "single" : r.Cross;
+        relActive = string.Equals(r.Active, "Yes", StringComparison.OrdinalIgnoreCase);
+        // load the column dropdowns for the from/to tables, keeping the loaded column selections
+        relFromCols = string.IsNullOrEmpty(relFromTable) ? new() : Names(await Ui.ColumnsAsync(workspace, dataset, relFromTable));
+        relToCols = string.IsNullOrEmpty(relToTable) ? new() : Names(await Ui.ColumnsAsync(workspace, dataset, relToTable));
+        Show($"Relationship [{r.Name}] loaded.", true);
+    });
+
+    private async Task SaveRel(bool apply)
+    {
+        if (string.IsNullOrWhiteSpace(relFromTable) || string.IsNullOrWhiteSpace(relFromCol)
+            || string.IsNullOrWhiteSpace(relToTable) || string.IsNullOrWhiteSpace(relToCol))
+        {
+            Show("From and To table + column are required.", false);
+            return;
+        }
+        var ft = relFromTable.Trim(); var fc = relFromCol.Trim();
+        var tt = relToTable.Trim(); var tc = relToCol.Trim();
+        var nm = string.IsNullOrWhiteSpace(relName) ? null : relName.Trim();
+        var cross = relCross; var active = relActive;
+        Func<ModelEditService, string> op = svc => svc.UpsertRelationship(ft, fc, tt, tc, nm, cross, active);
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    private void AskDeleteRel(string n) { pendingDeleteRel = n; result = null; }
+    private async Task ConfirmDeleteRel()
+    {
+        var n = pendingDeleteRel!;
+        pendingDeleteRel = null;
+        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteRelationship(n), true), true);
+    }
+    private void ClearRel()
+    {
+        relFromTable = relFromCol = relToTable = relToCol = relName = "";
+        relCross = "single"; relActive = true; relEditing = false; selectedRel = null;
+        relFromCols = new(); relToCols = new();
+    }
+
+    private static (string, string) ParseRef(string s)   // "Table[Column]" → (table, column)
+    {
+        var i = s.IndexOf('[');
+        if (i < 0) return (s, "");
+        return (s[..i], s[(i + 1)..].TrimEnd(']'));
+    }
+
+    // ---- Tables ----
+    private List<string> tables = new();
+    private string tableName = "", tableKind = "calculated", tableDax = "", tableM = "", tableColumns = "";
+    private bool tableEditing;
+    private bool tablePolicy;   // selected table has an incremental refresh policy — editing here would clobber it
+    private string? selectedTable;
+    private string? pendingDeleteTable;
+
+    private async Task LoadTables()
+    {
+        tables = Names(await Ui.TablesAsync(workspace, dataset));
+    }
+
+    private Task SelectTable(string name) => Busy(async () =>
+    {
+        selectedTable = name;
+        tableName = name;
+        tableEditing = true;
+        scrollToForm = true;
+        var (kind, expr, cols, hasPolicy) = await Ui.ReadTableAsync(workspace, dataset, name);
+        tableKind = kind;
+        tablePolicy = hasPolicy;
+        if (kind == "calculated") { tableDax = expr; tableM = ""; tableColumns = ""; }
+        else { tableM = expr; tableColumns = cols; tableDax = ""; }
+        if (hasPolicy)
+        {
+            var pol = await Ui.ReadRefreshPolicyAsync(workspace, dataset, name);
+            if (pol is not null)
+            {
+                policyPolling = pol.Polling;
+                policyRollGran = pol.RollingGranularity; policyRollPeriods = pol.RollingPeriods;
+                policyIncrGran = pol.IncrementalGranularity; policyIncrPeriods = pol.IncrementalPeriods; policyIncrOffset = pol.IncrementalOffset;
+            }
+        }
+        var note = hasPolicy ? "  (incremental refresh policy — editable below)" : "";
+        Show($"Table [{name}] ({kind}){note} — current definition:\n\n{expr}", true);
+    });
+
+    private async Task SaveTable(bool apply)
+    {
+        if (string.IsNullOrWhiteSpace(tableName)) { Show("Table name is required.", false); return; }
+        var name = tableName.Trim();
+        Func<ModelEditService, string> op;
+        if (tableKind == "calculated")
+        {
+            if (string.IsNullOrWhiteSpace(tableDax)) { Show("DAX is required for a calculated table.", false); return; }
+            var dax = tableDax;
+            op = svc => svc.CreateCalculatedTable(name, dax);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(tableM)) { Show("M is required for an import table.", false); return; }
+            var m = tableM;
+            var cols = new List<SourceColumn>();
+            foreach (var line in tableColumns.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var parts = line.Split(':');
+                if (parts.Length < 3) { Show($"Bad column line '{line}'. Use  Name:dataType:sourceColumn.", false); return; }
+                cols.Add(new SourceColumn(parts[0].Trim(), parts[1].Trim(), parts[2].Trim()));
+            }
+            if (cols.Count == 0) { Show("At least one column (Name:dataType:sourceColumn) is required.", false); return; }
+            op = svc => svc.CreateImportTable(name, m, cols);
+        }
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    // ---- incremental refresh policy editor (when a policy table is selected) ----
+    private string policyPolling = "", policyRollGran = "Month", policyIncrGran = "Day";
+    private int policyRollPeriods = 1, policyIncrPeriods = 1, policyIncrOffset;
+
+    private async Task SavePolicy(bool apply)
+    {
+        if (string.IsNullOrWhiteSpace(tableM)) { Show("Source (M) is required.", false); return; }
+        var name = tableName;
+        var src = tableM;
+        var poll = policyPolling;   // pass through (incl. empty → clears the polling expression)
+        var rg = policyRollGran; var rp = policyRollPeriods;
+        var ig = policyIncrGran; var ip = policyIncrPeriods; var io = policyIncrOffset;
+        Func<ModelEditService, string> op = svc => svc.UpdateRefreshPolicy(name, src, poll, rg, rp, ig, ip, io);
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    private void AskDeleteTable(string n) { pendingDeleteTable = n; result = null; }
+    private async Task ConfirmDeleteTable()
+    {
+        var n = pendingDeleteTable!;
+        pendingDeleteTable = null;
+        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteTable(n), true), true);
+    }
+    private void ClearTable()
+    {
+        tableName = ""; tableKind = "calculated"; tableDax = ""; tableM = ""; tableColumns = "";
+        tableEditing = false; tablePolicy = false; selectedTable = null;
+        policyPolling = ""; policyRollGran = "Month"; policyIncrGran = "Day";
+        policyRollPeriods = 1; policyIncrPeriods = 1; policyIncrOffset = 0;
+    }
+
+    /// <summary>Pull the "Name" column (or column 0) out of a tabular result as a list.</summary>
+    private static List<string> Names(QueryResult r)
+    {
+        var idx = 0;
+        for (var i = 0; i < r.Columns.Count; i++)
+        {
+            if (string.Equals(r.Columns[i], "Name", StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        }
+        var list = new List<string>();
+        foreach (var row in r.Rows)
+        {
+            var v = idx < row.Length ? row[idx]?.ToString() : null;
+            if (!string.IsNullOrEmpty(v)) list.Add(v!);
+        }
+        list.Sort(StringComparer.OrdinalIgnoreCase);   // picker lists are sorted A→Z
+        return list;
+    }
+}

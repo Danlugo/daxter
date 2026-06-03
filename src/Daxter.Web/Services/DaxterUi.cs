@@ -3,6 +3,7 @@ using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Daxter.Core.Editing;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
@@ -39,6 +40,10 @@ public sealed class DaxterUi
 
     /// <summary>True when refreshes/writes are enabled (Configure → Allow writes).</summary>
     public bool WritesEnabled => _state.AllowWrites;
+
+    /// <summary>True when model editing is enabled (Configure → Allow model edits) — a stricter,
+    /// separate gate than refresh writes (XMLA edits are irreversible for PBIX download).</summary>
+    public bool ModelEditEnabled => _state.AllowModelEdit;
 
     /// <summary>True when the target looks like production (refreshes are refused).</summary>
     public bool IsProductionTarget(string ws, string ds) => _state.ToConfig(ws, ds).IsProductionTarget();
@@ -184,6 +189,18 @@ public sealed class DaxterUi
 
     public Task<QueryResult> RlsAsync(string ws, string ds, CancellationToken ct = default)
         => XmlaAsync("rls", ws, ds, s => new ModelMetadataService(s).Roles(), ct);
+
+    public Task<QueryResult> RoleMembersAsync(string ws, string ds, string role, CancellationToken ct = default)
+        => XmlaAsync($"role-members:{role}", ws, ds, s => new ModelMetadataService(s).RoleMembers(role), ct);
+
+    public Task<QueryResult> RoleFiltersAsync(string ws, string ds, string role, CancellationToken ct = default)
+        => XmlaAsync($"role-filters:{role}", ws, ds, s => new ModelMetadataService(s).RoleFilters(role), ct);
+
+    public Task<QueryResult> RelationshipsAsync(string ws, string ds, CancellationToken ct = default)
+        => XmlaAsync("relationships", ws, ds, s => new ModelMetadataService(s).Relationships(), ct);
+
+    public Task<QueryResult> ColumnsAsync(string ws, string ds, string table, CancellationToken ct = default)
+        => XmlaAsync($"columns:{table}", ws, ds, s => new ModelMetadataService(s).Columns(table), ct);
 
     public Task<QueryResult> McodeAsync(string ws, string ds, string table, CancellationToken ct = default)
         => XmlaAsync($"mcode:{table}", ws, ds, s => new ModelMetadataService(s).MCode(table), ct);
@@ -394,6 +411,69 @@ public sealed class DaxterUi
         }
 
         return new ModelTree(nodes);
+    }
+
+    /// <summary>
+    /// Runs a model edit through the SAME <see cref="ModelEditService"/> the CLI and MCP use. The
+    /// <paramref name="op"/> stages a change in the in-memory model and returns a human-readable
+    /// description; <paramref name="apply"/>=false discards it (dry-run preview), apply takes a
+    /// <c>.bim</c> backup then <c>SaveChanges()</c>. Gated on <see cref="ModelEditEnabled"/> and
+    /// refuses production targets (XMLA edits are irreversible for PBIX download).
+    /// </summary>
+    public async Task<string> ModelEditAsync(string ws, string ds, Func<ModelEditService, string> op, bool apply, CancellationToken ct = default)
+    {
+        var cfg = _state.ToConfig(ws, ds);
+        var sw = Stopwatch.StartNew();
+        var label = $"model-edit [{ws}/{ds}]";
+        try
+        {
+            if (apply)
+            {
+                if (!_state.AllowModelEdit)
+                    throw new DaxterException("Model editing is disabled. Turn on \"Allow model edits\" on the Configure page first.");
+                if (cfg.IsProductionTarget())
+                    throw new DaxterException($"Refusing to edit a production target ('{ws}').");
+            }
+
+            var token = await Provider(cfg).GetTokenAsync(ct);
+            using var svc = new ModelEditService(cfg, token);
+            var desc = op(svc);   // stages the change in-memory (TOM)
+
+            if (!apply)
+            {
+                _log.LogInformation("{Label} → DRY RUN in {Ms} ms", label, sw.ElapsedMilliseconds);
+                return "DRY RUN — not applied:\n" + desc;
+            }
+
+            var backup = new ModelBackupService(cfg, token).Backup();
+            svc.Apply();
+            _log.LogInformation("{Label} → APPLIED in {Ms} ms (backup {Backup})", label, sw.ElapsedMilliseconds, backup);
+            return $"APPLIED — backup saved to {backup}\n{desc}";
+        }
+        catch (Exception ex)
+        {
+            _log.LogError("{Label} failed: {Error}", label, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Reads a table's current definition (kind + source expression + import column specs) via
+    /// TOM, for the Model Edit page to pre-fill when a table row is clicked.</summary>
+    public async Task<(string Kind, string Expression, string Columns, bool HasPolicy)> ReadTableAsync(string ws, string ds, string table, CancellationToken ct = default)
+    {
+        var cfg = _state.ToConfig(ws, ds);
+        var token = await Provider(cfg).GetTokenAsync(ct);
+        using var svc = new ModelEditService(cfg, token);
+        return svc.ReadTable(table);
+    }
+
+    /// <summary>Reads a table's incremental refresh policy settings (null if it has none).</summary>
+    public async Task<RefreshPolicyInfo?> ReadRefreshPolicyAsync(string ws, string ds, string table, CancellationToken ct = default)
+    {
+        var cfg = _state.ToConfig(ws, ds);
+        var token = await Provider(cfg).GetTokenAsync(ct);
+        using var svc = new ModelEditService(cfg, token);
+        return svc.ReadRefreshPolicy(table);
     }
 
     private Task<QueryResult> XmlaAsync(string op, string ws, string ds, Func<IXmlaSession, QueryResult> body, CancellationToken ct)

@@ -22,6 +22,13 @@
             URL.revokeObjectURL(url);
         };
         window.daxterCopy = (text) => navigator.clipboard && navigator.clipboard.writeText(text);
+        window.daxterFocusForm = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const f = el.querySelector('textarea, input:not([disabled]), select');
+            if (f) f.focus();
+        };
     </script>
     <script src="dax-complete.js"></script>
     <script src="_framework/blazor.web.js"></script>

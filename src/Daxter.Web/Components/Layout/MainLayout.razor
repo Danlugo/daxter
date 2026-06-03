@@ -8,6 +8,12 @@
 @inject AuditHistoryStore AuditHist
 @inject Daxter.Core.Audit.SavedAuditCheckStore SavedStore
 @inject ExploreActions Actions
+@inject UiBusy Busy
+
+@if (Busy.IsBusy)
+{
+    <div class="busy-overlay"><div class="spinner"></div></div>
+}
 
 <header class="topbar">
     <span class="brand">DAXter <small>Console @Version.Current</small></span>
@@ -20,6 +26,7 @@
         <NavLink href="gateways">Gateways</NavLink>
         <NavLink href="pipelines">Pipelines</NavLink>
         <NavLink href="audit">Audit</NavLink>
+        <NavLink href="model-edit">Model Edit</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -34,6 +41,7 @@
             UsageStore.PipelineContext => " · Pipelines",
             UsageStore.AuditContext => " · Audit",
             UsageStore.ExploreContext => " · Explore",
+            UsageStore.ModelEditContext => " · Model Edit",
             _ => "" })</div>
 
         @if (context is null)
@@ -206,6 +214,7 @@
     protected override void OnInitialized()
     {
         Usage.Changed += OnUsageChanged;
+        Busy.Changed += OnBusyChanged;
         Jobs.Changed += OnUsageChanged;          // refresh the Jobs nav count
         Hist.Changed += OnUsageChanged;          // refresh Recent queries
         AuditHist.Changed += OnUsageChanged;     // refresh Recent audits
@@ -234,6 +243,7 @@
             "refresh" => UsageStore.RefreshContext,
             "pipelines" => UsageStore.PipelineContext,
             "audit" => UsageStore.AuditContext,
+            "model-edit" => UsageStore.ModelEditContext,
             _ => null,
         };
     }
@@ -259,6 +269,7 @@
     }
 
     private void OnUsageChanged() => InvokeAsync(() => { Reload(); StateHasChanged(); });
+    private void OnBusyChanged() => InvokeAsync(StateHasChanged);
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
         => InvokeAsync(() => { Reload(); StateHasChanged(); });
 
@@ -315,6 +326,7 @@
     public void Dispose()
     {
         Usage.Changed -= OnUsageChanged;
+        Busy.Changed -= OnBusyChanged;
         Jobs.Changed -= OnUsageChanged;
         Hist.Changed -= OnUsageChanged;
         AuditHist.Changed -= OnUsageChanged;

@@ -59,10 +59,32 @@ public class ModelMetadataServiceTests
 
         new ModelMetadataService(session).MCode("Fact Sales");
 
-        Assert.Equal(2, session.Queries.Count);
+        // Resolve table id → partitions → refresh policy (the policy carries the M for incremental tables).
+        Assert.Equal(3, session.Queries.Count);
         Assert.Contains("WHERE [Name] = 'Fact Sales'", session.Queries[0]);
         Assert.Contains("QueryDefinition", session.Queries[1]);
         Assert.Contains("[TableID] = 42", session.Queries[1]);
+        Assert.Contains("TMSCHEMA_REFRESH_POLICIES", session.Queries[2]);
+        Assert.Contains("[TableID] = 42", session.Queries[2]);
+    }
+
+    [Fact]
+    public void MCode_surfaces_refresh_policy_source_for_incremental_tables()
+    {
+        // Partitions carry no M (policy-range); the M template lives on the refresh policy.
+        var session = new FakeXmlaSession(q =>
+        {
+            if (q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)) return new QueryResult(["ID"], [[42L]]);
+            if (q.Contains("TMSCHEMA_REFRESH_POLICIES", StringComparison.Ordinal))
+                return new QueryResult(["SourceExpression"], [["let Source = 1 in Source"]]);
+            return Empty;   // partitions: none with their own M
+        });
+
+        var result = new ModelMetadataService(session).MCode("Fact Sales");
+
+        Assert.Equal(1, result.RowCount);
+        Assert.Contains("policy", result.Rows[0][0]?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("let Source = 1 in Source", result.Rows[0][1]);
     }
 
     [Fact]

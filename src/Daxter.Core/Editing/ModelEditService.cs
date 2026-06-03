@@ -15,6 +15,12 @@ public sealed record TableFilter(string Table, string FilterDax);
 /// the M output column <paramref name="Source"/>.</summary>
 public sealed record SourceColumn(string Name, string DataType, string Source);
 
+/// <summary>An incremental-refresh policy's editable settings (the M template lives in <paramref name="Source"/>).</summary>
+public sealed record RefreshPolicyInfo(
+    string Source, string Polling,
+    string RollingGranularity, int RollingPeriods,
+    string IncrementalGranularity, int IncrementalPeriods, int IncrementalOffset);
+
 /// <summary>
 /// Edits a Power BI model via the <b>Tabular Object Model (TOM)</b>: connects, mutates the in-memory
 /// model, and applies with <c>SaveChanges()</c> — the engine-sanctioned write path (hand-built
@@ -247,6 +253,86 @@ public sealed class ModelEditService : IDisposable
 
         return $"{verb} import table [{name}] (M source, {cols.Count} column(s))";
     }
+
+    /// <summary>Reads a table's current definition (for the editor to pre-fill): kind
+    /// (<c>calculated</c>|<c>import</c>), the source expression (DAX or M), and the import columns as
+    /// <c>Name:dataType:sourceColumn</c> lines.</summary>
+    public (string Kind, string Expression, string Columns, bool HasPolicy) ReadTable(string name)
+    {
+        var t = _model.Tables.Find(name) ?? throw new DaxterException($"Table not found: [{name}].");
+        string kind;
+        string? expr;
+        var hasPolicy = false;
+
+        if (t.RefreshPolicy is Tom.BasicRefreshPolicy brp && !string.IsNullOrWhiteSpace(brp.SourceExpression))
+        {
+            // Incremental refresh: the M template lives on the POLICY, not the (auto-generated)
+            // policy-range partitions — read it from there or the M view is blank.
+            kind = "import";
+            expr = brp.SourceExpression;
+            hasPolicy = true;
+        }
+        else
+        {
+            var p = t.Partitions.FirstOrDefault();
+            (kind, expr) = p?.Source switch
+            {
+                Tom.CalculatedPartitionSource cps => ("calculated", cps.Expression),
+                Tom.MPartitionSource mps => ("import", mps.Expression),
+                _ => ("calculated", ""),
+            };
+        }
+
+        var cols = string.Join("\n", t.Columns.OfType<Tom.DataColumn>()
+            .Select(c => $"{c.Name}:{c.DataType}:{c.SourceColumn}"));
+        return (kind, expr ?? "", cols, hasPolicy);
+    }
+
+    // ---- incremental refresh policy ----
+
+    /// <summary>Reads a table's incremental refresh policy settings, or null if it has none.</summary>
+    public RefreshPolicyInfo? ReadRefreshPolicy(string name)
+    {
+        var t = _model.Tables.Find(name) ?? throw new DaxterException($"Table not found: [{name}].");
+        if (t.RefreshPolicy is not Tom.BasicRefreshPolicy p) return null;
+        return new RefreshPolicyInfo(
+            p.SourceExpression ?? "", p.PollingExpression ?? "",
+            p.RollingWindowGranularity.ToString(), (int)p.RollingWindowPeriods,
+            p.IncrementalGranularity.ToString(), (int)p.IncrementalPeriods, (int)p.IncrementalPeriodsOffset);
+    }
+
+    /// <summary>Updates an <b>existing</b> basic incremental refresh policy in place — its M source and
+    /// the rolling-window / incremental settings — without touching the table's partitions (so the
+    /// policy is preserved). Throws if the table has no basic policy (create those in Desktop/TE).</summary>
+    public string UpdateRefreshPolicy(string table, string source, string? polling,
+        string rollingGranularity, int rollingPeriods,
+        string incrementalGranularity, int incrementalPeriods, int incrementalOffset)
+    {
+        Require(source, "source");
+        var t = Table(table);
+        if (t.RefreshPolicy is not Tom.BasicRefreshPolicy p)
+        {
+            throw new DaxterException($"Table [{table}] has no basic incremental refresh policy to update.");
+        }
+        p.SourceExpression = source;
+        p.PollingExpression = polling ?? "";   // "" explicitly clears it (null would silently skip)
+        p.RollingWindowGranularity = ParseGranularity(rollingGranularity);
+        p.RollingWindowPeriods = rollingPeriods;
+        p.IncrementalGranularity = ParseGranularity(incrementalGranularity);
+        p.IncrementalPeriods = incrementalPeriods;
+        p.IncrementalPeriodsOffset = incrementalOffset;
+        return $"update refresh policy on [{table}] (rolling {rollingPeriods} {rollingGranularity}, " +
+               $"incremental {incrementalPeriods} {incrementalGranularity}, offset {incrementalOffset})";
+    }
+
+    private static Tom.RefreshGranularityType ParseGranularity(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "day" or "days" => Tom.RefreshGranularityType.Day,
+        "month" or "months" => Tom.RefreshGranularityType.Month,
+        "quarter" or "quarters" => Tom.RefreshGranularityType.Quarter,
+        "year" or "years" => Tom.RefreshGranularityType.Year,
+        _ => throw new DaxterException($"Unknown granularity '{value}'. Use day|month|quarter|year."),
+    };
 
     // ---- relationships ----
 

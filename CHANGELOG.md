@@ -4,6 +4,40 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-06-03
+
+### Fixed
+- **M source now shows for incremental-refresh tables.** When a table has an incremental refresh
+  policy, its M query template lives on the policy (`BasicRefreshPolicy.SourceExpression` /
+  `TMSCHEMA_REFRESH_POLICIES.[SourceExpression]`), not on the auto-generated partitions — so the
+  Explore **M code** view and the Model Edit **Tables** click-load came up blank. Both now read the
+  policy source. The Model Edit Tables editor also **flags policy tables and blocks Apply** (saving
+  would replace the table and drop the refresh policy — edit those in Tabular Editor / raw TMSL).
+
+### Added
+- **Model editing in the web console — `Model Edit` page.** Model editing is now writable in **all three
+  surfaces** (CLI, MCP, **UI**), all calling the same `Daxter.Core` **`ModelEditService`** — one engine,
+  no duplicated logic. The new `/model-edit` page lets you add / edit / remove:
+  - **Parameters** (shared M expressions), **RLS roles** (permission + members + table filters),
+    **relationships** (from/to columns, cross-filter, active), and **tables** (calculated, or import with
+    an M source + typed columns).
+  - **Click a row to load it** into the editor (shows its current definition); **Preview** dry-runs the
+    change; **Apply** writes it. Gated behind *Allow model edits* (a `.bim` backup is taken before every
+    apply — XMLA edits are irreversible for PBIX download). Workspace/dataset picker with Frequent recall.
+  - New Core read `ModelMetadataService.Relationships()` (resolves from/to `table[column]`, active,
+    cross-filter) + `DaxterUi` bridge reads for relationships and per-role members/filters.
+  - **Relationship From/To pickers**: table + column **dropdowns** (no typing/guessing column names).
+  - **Incremental refresh policy editing**: selecting a policy-managed table opens a **refresh-policy editor**
+    (source M + rolling-window & incremental granularity/periods/offset + polling expression) — updates the
+    policy in place via `ModelEditService.UpdateRefreshPolicy` without disturbing the table's partitions.
+  - **Confirm-on-Apply**: every **Apply** (parameter/role/relationship/table/refresh-policy) first dry-runs the
+    change and shows a **Confirm apply / Cancel** card with the exact preview — no write happens until you confirm.
+- **Global loading overlay.** A circuit-scoped `UiBusy` service drives one blocking spinner overlay
+  in `MainLayout`: any slow async load — clicking a row to edit, picking a workspace/dataset, or
+  **arriving on a page from a Frequent/deep-link click** — shows the spinner and blocks clicks until
+  it finishes, so you can't queue overlapping loads or click into a half-loaded page. Wired into the
+  Model Edit, Explore, and Refresh pages; the pattern is now mandatory in `daxter-ui` + the UI contract.
+
 ## [1.9.0] - 2026-06-03
 
 ### Added
