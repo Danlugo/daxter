@@ -65,7 +65,7 @@
                         <tr class="row-pick @(selected == p.Name ? "active" : "")" @onclick="() => SelectParam(p)">
                             <td>@p.Name</td>
                             <td class="nowrap" @onclick:stopPropagation="true">
-                                <button class="btn-sm" @onclick="() => AskDelete(p.Name)">Delete</button>
+                                <button class="btn-sm" @onclick="() => ConfirmApply(svc => svc.DeleteExpression(p.Name))" @onclick:stopPropagation="true">Delete</button>
                             </td>
                         </tr>
                     }
@@ -97,15 +97,6 @@
             </div>
             <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
         </div>
-
-        @if (pendingDelete is not null)
-        {
-            <div class="card">
-                Delete parameter '<strong>@pendingDelete</strong>'?
-                <button class="btn-sm" @onclick="ConfirmDelete" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
-                <button class="btn-sm" @onclick="() => pendingDelete = null">cancel</button>
-            </div>
-        }
     }
     else if (tab == "Roles")
     {
@@ -125,7 +116,7 @@
                             <td>@r.Name</td>
                             <td class="muted">@r.Permission</td>
                             <td class="nowrap" @onclick:stopPropagation="true">
-                                <button class="btn-sm" @onclick="() => AskDeleteRole(r.Name)">Delete</button>
+                                <button class="btn-sm" @onclick="() => ConfirmApply(svc => svc.DeleteRole(r.Name))" @onclick:stopPropagation="true">Delete</button>
                             </td>
                         </tr>
                     }
@@ -164,13 +155,6 @@
             </div>
             <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
         </div>
-        @if (pendingDeleteRole is not null)
-        {
-            <div class="card">Delete role '<strong>@pendingDeleteRole</strong>'?
-                <button class="btn-sm" @onclick="ConfirmDeleteRole" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
-                <button class="btn-sm" @onclick="() => pendingDeleteRole = null">cancel</button>
-            </div>
-        }
     }
     else if (tab == "Relationships")
     {
@@ -195,7 +179,7 @@
                                 <td>@r.Active</td>
                                 <td class="muted">@r.Cross</td>
                                 <td class="nowrap" @onclick:stopPropagation="true">
-                                    <button class="btn-sm" @onclick="() => AskDeleteRel(r.Name)">Delete</button>
+                                    <button class="btn-sm" @onclick="() => ConfirmApply(svc => svc.DeleteRelationship(r.Name))" @onclick:stopPropagation="true">Delete</button>
                                 </td>
                             </tr>
                         }
@@ -252,13 +236,6 @@
             </div>
             <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.</p>
         </div>
-        @if (pendingDeleteRel is not null)
-        {
-            <div class="card">Delete relationship '<strong>@pendingDeleteRel</strong>'?
-                <button class="btn-sm" @onclick="ConfirmDeleteRel" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
-                <button class="btn-sm" @onclick="() => pendingDeleteRel = null">cancel</button>
-            </div>
-        }
     }
     else if (tab == "Tables")
     {
@@ -277,7 +254,7 @@
                         <tr class="row-pick @(selectedTable == tname ? "active" : "")" @onclick="() => SelectTable(tname)">
                             <td>@tname</td>
                             <td class="nowrap" @onclick:stopPropagation="true">
-                                <button class="btn-sm" @onclick="() => AskDeleteTable(tname)">Delete</button>
+                                <button class="btn-sm" @onclick="() => ConfirmApply(svc => svc.DeleteTable(tname))" @onclick:stopPropagation="true">Delete</button>
                             </td>
                         </tr>
                     }
@@ -360,25 +337,20 @@
                    “Create” replaces a same-named table.</p>
             }
         </div>
-        @if (pendingDeleteTable is not null)
-        {
-            <div class="card">Delete table '<strong>@pendingDeleteTable</strong>'?
-                <button class="btn-sm" @onclick="ConfirmDeleteTable" disabled="@(busy || !Ui.ModelEditEnabled)">Confirm delete</button>
-                <button class="btn-sm" @onclick="() => pendingDeleteTable = null">cancel</button>
-            </div>
-        }
     }
 }
 
 @if (pendingApplyOp is not null)
 {
-    <div class="card confirm-apply" id="me-confirm">
-        <h3>Confirm apply</h3>
-        <p class="muted">This writes over XMLA — a <code>.bim</code> backup is saved first. Review the change, then confirm or cancel:</p>
-        <pre class="code">@pendingApplyText</pre>
-        <div class="cmd-group">
-            <button class="btn" @onclick="DoApply" disabled="@busy">✓ Confirm apply</button>
-            <button class="btn-sm" @onclick="CancelApply" disabled="@busy">Cancel</button>
+    <div class="modal-overlay" @onclick="CancelApply">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Confirm change</h3>
+            <p class="muted">This writes over XMLA — a <code>.bim</code> backup is saved first. Review the change, then confirm or cancel:</p>
+            <pre class="code">@pendingApplyText</pre>
+            <div class="cmd-group">
+                <button class="btn" @onclick="DoApply" disabled="@busy">✓ Confirm</button>
+                <button class="btn-sm" @onclick="CancelApply" disabled="@busy">Cancel</button>
+            </div>
         </div>
     </div>
 }
@@ -406,29 +378,32 @@
     private string formName = "";
     private string formM = "";
     private bool editingExisting;
-    private string? pendingDelete;
 
     private string? result;
     private bool resultOk;
     private bool busy;
-    private bool applied;
 
     protected override async Task OnInitializedAsync()
     {
         workspaces = Names(await Ui.WorkspacesAsync());
+    }
 
-        // Deep-link recall (?ws=&ds= from a Frequent shortcut) — apply once, after the index is ready.
-        if (!string.IsNullOrEmpty(Qws) && !applied)
+    // Apply ?ws=&ds= whenever the query changes — covers first load AND clicking a Frequent shortcut
+    // while already on this page (same component → OnParametersSet fires, OnInitialized does not).
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        if (Qws == workspace && (Qds ?? "") == dataset) return;   // already reflects the URL
+        await Busy(async () =>
         {
-            applied = true;
+            if (workspaces.Count == 0) workspaces = Names(await Ui.WorkspacesAsync());
             workspace = Qws!;
             datasets = Names(await Ui.DatasetsAsync(workspace));
-            if (!string.IsNullOrEmpty(Qds))
-            {
-                dataset = Qds!;
-                await LoadObjects();
-            }
-        }
+            dataset = Qds ?? "";
+            ClearActiveForm();
+            result = null;
+            if (!string.IsNullOrEmpty(dataset)) await LoadForTab();
+        });
     }
 
     private async Task OnWorkspaceChanged()
@@ -462,8 +437,7 @@
     {
         tab = t;
         result = null;
-        pendingDelete = pendingDeleteRole = pendingDeleteRel = pendingDeleteTable = null;
-        pendingApplyOp = null; pendingApplyText = null;   // don't carry a confirm card to another tab
+        pendingApplyOp = null; pendingApplyText = null;   // don't carry a confirm modal to another tab
         await LoadForTab();
     }
 
@@ -517,14 +491,8 @@
             scrollToForm = false;
             try { await JS.InvokeVoidAsync("daxterFocusForm", "me-editor"); } catch { /* JS not ready */ }
         }
-        if (scrollToConfirm)
-        {
-            scrollToConfirm = false;
-            try { await JS.InvokeVoidAsync("daxterFocusForm", "me-confirm"); } catch { /* JS not ready */ }
-        }
     }
     private void ClearForm() { formName = ""; formM = ""; editingExisting = false; selected = null; }
-    private void AskDelete(string name) { pendingDelete = name; result = null; }
 
     private async Task SaveParam(bool apply)
     {
@@ -535,13 +503,6 @@
         Func<ModelEditService, string> op = svc => svc.UpsertExpression(name, m);
         if (apply) await ConfirmApply(op);
         else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
-    }
-
-    private async Task ConfirmDelete()
-    {
-        var name = pendingDelete!;
-        pendingDelete = null;
-        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteExpression(name), true), true);
     }
 
     private async Task Run(Func<Task<string>> op, bool apply)
@@ -575,13 +536,10 @@
     private Func<ModelEditService, string>? pendingApplyOp;
     private string? pendingApplyText;
 
-    private bool scrollToConfirm;
-
     private Task ConfirmApply(Func<ModelEditService, string> op) => Busy(async () =>
     {
         pendingApplyText = await Ui.ModelEditAsync(workspace, dataset, op, apply: false);   // dry-run preview
         pendingApplyOp = op;
-        scrollToConfirm = true;
     });
 
     private async Task DoApply()
@@ -611,7 +569,6 @@
     private string roleName = "", rolePermission = "read", roleMembers = "", roleFilters = "";
     private bool roleEditing;
     private string? selectedRole;
-    private string? pendingDeleteRole;
 
     private async Task LoadRoles()
     {
@@ -666,13 +623,6 @@
         else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
     }
 
-    private void AskDeleteRole(string n) { pendingDeleteRole = n; result = null; }
-    private async Task ConfirmDeleteRole()
-    {
-        var n = pendingDeleteRole!;
-        pendingDeleteRole = null;
-        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteRole(n), true), true);
-    }
     private void ClearRole() { roleName = ""; rolePermission = "read"; roleMembers = ""; roleFilters = ""; roleEditing = false; selectedRole = null; }
 
     private static string PermName(string raw)
@@ -697,7 +647,6 @@
     private bool relActive = true;
     private bool relEditing;
     private string? selectedRel;
-    private string? pendingDeleteRel;
     private List<string> relTables = new();   // all tables, for the From/To table dropdowns
     private List<string> relFromCols = new();
     private List<string> relToCols = new();
@@ -761,13 +710,6 @@
         else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
     }
 
-    private void AskDeleteRel(string n) { pendingDeleteRel = n; result = null; }
-    private async Task ConfirmDeleteRel()
-    {
-        var n = pendingDeleteRel!;
-        pendingDeleteRel = null;
-        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteRelationship(n), true), true);
-    }
     private void ClearRel()
     {
         relFromTable = relFromCol = relToTable = relToCol = relName = "";
@@ -788,7 +730,6 @@
     private bool tableEditing;
     private bool tablePolicy;   // selected table has an incremental refresh policy — editing here would clobber it
     private string? selectedTable;
-    private string? pendingDeleteTable;
 
     private async Task LoadTables()
     {
@@ -866,13 +807,6 @@
         else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
     }
 
-    private void AskDeleteTable(string n) { pendingDeleteTable = n; result = null; }
-    private async Task ConfirmDeleteTable()
-    {
-        var n = pendingDeleteTable!;
-        pendingDeleteTable = null;
-        await Run(() => Ui.ModelEditAsync(workspace, dataset, svc => svc.DeleteTable(n), true), true);
-    }
     private void ClearTable()
     {
         tableName = ""; tableKind = "calculated"; tableDax = ""; tableM = ""; tableColumns = "";

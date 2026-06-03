@@ -23,6 +23,67 @@ It is split into a UI-free engine (`Daxter.Core`) and a thin command shell
                  └─────────────────────────┘
 ```
 
+## Runtime topology — one image, many containers, one shared volume
+
+One DAXter **instance per machine** does **not** mean one container. It means **one shared
+volume** (`daxter-tokens`) + **exactly one long-running web container** (the worker + UI).
+Every surface is the *same image* run in a different **mode** (`mcp` / `cli` / `web`); the
+modes coordinate **only** through the file-backed queue on the shared volume — never through
+shared process memory.
+
+```
+  CLIENTS (separate Claude programs / a browser)
+  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌──────────┐
+  │ Claude MCP #1 │ │ Claude MCP #2 │ │  CLI command  │ │ Browser  │
+  └───────┬───────┘ └───────┬───────┘ └───────┬───────┘ └────┬─────┘
+          │ (1 per client)  │                 │ (1 per run)   │
+          ▼                 ▼                 ▼               ▼
+  CONTAINERS (each = one mode; all stamped from the Daxter Image)
+  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐
+  │ MCP cont. A  │  │ MCP cont. B  │  │ CLI cont.    │  │ WEB cont.       │
+  │ --rm,no port │  │ --rm,no port │  │ --rm, exits  │  │ persistent,8080 │
+  │ ENQUEUE only │  │ ENQUEUE only │  │ ENQUEUE only │  │ ★ WORKER + UI   │
+  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └────────┬────────┘
+         └─────────────────┴─────────────────┴───────────────────┘
+                                   │  all mount ▼
+                 ┌─────────────────────────────────────────────┐
+                 │  SHARED VOLUME  daxter-tokens (~/.daxter)    │  ◄── the "single instance"
+                 │    • queue.json   the one job queue          │
+                 │    • auth token   one sign-in for all        │
+                 └─────────────────────────────────────────────┘
+   (the Daxter Image is the template every container is stamped from —
+    it sits "behind" the containers; it is not the coordination layer)
+```
+
+**How jobs stay consistent across containers** (`Daxter.Core/Scheduling/RefreshQueueStore.cs`):
+
+- The queue is a **cross-process, file-backed** `queue.json` on the shared volume. Reads
+  re-load from disk under an exclusive **lock file**; writes are temp-file + atomic replace.
+- **MCP and CLI only `Enqueue`** (`JobOrigin.Mcp` / `Cli`) — they append a job and may exit.
+  They hold **no** job state in memory.
+- The **web container hosts the single worker** (`RefreshWorkerHostedService`) that drains the
+  queue; its `JobService` is a *façade over the same `RefreshQueueStore`*, so the **Jobs UI
+  shows every job** — CLI, MCP, and web alike. A `worker.heartbeat` file lets CLI/MCP warn
+  when no web worker is alive to run what they enqueued.
+
+**The two invariants that make "single instance per machine" hold:**
+
+1. **One shared volume** — every container mounts `-v daxter-tokens:/home/daxter/.daxter`.
+   (The `.mcpb` extension and the web `docker run` both do.)
+2. **Exactly one web container** running the worker.
+
+Multiple MCP/CLI containers are **harmless** — they are stateless front doors to the one
+queue. The failure mode to avoid is a surface mounting a **different** volume (e.g. a stray
+`*-tokens`): its `queue.json` would be invisible to the web worker. This is why **all
+surfaces standardize on `daxter-tokens`**.
+
+**Common misconceptions** (both are wrong):
+
+| Wrong | Right |
+|-------|-------|
+| Several MCP clients share one MCP container | **One MCP container per client** (per-stdio process); N clients → N containers |
+| The image is the shared/coordination layer | The image is just the **template**; the **shared volume** is the coordination layer |
+
 ## Why this shape
 
 | Concern | Decision | Rationale |

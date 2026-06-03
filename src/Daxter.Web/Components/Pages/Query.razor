@@ -4,6 +4,7 @@
 @inject QueryHistoryStore History
 @inject ExploreActions Actions
 @inject IJSRuntime JS
+@inject UiBusy BusyState
 @implements IDisposable
 @using System.Text
 
@@ -215,12 +216,12 @@
     private async Task LoadObjects()
     {
         if (string.IsNullOrEmpty(dataset)) return;
-        objLoading = true; objError = null; objects = null; StateHasChanged();
+        objLoading = true; BusyState.Begin(); objError = null; objects = null; StateHasChanged();
         try { objects = await Ui.ModelTreeAsync(workspace, dataset); objectsFor = dataset; acDirty = true; }
         catch (Exception ex) { objError = ex.Message; }
         // StateHasChanged is required: when called from OnAfterRenderAsync, Blazor does not
         // auto-render after the await, so the loaded tree wouldn't paint until the next event.
-        finally { objLoading = false; StateHasChanged(); }
+        finally { objLoading = false; BusyState.End(); StateHasChanged(); }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -475,32 +476,32 @@
 
     private async Task LoadWorkspaces()
     {
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task OnWorkspaceChanged()
     {
         datasets = new(); dataset = ""; objects = null; objectsFor = null;
         if (string.IsNullOrEmpty(workspace)) return;
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try
         {
             datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
             Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ExploreContext);
         }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 
     private async Task RunQuery()
     {
-        busy = true; error = null; result = null; StateHasChanged();
+        busy = true; BusyState.Begin(); error = null; result = null; StateHasChanged();
         try { result = await Ui.QueryAsync(workspace, dataset, dax); }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
 
         if (error is null)
         {

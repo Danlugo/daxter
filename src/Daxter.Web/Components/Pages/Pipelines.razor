@@ -1,6 +1,7 @@
 @page "/pipelines"
 @inject DaxterUi Ui
 @inject UsageStore Usage
+@inject UiBusy BusyState
 
 <PageTitle>DAXter — Pipelines</PageTitle>
 
@@ -189,7 +190,7 @@ else if (results is not null)
 
     private async Task LoadPipelines()
     {
-        indexBusy = true; error = null; results = null; selectedModel = ""; selectedId = null;
+        indexBusy = true; BusyState.Begin(); error = null; results = null; selectedModel = ""; selectedId = null;
         try
         {
             index = await Ui.PipelineModelIndexAsync();
@@ -200,7 +201,7 @@ else if (results is not null)
                 .OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch (Exception ex) { error = ex.Message; pipelines = null; index = Array.Empty<PipelineModels>(); }
-        finally { indexBusy = false; }
+        finally { indexBusy = false; BusyState.End(); }
 
         // If the page was opened with ?model=… (e.g. from the Frequent sidebar) but the index
         // wasn't ready when OnParametersSetAsync fired, apply the deep-link now.
@@ -222,7 +223,7 @@ else if (results is not null)
             .Where(p => p.Models.Any(m => string.Equals(m, selectedModel, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
-        matrixBusy = true; StateHasChanged();
+        matrixBusy = true; BusyState.Begin(); StateHasChanged();
         try
         {
             var built = new List<(string, string, PipelineParamMatrix)>();
@@ -233,7 +234,7 @@ else if (results is not null)
                 Usage.Record(UsageStore.Dataset, selectedModel, null, UsageStore.PipelineContext); // Frequent · Pipelines
         }
         catch (Exception ex) { matrixError = ex.Message; }
-        finally { matrixBusy = false; }
+        finally { matrixBusy = false; BusyState.End(); }
     }
 
     private void ClearModel() { selectedModel = ""; results = null; matrixError = null; }
@@ -241,13 +242,13 @@ else if (results is not null)
     private async Task Select(PipelineRow p)
     {
         selectedId = p.Id; selectedName = p.Name;
-        drillBusy = true; drillError = null; stages = operations = null;
+        drillBusy = true; BusyState.Begin(); drillError = null; stages = operations = null;
         try
         {
             stages = await Ui.PipelineStagesAsync(p.Id);
             operations = await Ui.PipelineOperationsAsync(p.Id);
         }
         catch (Exception ex) { drillError = ex.Message; }
-        finally { drillBusy = false; }
+        finally { drillBusy = false; BusyState.End(); }
     }
 }

@@ -2,6 +2,7 @@
 @inject DaxterUi Ui
 @inject IJSRuntime JS
 @inject VersionService Version
+@inject UiBusy BusyState
 
 <PageTitle>DAXter — Status</PageTitle>
 
@@ -118,7 +119,7 @@
 
     private async Task RunAsync()
     {
-        busy = true;
+        busy = true; BusyState.Begin();
         loginMsg = null;
         loginError = null;
         try
@@ -128,7 +129,7 @@
         }
         finally
         {
-            busy = false;
+            busy = false; BusyState.End();
         }
     }
 
@@ -191,10 +192,10 @@
 
     private async Task CheckUpdatesAsync()
     {
-        checkingUpdate = true;
+        checkingUpdate = true; BusyState.Begin();
         update = null;
         try { update = await Version.CheckLatestAsync(); }
-        finally { checkingUpdate = false; }
+        finally { checkingUpdate = false; BusyState.End(); }
     }
 
     private string UpgradeCommands()

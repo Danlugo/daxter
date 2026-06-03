@@ -4,6 +4,41 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.10.2] - 2026-06-03
+
+### Fixed
+- **Delete on Model Edit now shows a confirmation you can't miss.** Clicking a row's **Delete** appeared
+  to do nothing: the per-row `@onclick:stopPropagation` was on the `<td>` (no handler) so it never
+  fired — the click also selected the row — and the confirmation rendered as a card at the *bottom* of
+  the page, off-screen. Delete now routes through the shared **confirm flow shown as a centered modal
+  popup** (dry-run preview → **Confirm** / **Cancel**), with `stopPropagation` on the button so it no
+  longer also selects the row. On Confirm it deletes and refreshes the list. Applies to Parameters,
+  Roles, Relationships, and Tables.
+- **Frequent-sidebar clicks now load on the Model Edit page.** Deep-link recall (`?ws=&ds=`) only ran
+  in `OnInitializedAsync`, which doesn't re-fire when you click a Frequent shortcut while already on the
+  page (same component → only the query changes). Model Edit now applies it in `OnParametersSetAsync`
+  (guarded against re-applying the same value) and shows the loading spinner while it loads.
+- **Loading spinner on Pipelines + Audit.** Their Frequent-triggered loads (and index loads) now drive
+  the global busy overlay too, so every Frequent page shows a spinner while loading (matching Explore /
+  Refresh / Model Edit).
+
+### Changed
+- **Confirmations are now centered modal popups** (overlay) instead of inline cards, so an Apply/Delete
+  confirm is never lost below the fold.
+- **Blocking busy overlay on every seconds-long click, across all pages.** Query (Run DAX, load
+  workspaces/datasets/objects), Home (health check, check-for-updates), and Gateways now drive the
+  global `UiBusy` overlay — which covers the screen and intercepts clicks — so the user can't fire a
+  second action into a half-loaded page (matching Explore / Refresh / Pipelines / Audit / Model Edit).
+- **Descriptive, self-identifying container names.** Containers no longer show as Docker's random
+  names (`determined_hamilton`). The `.mcpb` extension (v1.10.2) now launches the MCP server as
+  **`daxter-mcp-<epoch>-<pid>`** (shell-wrapped `docker run … --name …`, with darwin/win32 variants;
+  `exec` preserves the stdio pipe), and the `bin/daxter` CLI wrapper names runs **`daxter-cli-<epoch>-<pid>`**
+  (the web console is already `daxter-web`). The suffix is a timestamp+pid — unique per launch so
+  concurrent clients don't collide; there is no per-Claude-session label because no session identity
+  is passed into `docker run`. Requires reinstalling the `.mcpb` to take effect.
+
 ## [1.10.0] - 2026-06-03
 
 ### Fixed

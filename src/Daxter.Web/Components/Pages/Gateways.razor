@@ -1,5 +1,6 @@
 @page "/gateways"
 @inject DaxterUi Ui
+@inject UiBusy BusyState
 
 <PageTitle>DAXter — Gateways</PageTitle>
 
@@ -24,9 +25,9 @@
 
     private async Task Load()
     {
-        busy = true; error = null;
+        busy = true; BusyState.Begin(); error = null;
         try { result = await Ui.GatewaysAsync(); loaded = true; }
         catch (Exception ex) { error = ex.Message; }
-        finally { busy = false; }
+        finally { busy = false; BusyState.End(); }
     }
 }

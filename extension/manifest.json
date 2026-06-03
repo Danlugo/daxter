@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "daxter",
   "display_name": "DAXter — Power BI Service",
-  "version": "1.10.0",
+  "version": "1.10.2",
   "description": "Query, inspect, refresh, and audit Power BI semantic models over XMLA + REST — from one Docker image.",
   "long_description": "DAXter is a Docker-only Power BI Service client. This extension launches the DAXter MCP server in its container, so the cross-platform .NET XMLA/ADOMD engine runs the same on macOS, Windows, and Linux. Sign in once with the `daxter_login` tool (device-code) or the web console; the token persists in the `daxter-tokens` volume. Reads and audits are always available; refresh/cache writes are gated behind an explicit opt-in. No env file and no credentials are stored in this extension — authentication is interactive sign-in.",
   "author": {
@@ -18,19 +18,25 @@
     "type": "binary",
     "entry_point": "docker",
     "mcp_config": {
-      "command": "docker",
+      "command": "/bin/sh",
       "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-v",
-        "daxter-tokens:/home/daxter/.daxter",
-        "ghcr.io/danlugo/daxter:latest",
-        "mcp"
+        "-c",
+        "exec docker run -i --rm --name daxter-mcp-$(date +%s)-$$ -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest mcp"
       ],
       "platform_overrides": {
         "darwin": {
-          "command": "/usr/local/bin/docker"
+          "command": "/bin/sh",
+          "args": [
+            "-c",
+            "exec /usr/local/bin/docker run -i --rm --name daxter-mcp-$(date +%s)-$$ -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest mcp"
+          ]
+        },
+        "win32": {
+          "command": "cmd",
+          "args": [
+            "/c",
+            "docker run -i --rm --name daxter-mcp-%RANDOM%%RANDOM% -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest mcp"
+          ]
         }
       }
     }

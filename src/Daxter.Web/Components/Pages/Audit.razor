@@ -3,6 +3,7 @@
 @inject UsageStore Usage
 @inject AuditHistoryStore AuditHist
 @inject IJSRuntime JS
+@inject UiBusy BusyState
 
 @* Cross-cutting audits. Today: Pipeline deployment-rule audits. Tomorrow: refresh status,
    measure dependencies, dataset health, … The page is built around an audit-type picker so
@@ -109,10 +110,10 @@ else
 
     private async Task LoadPipelines()
     {
-        indexBusy = true; error = null;
+        indexBusy = true; BusyState.Begin(); error = null;
         try { pipelines = await Ui.PipelineModelIndexAsync(); }
         catch (Exception ex) { error = ex.Message; pipelines = Array.Empty<PipelineModels>(); }
-        finally { indexBusy = false; }
+        finally { indexBusy = false; BusyState.End(); }
 
         // Deep-link arrived before the index — apply it now.
         if (!string.IsNullOrEmpty(Qpipeline) && Qpipeline != appliedPipeline && pipelines.Count > 0)

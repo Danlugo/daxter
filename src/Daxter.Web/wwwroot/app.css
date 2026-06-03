@@ -236,6 +236,11 @@ label.inline input, label.inline select { min-width:auto; }
 @keyframes daxter-spin { to { transform:rotate(360deg); } }
 /* Apply confirmation card — accent border to draw the eye before a write. */
 .card.confirm-apply { border:2px solid var(--accent); }
+/* Confirmation modal — centered popup so a confirm is never lost at the bottom of the page. */
+.modal-overlay { position:fixed; inset:0; z-index:2500; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.4); padding:1rem; }
+.modal { background:var(--bg); border:2px solid var(--accent); border-radius:var(--radius); box-shadow:var(--shadow); width:min(680px, 92vw); max-height:82vh; overflow:auto; padding:1.2rem 1.4rem; }
+.modal h3 { margin-top:0; }
+.modal pre.code { max-height:46vh; overflow:auto; }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

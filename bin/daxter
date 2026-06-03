@@ -16,7 +16,8 @@ set -euo pipefail
 IMAGE="${DAXTER_IMAGE:-daxter:latest}"
 CACHE_VOLUME="${DAXTER_CACHE_VOLUME:-daxter-tokens}"
 
-run_args=(--rm)
+# Descriptive, unique container name so `docker ps` is readable (daxter-cli-<epoch>-<pid>).
+run_args=(--rm --name "daxter-cli-$(date +%s)-$$")
 
 # Interactive TTY only when attached to a terminal (device-code login).
 if [ -t 0 ] && [ -t 1 ]; then
