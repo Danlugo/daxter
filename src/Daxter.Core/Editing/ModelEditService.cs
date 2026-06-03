@@ -11,6 +11,10 @@ public sealed record RoleMember(string Name);
 /// <summary>A table-level RLS filter: <paramref name="FilterDax"/> applied to <paramref name="Table"/>.</summary>
 public sealed record TableFilter(string Table, string FilterDax);
 
+/// <summary>A sourced (import) column: <paramref name="Name"/> of <paramref name="DataType"/> mapped to
+/// the M output column <paramref name="Source"/>.</summary>
+public sealed record SourceColumn(string Name, string DataType, string Source);
+
 /// <summary>
 /// Edits a Power BI model via the <b>Tabular Object Model (TOM)</b>: connects, mutates the in-memory
 /// model, and applies with <c>SaveChanges()</c> — the engine-sanctioned write path (hand-built
@@ -204,6 +208,83 @@ public sealed class ModelEditService : IDisposable
         return $"delete table [{name}]";
     }
 
+    /// <summary>Create or replace an <b>import table</b>: an M (Power Query) partition plus typed,
+    /// sourced columns. The columns map to the M query's output columns by name.</summary>
+    public string CreateImportTable(string name, string mExpression, IEnumerable<SourceColumn> columns)
+    {
+        Require(name, "name");
+        Require(mExpression, "m");
+        var cols = (columns ?? []).Where(c => !string.IsNullOrWhiteSpace(c.Name)).ToList();
+        if (cols.Count == 0)
+        {
+            throw new DaxterException("At least one column (name:dataType:sourceColumn) is required for an import table.");
+        }
+
+        var existing = _model.Tables.Find(name);
+        var verb = existing is null ? "create" : "replace";
+        var t = existing ?? new Tom.Table { Name = name };
+        if (existing is null) _model.Tables.Add(t);
+
+        t.Partitions.Clear();
+        t.Partitions.Add(new Tom.Partition
+        {
+            Name = name,
+            Source = new Tom.MPartitionSource { Expression = mExpression },
+        });
+
+        foreach (var c in cols)
+        {
+            if (t.Columns.Find(c.Name) is null)
+            {
+                t.Columns.Add(new Tom.DataColumn
+                {
+                    Name = c.Name,
+                    DataType = ParseDataType(c.DataType),
+                    SourceColumn = c.Source,
+                });
+            }
+        }
+
+        return $"{verb} import table [{name}] (M source, {cols.Count} column(s))";
+    }
+
+    // ---- relationships ----
+
+    /// <summary>Create or alter a single-column relationship fromTable[fromColumn] → toTable[toColumn]
+    /// (many-to-one by default). <paramref name="name"/> is optional (auto-derived if omitted).</summary>
+    public string UpsertRelationship(string fromTable, string fromColumn, string toTable, string toColumn,
+        string? name = null, string? crossFilter = null, bool isActive = true)
+    {
+        var fc = Table(fromTable).Columns.Find(fromColumn)
+                 ?? throw new DaxterException($"Column not found: [{fromColumn}] on [{fromTable}].");
+        var tc = Table(toTable).Columns.Find(toColumn)
+                 ?? throw new DaxterException($"Column not found: [{toColumn}] on [{toTable}].");
+
+        var relName = string.IsNullOrWhiteSpace(name)
+            ? $"{fromTable}_{fromColumn}_{toTable}_{toColumn}"
+            : name;
+        var existing = _model.Relationships.Find(relName) as Tom.SingleColumnRelationship;
+        var verb = existing is null ? "create" : "alter";
+        var r = existing ?? new Tom.SingleColumnRelationship { Name = relName };
+        if (existing is null) _model.Relationships.Add(r);
+
+        r.FromColumn = fc;
+        r.ToColumn = tc;
+        r.CrossFilteringBehavior = ParseCrossFilter(crossFilter);
+        r.IsActive = isActive;
+        return $"{verb} relationship [{fromTable}].[{fromColumn}] -> [{toTable}].[{toColumn}] " +
+               $"(name={relName}, crossFilter={r.CrossFilteringBehavior}, active={isActive})";
+    }
+
+    /// <summary>Delete a relationship by name.</summary>
+    public string DeleteRelationship(string name)
+    {
+        Require(name, "name");
+        var r = _model.Relationships.Find(name) ?? throw new DaxterException($"Relationship not found: [{name}].");
+        _model.Relationships.Remove(r);
+        return $"delete relationship [{name}]";
+    }
+
     // ---- raw TMSL escape hatch ----
 
     public string Raw(string tmsl)
@@ -256,6 +337,14 @@ public sealed class ModelEditService : IDisposable
         "administrator" or "admin" => Tom.ModelPermission.Administrator,
         "none" => Tom.ModelPermission.None,
         _ => throw new DaxterException($"Unknown model permission '{value}'. Use read|readRefresh|refresh|administrator|none."),
+    };
+
+    private static Tom.CrossFilteringBehavior ParseCrossFilter(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "single" or "onedirection" or "one" => Tom.CrossFilteringBehavior.OneDirection,
+        "both" or "bothdirections" => Tom.CrossFilteringBehavior.BothDirections,
+        "automatic" or "auto" => Tom.CrossFilteringBehavior.Automatic,
+        _ => throw new DaxterException($"Unknown cross-filter '{value}'. Use single|both|automatic."),
     };
 
     private static Tom.DataType ParseDataType(string value) => value.Trim().ToLowerInvariant() switch

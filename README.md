@@ -44,14 +44,14 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 |--------|----------|
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
 | **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
-| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table` (+ `delete-*`, raw `tmsl`) — TMSL, **dry-run by default**, gated, `.bim` backup before apply |
+| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply |
 | **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
 | **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-The MCP server exposes these at **full parity** as **45 tools** (`daxter_login` + 30 read + 14 gated
+The MCP server exposes these at **full parity** as **48 tools** (`daxter_login` + 30 read + 17 gated
 write/edit). See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
 

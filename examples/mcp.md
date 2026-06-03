@@ -121,3 +121,5 @@ written first. To apply, enable *Allow model edits* in the web console (or
 | "Create an RLS role `US` filtering Geography to US" | `daxter_edit_role` |
 | "Add a calculated column `Margin = [Revenue]-[Cost]` on Sales" | `daxter_edit_calculated_column` |
 | "Delete the measure `Old KPI`" | `daxter_delete_measure` |
+| "Add an import table `Region` from this M query with columns RegionKey, Region" | `daxter_create_import_table` |
+| "Relate Sales[RegionKey] to Region[RegionKey]" | `daxter_edit_relationship` |

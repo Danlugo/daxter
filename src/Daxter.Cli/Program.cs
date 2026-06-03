@@ -255,6 +255,13 @@ internal static class Program
         var filterDax = new Option<string?>("--filter") { Description = "DAX filter expression for --filter-table." };
         var partition = new Option<string?>("--partition") { Description = "Partition name." };
         var tmslOpt = new Option<string?>("--tmsl") { Description = "Raw TMSL command (escape hatch)." };
+        var columnsOpt = new Option<string?>("--columns") { Description = "Import-table columns: 'Name:dataType:sourceColumn', comma-separated." };
+        var fromTable = new Option<string?>("--from-table") { Description = "Relationship 'from' (many-side) table." };
+        var fromColumn = new Option<string?>("--from-column") { Description = "Relationship 'from' column." };
+        var toTable = new Option<string?>("--to-table") { Description = "Relationship 'to' (one-side) table." };
+        var toColumn = new Option<string?>("--to-column") { Description = "Relationship 'to' column." };
+        var crossFilter = new Option<string?>("--cross-filter") { Description = "Cross-filter: single | both | automatic (default single)." };
+        var active = new Option<bool>("--active") { Description = "Relationship is active (default true).", DefaultValueFactory = _ => true };
 
         Command Edit(string n, string d, Func<ParseResult, ModelEditService, string> build, params Option[] opts)
         {
@@ -306,6 +313,24 @@ internal static class Program
                 name, dax),
             Edit("delete-table", "Delete an entire table.",
                 (pr, svc) => svc.DeleteTable(RequireOption(pr, name, "--name")),
+                name),
+            Edit("import-table", "Create or replace an import table (M source + typed columns).",
+                (pr, svc) => svc.CreateImportTable(RequireOption(pr, name, "--name"), RequireOption(pr, m, "--m"),
+                    RequireOption(pr, columnsOpt, "--columns")
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(part => part.Split(':', StringSplitOptions.TrimEntries))
+                        .Select(p => p.Length >= 3
+                            ? new SourceColumn(p[0], p[1], p[2])
+                            : throw new DaxterException("Bad --columns spec. Use Name:dataType:sourceColumn (comma-separated)."))),
+                name, m, columnsOpt),
+            Edit("relationship", "Create or alter a relationship: fromTable[fromColumn] -> toTable[toColumn] (many-to-one).",
+                (pr, svc) => svc.UpsertRelationship(
+                    RequireOption(pr, fromTable, "--from-table"), RequireOption(pr, fromColumn, "--from-column"),
+                    RequireOption(pr, toTable, "--to-table"), RequireOption(pr, toColumn, "--to-column"),
+                    pr.GetValue(name), pr.GetValue(crossFilter), pr.GetValue(active)),
+                fromTable, fromColumn, toTable, toColumn, name, crossFilter, active),
+            Edit("delete-relationship", "Delete a relationship by name.",
+                (pr, svc) => svc.DeleteRelationship(RequireOption(pr, name, "--name")),
                 name),
             Edit("tmsl", "Execute a raw TMSL command (escape hatch).",
                 (pr, svc) => svc.Raw(RequireOption(pr, tmslOpt, "--tmsl")),

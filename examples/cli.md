@@ -148,6 +148,11 @@ written to `~/.daxter/backups/` before every apply, and the workspace XMLA endpo
 ./bin/daxter model edit column -t Sales -n Margin --dax "[Revenue]-[Cost]" --data-type double --yes
 ./bin/daxter model edit calc-table -n DimDate --dax "CALENDARAUTO()" --yes
 
+# Import table (M source + typed columns) and relationships:
+./bin/daxter model edit import-table -n Region --m 'let Source = Sql.Database("srv","db"){[Item="Region"]}[Data] in Source' --columns "RegionKey:int64:RegionKey,Region:string:Region" --yes
+./bin/daxter model edit relationship --from-table Sales --from-column RegionKey --to-table Region --to-column RegionKey --name Sales_Region --yes
+./bin/daxter model edit delete-relationship -n Sales_Region --yes
+
 # Deletes + raw TMSL escape hatch:
 ./bin/daxter model edit delete-measure -t Sales -n "Old KPI" --yes
 ./bin/daxter model edit tmsl --tmsl '{"delete":{"object":{"database":"Retail Model","table":"Sales","measure":"X"}}}' --yes

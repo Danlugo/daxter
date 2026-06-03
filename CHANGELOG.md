@@ -4,6 +4,21 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.4] - 2026-06-03
+
+### Added
+- **Model editing now covers relationships and structured (import) tables** — completing the
+  "create a table + relationships + measures" story.
+  - **Relationships:** `model edit relationship` / `delete-relationship` (CLI) and
+    `daxter_edit_relationship` / `daxter_delete_relationship` (MCP) — create/alter/delete a
+    single-column relationship `fromTable[fromColumn] → toTable[toColumn]` (many-to-one), with
+    cross-filter (`single|both|automatic`) and active/inactive.
+  - **Import tables:** `model edit import-table` (CLI) / `daxter_create_import_table` (MCP) —
+    create/replace a table with an **M (Power Query) source** partition + typed sourced columns
+    (`Name:dataType:sourceColumn`). Complements the existing calculated-table support.
+  - Same model-edit gate + `.bim` backup + dry-run as the other edits. **Verified live**: created
+    two import tables + a relationship, read them back, then deleted them (model left clean).
+
 ## [1.8.3] - 2026-06-03
 
 ### Fixed

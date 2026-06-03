@@ -403,6 +403,47 @@ public static class DaxterTools
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteTable(name), execute, ct);
 
+    [McpServerTool(Name = "daxter_create_import_table", Destructive = true, Title = "Create import table"),
+     Description("Create or replace an import table: an M (Power Query) source + typed columns mapped to the M output." + EditNote)]
+    public static Task<string> CreateImportTable(
+        [Description("Table name.")] string name,
+        [Description("The M (Power Query) expression for the partition source.")] string mExpression,
+        [Description("Columns as 'Name:dataType:sourceColumn', comma-separated (dataType: string|int64|double|decimal|dateTime|boolean).")] string columns,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.CreateImportTable(name, mExpression, ParseColumnSpecs(columns)), execute, ct);
+
+    [McpServerTool(Name = "daxter_edit_relationship", Destructive = true, Title = "Create / alter relationship"),
+     Description("Create or alter a single-column relationship fromTable[fromColumn] → toTable[toColumn] (many-to-one)." + EditNote)]
+    public static Task<string> EditRelationship(
+        [Description("'From' (many-side) table.")] string fromTable,
+        [Description("'From' column.")] string fromColumn,
+        [Description("'To' (one-side) table.")] string toTable,
+        [Description("'To' column.")] string toColumn,
+        [Description("Relationship name (optional; auto-derived if omitted).")] string? name = null,
+        [Description("Cross-filter: single | both | automatic (default single).")] string? crossFilter = null,
+        [Description("Whether the relationship is active (default true).")] bool isActive = true,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.UpsertRelationship(fromTable, fromColumn, toTable, toColumn, name, crossFilter, isActive), execute, ct);
+
+    [McpServerTool(Name = "daxter_delete_relationship", Destructive = true, Title = "Delete relationship"),
+     Description("Delete a relationship by name." + EditNote)]
+    public static Task<string> DeleteRelationship(
+        [Description("Relationship name.")] string name,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.DeleteRelationship(name), execute, ct);
+
+    private static IEnumerable<SourceColumn> ParseColumnSpecs(string spec) =>
+        (spec ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => part.Split(':', StringSplitOptions.TrimEntries))
+            .Select(p => p.Length >= 3
+                ? new SourceColumn(p[0], p[1], p[2])
+                : throw new DaxterException($"Bad column spec '{string.Join(":", p)}'. Use Name:dataType:sourceColumn."));
+
     [McpServerTool(Name = "daxter_edit_tmsl", Destructive = true, Title = "Run raw TMSL edit"),
      Description("Execute a raw TMSL command (createOrReplace / alter / delete / …) — the escape hatch for " +
                  "edits not covered by the typed tools." + EditNote)]
