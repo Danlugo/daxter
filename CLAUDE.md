@@ -87,8 +87,8 @@ Dockerfile          # multi-stage: sdk build+test → slim non-root runtime
 
 `Daxter.Cli` is a thin shell over `Daxter.Core`. The MCP server (`Mcp/DaxterTools.cs`,
 discovered via `[McpServerTool]`) is **another shell over the same Core** — keep CLI and MCP
-at parity (33 MCP tools today). Shared logic (prod detection, token provider) lives in Core
-or shared CLI helpers, not duplicated.
+at parity (49 MCP tools today). Shared logic (prod detection, token provider, the refresh
+scheduler/queue) lives in Core or shared CLI helpers, not duplicated.
 
 ## Conventions
 

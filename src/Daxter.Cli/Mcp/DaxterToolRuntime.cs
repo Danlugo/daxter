@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Daxter.Core;
 using Daxter.Core.Audit;
 using Daxter.Core.Auth;
@@ -10,6 +11,7 @@ using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
+using Daxter.Core.Scheduling;
 
 namespace Daxter.Cli.Mcp;
 
@@ -182,31 +184,30 @@ internal static class DaxterToolRuntime
         });
 
     /// <summary>
-    /// Gated, ordered partition refresh: executes one single-partition refresh at a time, in order,
-    /// so the order is honored (the engine ignores partition order within a single TMSL request).
-    /// Dry-run lists the order; execute applies each with optional retry, returning a per-partition summary.
+    /// Gated refresh that <b>enqueues</b> a job onto the shared refresh queue rather than executing it
+    /// inline. The single worker (hosted by the web container) drains the queue, serialized one refresh
+    /// per model. Dry-run returns the plan without queueing; execute enqueues once writes are enabled.
+    /// This is how the MCP server "always routes refreshes through the scheduler".
     /// </summary>
-    public static Task<string> RefreshPartitionsOrderedAsync(
+    public static Task<string> EnqueueRefreshAsync(
         string? workspace, string? dataset,
-        Func<MaintenanceService, IReadOnlyList<(string Partition, string Tmsl)>> plan,
+        RefreshKind kind, string? table, string? partition,
+        PartitionOrder order, RefreshType type, IReadOnlyList<string>? partitions,
         bool execute, int retries, CancellationToken ct)
         => Guard(async () =>
         {
             var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             if (string.IsNullOrWhiteSpace(config.Dataset))
             {
-                throw new DaxterException("A dataset is required for maintenance operations.");
+                throw new DaxterException("A dataset is required for refresh operations.");
             }
 
-            var factory = new AdomdXmlaSessionFactory(config, Provider(config));
-            using var session = await factory.CreateAsync(ct);
-            var service = new MaintenanceService(session, config.Dataset!);
-            var commands = plan(service);
-            var order = string.Join(", ", commands.Select(c => c.Partition));
+            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries);
+            var plan = RefreshTitle.Describe(spec);
 
             if (!execute)
             {
-                return $"DRY RUN — would refresh {commands.Count} partition(s) one at a time, in order: {order}";
+                return $"DRY RUN — not queued. Would queue: {plan}. Set execute=true (with writes enabled) to queue it.";
             }
 
             if (!WritesAllowed())
@@ -220,18 +221,52 @@ internal static class DaxterToolRuntime
                 return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
             }
 
-            var notes = new List<string>();
-            var done = new List<string>();
-            foreach (var (partition, tmsl) in commands)
-            {
-                RetryPolicy.Execute(() => service.Execute(tmsl), retries,
-                    onRetry: (a, m, ex) => notes.Add($"{partition}: transient failure (retry {a}/{m}): {ex.Message}"));
-                done.Add(partition);
-            }
-
-            var prefix = notes.Count > 0 ? string.Join("\n", notes) + "\n" : "";
-            return $"{prefix}EXECUTED — refreshed {done.Count} partition(s) in order: {string.Join(", ", done)}";
+            var store = new RefreshQueueStore();
+            var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Mcp);
+            return $"QUEUED as job #{job.Id} — {plan}. The DAXter worker (web container) runs it, serialized one refresh per model.{WorkerWarning(store)} Track with daxter_refresh_jobs.";
         });
+
+    /// <summary>A warning suffix when no live worker is draining the queue, else empty.</summary>
+    internal static string WorkerWarning(RefreshQueueStore store)
+    {
+        var age = store.HeartbeatAge();
+        return age is null || age > TimeSpan.FromSeconds(30)
+            ? " ⚠ No refresh worker is currently running — start the DAXter web container (it hosts the worker) so queued jobs execute."
+            : "";
+    }
+
+    /// <summary>JSON snapshot of the shared refresh queue (all interfaces), plus worker liveness.</summary>
+    public static string RefreshJobsJson(string? workspace, string? dataset, int top)
+    {
+        var store = new RefreshQueueStore();
+        var jobs = (!string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(dataset))
+            ? store.For(workspace, dataset)
+            : store.All();
+
+        var age = store.HeartbeatAge();
+        var worker = age is null ? "none"
+            : age > TimeSpan.FromSeconds(30) ? $"stale ({(int)age.Value.TotalSeconds}s ago)"
+            : "alive";
+
+        var list = jobs.Take(Math.Max(1, top)).Select(j => new
+        {
+            id = j.Id,
+            status = j.Status.ToString(),
+            origin = j.Origin.ToString(),
+            title = j.Title,
+            step = j.Step,
+            model = $"{j.Spec.Workspace} / {j.Spec.Dataset}",
+            partitions = j.PartitionTotal is { } t ? $"{j.PartitionDone ?? 0}/{t}" : null,
+            created = j.Created,
+            started = j.Started,
+            finished = j.Finished,
+            error = j.Error,
+        });
+
+        return JsonSerializer.Serialize(
+            new { worker, total = jobs.Count, jobs = list },
+            new JsonSerializerOptions { WriteIndented = true });
+    }
 
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
     {

@@ -1,440 +1,112 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Daxter.Core;
-using Daxter.Core.Auth;
-using Daxter.Core.Configuration;
-using Daxter.Core.Connection;
 using Daxter.Core.Maintenance;
+using Daxter.Core.Scheduling;
 using Microsoft.Extensions.Logging;
 
 namespace Daxter.Web.Services;
 
-public enum RefreshKind { Model, Table, Partition, AllPartitions, SomePartitions }
-public enum JobStatus { Queued, Running, Succeeded, Failed, Canceled, Interrupted }
-
-/// <summary>What a refresh job targets. Table/Partition are null where not applicable.</summary>
-public sealed record RefreshSpec(
-    RefreshKind Kind, string Workspace, string Dataset, string? Table, string? Partition,
-    PartitionOrder Order, RefreshType Type = RefreshType.Full, IReadOnlyList<string>? Partitions = null);
-
-/// <summary>One timestamped step in a job's activity log.</summary>
-public sealed record JobEvent(DateTimeOffset Time, string Message);
-
-/// <summary>A queued/running/finished refresh, shown on the Jobs page.</summary>
-public sealed class Job
-{
-    public required int Id { get; init; }
-    public required string Title { get; init; }
-    public required RefreshSpec Spec { get; init; }
-    public JobStatus Status { get; set; } = JobStatus.Queued;
-    public DateTimeOffset Created { get; init; } = DateTimeOffset.Now;
-    public DateTimeOffset? Started { get; set; }
-    public DateTimeOffset? Finished { get; set; }
-    public string? Error { get; set; }
-
-    // Cancellation: the live session is aborted (disposed) to stop a running refresh. Runtime-only.
-    [JsonIgnore] internal IDisposable? Session { get; set; }
-    [JsonIgnore] internal bool CancelRequested { get; set; }
-
-    /// <summary>Timestamped activity log (Queued → Started → Connecting → Executing → Done/…).</summary>
-    public List<JobEvent> Events { get; } = new();
-
-    /// <summary>The latest activity message (what the job is doing now).</summary>
-    public string? Step { get; set; }
-
-    /// <summary>Estimated total seconds from history (set at enqueue); null if no history yet.</summary>
-    public double? EstimateSeconds { get; set; }
-
-    /// <summary>For multi-partition jobs: total partitions and how many have completed.</summary>
-    public int? PartitionTotal { get; set; }
-    public int? PartitionDone { get; set; }
-
-    [JsonIgnore] public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
-    [JsonIgnore] public TimeSpan? Duration => Started is { } s ? (Finished ?? DateTimeOffset.Now) - s : null;
-
-    /// <summary>0..1 progress while running — by completed partitions when known, else elapsed vs estimate.</summary>
-    [JsonIgnore] public double? Progress
-    {
-        get
-        {
-            if (Status != JobStatus.Running) return null;
-            if (PartitionTotal is { } total && total > 0 && PartitionDone is { } done)
-                return Math.Clamp((double)done / total, 0, 1);
-            if (EstimateSeconds is { } est && est > 0 && Duration is { } d)
-                return Math.Clamp(d.TotalSeconds / est, 0, 0.99);
-            return null;
-        }
-    }
-}
-
 /// <summary>
-/// Runs model/table/partition refreshes as background <see cref="Job"/>s, one at a time (a single
-/// worker), so many can be queued and they execute <b>in order</b>. Refreshes are writes, so they
-/// are gated exactly like the MCP server: allowed only when <see cref="ConfigState.AllowWrites"/>
-/// is on, and <b>always refused</b> for PROD-looking targets. Raises <see cref="Changed"/> for the
-/// live Jobs page.
+/// Web façade over the shared <see cref="RefreshQueueStore"/>. Enqueues refreshes — enforcing the
+/// write gate exactly like the MCP server (only when <see cref="ConfigState.AllowWrites"/> is on,
+/// and never for PROD-looking targets) — and exposes the queue to the Jobs/Refresh pages. The
+/// refreshes themselves execute in <see cref="RefreshWorkerHostedService"/>, the single worker this
+/// web container hosts and that every interface's refreshes (CLI, MCP, UI) route through. Because
+/// the queue lives on the shared <c>~/.daxter</c> volume, the Jobs page shows jobs enqueued by the
+/// CLI and MCP server too.
 /// </summary>
 public sealed class JobService
 {
     private readonly ConfigState _state;
     private readonly ILogger<JobService> _log;
     private readonly JobHistoryStore _history;
+    private readonly RefreshQueueStore _store;
 
-    private readonly object _gate = new();
-    private readonly List<Job> _jobs = new();
-    private readonly ConcurrentQueue<Job> _queue = new();
-    private int _nextId = 1;
-    private bool _workerRunning;
-
+    /// <summary>Raised when the queue changes (enqueue/cancel/remove or a worker status transition).</summary>
     public event Action? Changed;
 
-    private static string StorePath => Path.Combine(
-        Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath(), ".daxter", "jobs.json");
+    /// <summary>Lets the hosted worker notify the live Jobs/Refresh pages of a status change.</summary>
+    internal void RaiseChanged() => Changed?.Invoke();
 
-    public JobService(ConfigState state, ILogger<JobService> log, JobHistoryStore history)
+    public JobService(ConfigState state, ILogger<JobService> log, JobHistoryStore history, RefreshQueueStore store)
     {
         _state = state;
         _log = log;
         _history = history;
-        LoadPersisted();
+        _store = store;
     }
 
-    private void LoadPersisted()
-    {
-        try
-        {
-            if (!File.Exists(StorePath)) return;
-            var loaded = JsonSerializer.Deserialize<List<Job>>(File.ReadAllText(StorePath));
-            if (loaded is null) return;
-
-            foreach (var j in loaded)
-            {
-                // Queued/Running jobs can't survive a restart — the worker is gone. Mark them
-                // Interrupted (don't auto-resume a write) so the record is kept but accurate.
-                if (j.Status is JobStatus.Queued or JobStatus.Running)
-                {
-                    j.Status = JobStatus.Interrupted;
-                    j.Finished ??= j.Started ?? j.Created;
-                    j.Step = "Interrupted by restart";
-                }
-                _jobs.Add(j);
-            }
-            _nextId = (_jobs.Count > 0 ? _jobs.Max(j => j.Id) : 0) + 1;
-        }
-        catch
-        {
-            // Best-effort: corrupt file shouldn't break the app.
-        }
-    }
-
-    private void Save()
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            List<Job> snapshot;
-            lock (_gate) snapshot = _jobs.ToList();
-            File.WriteAllText(StorePath, JsonSerializer.Serialize(snapshot));
-        }
-        catch
-        {
-            // Best-effort persistence; never let it break a refresh.
-        }
-    }
-
-    private void NotifyChanged()
-    {
-        Save();
-        Changed?.Invoke();
-    }
-
-    /// <summary>History signature: same kind+dataset+table+type pool together (partition name ignored).</summary>
-    private static string Sig(RefreshSpec s) => $"{s.Kind}|{s.Workspace}|{s.Dataset}|{s.Table}|{s.Type}";
+    /// <summary>History signature: same kind+model+table+type pool together (partition name ignored).</summary>
+    public static string Sig(RefreshSpec s) => $"{s.Kind}|{s.Workspace}|{s.Dataset}|{s.Table}|{s.Type}";
 
     /// <summary>Estimated duration (seconds) for a spec, from past runs; null if none yet.</summary>
     public double? EstimateSeconds(RefreshSpec spec) => _history.EstimateSeconds(Sig(spec));
 
-    /// <summary>A copy of a job's activity log (thread-safe).</summary>
-    public IReadOnlyList<JobEvent> EventsOf(int id)
-    {
-        lock (_gate)
-            return _jobs.FirstOrDefault(j => j.Id == id)?.Events.ToList() ?? new List<JobEvent>();
-    }
-
-    private void AddEvent(Job job, string message)
-    {
-        lock (_gate)
-        {
-            job.Events.Add(new JobEvent(DateTimeOffset.Now, message));
-            job.Step = message;
-        }
-    }
+    /// <summary>A copy of a job's activity log.</summary>
+    public IReadOnlyList<JobEvent> EventsOf(int id) => _store.Get(id)?.Events ?? new List<JobEvent>();
 
     /// <summary>Validates the write gate and enqueues a refresh. Throws if writes are off or the
     /// target is production.</summary>
-    public Job Enqueue(RefreshSpec spec)
+    public RefreshJob Enqueue(RefreshSpec spec)
     {
         if (!_state.AllowWrites)
-        {
             throw new DaxterException(
                 "Writes are disabled. Turn on \"Allow writes\" on the Configure page to run refreshes.");
-        }
 
         if (_state.ToConfig(spec.Workspace, spec.Dataset).IsProductionTarget())
-        {
-            throw new DaxterException(
-                $"Refusing to refresh a production target ('{spec.Workspace}').");
-        }
+            throw new DaxterException($"Refusing to refresh a production target ('{spec.Workspace}').");
 
-        Job job;
-        lock (_gate)
-        {
-            job = new Job { Id = _nextId++, Title = TitleFor(spec), Spec = spec };
-            job.EstimateSeconds = _history.EstimateSeconds(Sig(spec));
-            _jobs.Add(job);
-            _queue.Enqueue(job);
-        }
-
-        AddEvent(job, "Queued");
+        var job = _store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Web, _history.EstimateSeconds(Sig(spec)));
         _log.LogInformation("Queued job #{Id}: {Title}", job.Id, job.Title);
-        EnsureWorker();
-        NotifyChanged();
+        RaiseChanged();
         return job;
     }
 
     /// <summary>All jobs, newest first.</summary>
-    public IReadOnlyList<Job> Snapshot()
+    public IReadOnlyList<RefreshJob> Snapshot() => _store.All();
+
+    /// <summary>Jobs for one model, newest first (for the Refresh page's tracker).</summary>
+    public IReadOnlyList<RefreshJob> For(string workspace, string dataset) => _store.For(workspace, dataset);
+
+    public int ActiveCount => _store.All().Count(j => j.IsActive);
+
+    /// <summary>Whether a worker is currently draining the shared queue: "alive" | "stale" | "none",
+    /// plus the age of the last heartbeat. Lets the UI show that queued jobs will actually run.</summary>
+    public (string State, TimeSpan? Age) WorkerStatus()
     {
-        lock (_gate) return _jobs.OrderByDescending(j => j.Id).ToList();
+        var age = _store.HeartbeatAge();
+        var state = age is null ? "none" : age > TimeSpan.FromSeconds(30) ? "stale" : "alive";
+        return (state, age);
     }
 
-    /// <summary>Jobs for one dataset, newest first (for the Refresh page's tracker).</summary>
-    public IReadOnlyList<Job> For(string workspace, string dataset)
-    {
-        lock (_gate)
-            return _jobs
-                .Where(j => j.Spec.Workspace == workspace && j.Spec.Dataset == dataset)
-                .OrderByDescending(j => j.Id).ToList();
-    }
+    /// <summary>True if a refresh is queued or running for this model.</summary>
+    public bool IsRefreshing(string workspace, string dataset) => _store.IsRefreshing(workspace, dataset);
 
-    public int ActiveCount
-    {
-        get { lock (_gate) return _jobs.Count(j => j.Status is JobStatus.Queued or JobStatus.Running); }
-    }
-
-    /// <summary>True if a refresh is queued or running for this dataset (drives the "Refreshing…" state).</summary>
-    public bool IsRefreshing(string workspace, string dataset)
-    {
-        lock (_gate)
-            return _jobs.Any(j => j.Spec.Workspace == workspace && j.Spec.Dataset == dataset
-                && j.Status is JobStatus.Queued or JobStatus.Running);
-    }
-
-    /// <summary>Cancels a job: queued jobs are skipped; a running refresh is aborted (connection closed).</summary>
+    /// <summary>Cancels a job (queued → canceled; running → flagged for the worker to abort).</summary>
     public void Cancel(int id)
     {
-        Job? job;
-        IDisposable? session = null;
-        lock (_gate)
-        {
-            job = _jobs.FirstOrDefault(j => j.Id == id);
-            if (job is null) return;
-
-            if (job.Status == JobStatus.Queued)
-            {
-                job.Status = JobStatus.Canceled;
-                job.Finished = DateTimeOffset.Now;   // worker skips it when dequeued
-            }
-            else if (job.Status == JobStatus.Running)
-            {
-                job.CancelRequested = true;
-                session = job.Session;               // abort outside the lock
-            }
-            else
-            {
-                return;
-            }
-        }
-
+        _store.Cancel(id);
         _log.LogInformation("Cancel requested for job #{Id}", id);
-        if (session is not null)
-        {
-            try { session.Dispose(); } catch { /* aborting the running command */ }
-        }
-
-        NotifyChanged();
+        RaiseChanged();
     }
 
-    /// <summary>Removes all finished jobs (succeeded/failed/canceled/interrupted) from the list.</summary>
+    /// <summary>Removes all finished jobs from the list.</summary>
     public void ClearFinished()
     {
-        lock (_gate) _jobs.RemoveAll(j => j.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Canceled or JobStatus.Interrupted);
-        NotifyChanged();
+        _store.RemoveFinished();
+        RaiseChanged();
     }
 
-    /// <summary>Removes one finished job (not a queued/running one) from the list.</summary>
+    /// <summary>Removes one finished job (not a queued/running one).</summary>
     public void Remove(int id)
     {
-        lock (_gate)
-        {
-            var j = _jobs.FirstOrDefault(x => x.Id == id);
-            if (j is not null && j.Status is not (JobStatus.Queued or JobStatus.Running))
-                _jobs.Remove(j);
-        }
-        NotifyChanged();
+        _store.Remove(id);
+        RaiseChanged();
     }
 
-    /// <summary>Re-runs a finished/interrupted job by enqueuing the same spec (re-validates write gates).</summary>
-    public Job? Resume(int id)
+    /// <summary>Re-runs a finished/interrupted job by enqueuing the same spec (re-validates gates).</summary>
+    public RefreshJob? Resume(int id)
     {
-        RefreshSpec? spec;
-        lock (_gate) spec = _jobs.FirstOrDefault(j => j.Id == id)?.Spec;
+        var spec = _store.Get(id)?.Spec;
         return spec is null ? null : Enqueue(spec);
-    }
-
-    private void EnsureWorker()
-    {
-        lock (_gate)
-        {
-            if (_workerRunning) return;
-            _workerRunning = true;
-        }
-
-        _ = Task.Run(WorkerLoopAsync);
-    }
-
-    private async Task WorkerLoopAsync()
-    {
-        try
-        {
-            while (_queue.TryDequeue(out var job))
-            {
-                if (job.Status == JobStatus.Canceled) continue; // canceled while queued
-
-                job.Status = JobStatus.Running;
-                job.Started = DateTimeOffset.Now;
-                AddEvent(job, "Started");
-                _log.LogInformation("Running job #{Id}: {Title}", job.Id, job.Title);
-                NotifyChanged();
-
-                try
-                {
-                    await ExecuteAsync(job);
-                    job.Status = JobStatus.Succeeded;
-                    AddEvent(job, $"Completed in {(int)(job.Duration?.TotalSeconds ?? 0)}s");
-                    _history.Record(Sig(job.Spec), job.Duration?.TotalSeconds ?? 0);
-                    _log.LogInformation("Job #{Id} succeeded in {Ms} ms", job.Id, (long)(job.Duration?.TotalMilliseconds ?? 0));
-                }
-                catch (Exception) when (job.CancelRequested)
-                {
-                    job.Status = JobStatus.Canceled;
-                    AddEvent(job, "Canceled");
-                    _log.LogInformation("Job #{Id} canceled", job.Id);
-                }
-                catch (Exception ex)
-                {
-                    job.Status = JobStatus.Failed;
-                    job.Error = ex.Message;
-                    AddEvent(job, "Failed");
-                    _log.LogError("Job #{Id} failed: {Error}", job.Id, ex.Message);
-                }
-                finally
-                {
-                    job.Finished = DateTimeOffset.Now;
-                    NotifyChanged();
-                }
-            }
-        }
-        finally
-        {
-            lock (_gate) _workerRunning = false;
-            // A job may have been enqueued between the empty-check and clearing the flag.
-            if (!_queue.IsEmpty) EnsureWorker();
-        }
-    }
-
-    private async Task ExecuteAsync(Job job)
-    {
-        var spec = job.Spec;
-        var cfg = _state.ToConfig(spec.Workspace, spec.Dataset);
-        ITokenProvider provider = new MsalTokenProvider(cfg, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
-        var factory = new AdomdXmlaSessionFactory(cfg, provider);
-
-        AddEvent(job, "Connecting to the model…");
-        NotifyChanged();
-        var session = await factory.CreateAsync();
-        lock (_gate) job.Session = session;   // so Cancel can abort the running command
-
-        try
-        {
-            var maint = new MaintenanceService(session, spec.Dataset);
-
-            if (spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions)
-            {
-                // Refresh each partition as its own command so we can report "X of N" and per-
-                // partition timing (a single multi-partition command is opaque). Sequential by
-                // construction, in the listed order.
-                var parts = spec.Kind == RefreshKind.AllPartitions
-                    ? maint.OrderedPartitionNames(spec.Table!, spec.Order)
-                    : spec.Partitions ?? Array.Empty<string>();
-
-                job.PartitionTotal = parts.Count;
-                job.PartitionDone = 0;
-                AddEvent(job, $"Refreshing {parts.Count} partition(s) of '{spec.Table}', one at a time");
-                NotifyChanged();
-
-                for (var i = 0; i < parts.Count; i++)
-                {
-                    if (job.CancelRequested) throw new OperationCanceledException();
-
-                    var name = parts[i];
-                    job.Step = $"Partition {i + 1}/{parts.Count}: {name}";
-                    AddEvent(job, $"[{i + 1}/{parts.Count}] refreshing {name}…");
-                    NotifyChanged();
-
-                    var sw = System.Diagnostics.Stopwatch.StartNew();
-                    maint.Execute(maint.BuildPartitionRefresh(spec.Table!, name, spec.Type));
-                    sw.Stop();
-
-                    job.PartitionDone = i + 1;
-                    AddEvent(job, $"[{i + 1}/{parts.Count}] ✓ {name} — {(int)sw.Elapsed.TotalSeconds}s");
-                    NotifyChanged();
-                }
-            }
-            else
-            {
-                var tmsl = spec.Kind switch
-                {
-                    RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
-                    RefreshKind.Table => maint.BuildTableRefresh(spec.Table!, spec.Type),
-                    RefreshKind.Partition => maint.BuildPartitionRefresh(spec.Table!, spec.Partition!, spec.Type),
-                    _ => throw new DaxterException("Unknown refresh kind."),
-                };
-
-                AddEvent(job, "Processing (TMSL refresh)…");
-                NotifyChanged();
-                maint.Execute(tmsl);
-            }
-        }
-        finally
-        {
-            lock (_gate) job.Session = null;
-            try { session.Dispose(); } catch { /* may already be disposed by Cancel */ }
-        }
-    }
-
-    private static string TitleFor(RefreshSpec s)
-    {
-        var t = s.Type == RefreshType.Full ? "" : $" [{s.Type}]";
-        return s.Kind switch
-        {
-            RefreshKind.Model => $"Refresh model · {s.Dataset}{t}",
-            RefreshKind.Table => $"Refresh table · {s.Table}{t}",
-            RefreshKind.Partition => $"Refresh partition · {s.Table}[{s.Partition}]{t}",
-            RefreshKind.AllPartitions => $"Refresh all partitions · {s.Table} ({(s.Order == PartitionOrder.NewestFirst ? "newest→oldest" : "oldest→newest")}){t}",
-            RefreshKind.SomePartitions => $"Refresh {s.Partitions?.Count ?? 0} partitions · {s.Table}{t}",
-            _ => "Refresh",
-        };
     }
 }

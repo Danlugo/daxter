@@ -19,7 +19,10 @@ builder.Services.AddSingleton<VersionService>();
 builder.Services.AddSingleton<UsageStore>();
 builder.Services.AddSingleton<QueryHistoryStore>();
 builder.Services.AddSingleton<JobHistoryStore>();
+builder.Services.AddSingleton<Daxter.Core.Scheduling.RefreshQueueStore>();
 builder.Services.AddSingleton<JobService>();
+// The single shared refresh worker — drains the queue every interface (CLI/MCP/UI) enqueues to.
+builder.Services.AddHostedService<RefreshWorkerHostedService>();
 builder.Services.AddSingleton<PipelineScanStore>();
 builder.Services.AddSingleton<AuditHistoryStore>();
 builder.Services.AddSingleton<Daxter.Core.Audit.SavedAuditCheckStore>();

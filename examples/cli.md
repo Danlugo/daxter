@@ -78,23 +78,31 @@ device-code `.env`, this is just `./bin/daxter login` then `./bin/daxter ws gate
 
 ## Maintenance / Ops (safe by default)
 
-Mutating commands print the exact TMSL/REST call and refuse to run without `--yes`;
-`--dry-run` previews; PROD-looking targets require `--force`.
+Refreshes are **queued** onto a shared queue and run by the single worker hosted by the DAXter **web
+container** — serialized one refresh per model (different models in parallel). `refresh …` commands
+return a **job id**; they refuse to queue without `--yes`; `--dry-run` prints the plan (no connection
+needed); PROD-looking targets require `--force`. **Start the web container** so its worker drains the
+queue.
 
 ```bash
 ./bin/daxter refresh history --top 10            # recent refreshes (REST)
-./bin/daxter refresh model --dry-run             # preview the TMSL, run nothing
-./bin/daxter refresh model --yes                 # full model refresh (TMSL)
-./bin/daxter refresh table --table Sales --yes   # one table
+./bin/daxter refresh model --dry-run             # print the plan, queue nothing
+./bin/daxter refresh model --yes                 # QUEUE a full-model refresh → prints job id
+./bin/daxter refresh table --table Sales --yes   # queue a one-table refresh
 ./bin/daxter refresh partitions --table Sales --order newest-first --dry-run
-./bin/daxter refresh partitions --table Sales --order newest-first --yes --retries 3  # retry on transient failure
-./bin/daxter refresh trigger --yes               # whole-model refresh via REST
-./bin/daxter cache clear --dry-run               # ClearCache XML preview
+./bin/daxter refresh partitions --table Sales --order newest-first --yes --retries 3  # queue; worker retries on transient failure
+./bin/daxter refresh status                      # show the queue (queued/running/finished) + worker liveness
+./bin/daxter refresh trigger --yes               # whole-model refresh via REST (async, NOT queued)
+./bin/daxter cache clear --dry-run               # ClearCache XML preview (NOT queued)
 ```
 
-> **`--retries N`** (on any `refresh …` and `cache clear`) re-attempts on a *transient* failure
-> (connection drop, timeout, throttling) up to N more times with linear backoff (5 s, 10 s, … cap 30 s);
-> default 0. It retries the operation **within the run** — it can't recover from the process being killed.
+> **The worker runs the refresh, not the CLI process.** `refresh … --yes` enqueues and returns
+> immediately; killing the CLI doesn't stop a queued/running job. If `refresh status` reports
+> *worker: none detected*, start the web container (`daxter web`) — it hosts the worker.
+
+> **`--retries N`** (on any `refresh …`) is stored on the job; the **worker** re-attempts on a *transient*
+> failure (connection drop, timeout, throttling) up to N more times with linear backoff (5 s, 10 s, …
+> cap 30 s); default 0. Because the worker owns execution, retries survive the CLI process exiting.
 
 ## Workspace inventory (REST)
 

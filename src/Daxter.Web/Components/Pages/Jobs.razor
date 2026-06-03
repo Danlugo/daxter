@@ -6,9 +6,28 @@
 
 <h1>Jobs@(Svc.ActiveCount > 0 ? $" ({Svc.ActiveCount} running)" : "")</h1>
 <p class="muted">
-    Refresh operations run here as background jobs — one at a time, in the order you launch them.
-    Click a row for its activity log. Launch refreshes from the <a href="refresh">Refresh</a> page.
+    Every refresh — whether launched from this console, the CLI, or an MCP client — runs through one
+    shared queue, <strong>one refresh per model at a time</strong> (different models in parallel). The
+    <em>Source</em> badge shows which interface queued each job. Click a row for its activity log.
+    Launch refreshes from the <a href="refresh">Refresh</a> page.
 </p>
+
+@{ var (wState, wAge) = Svc.WorkerStatus(); }
+<div class="worker-status worker-@wState">
+    <span class="dot">●</span>
+    @if (wState == "alive")
+    {
+        <span>Refresh worker running — queued jobs will execute.</span>
+    }
+    else if (wState == "stale")
+    {
+        <span>Refresh worker last seen @((int)(wAge?.TotalSeconds ?? 0))s ago — it may be down; queued jobs won't run until it recovers.</span>
+    }
+    else
+    {
+        <span>No refresh worker is running — start the DAXter web container so queued jobs execute.</span>
+    }
+</div>
 
 @if (!string.IsNullOrEmpty(Qws) && !string.IsNullOrEmpty(Qds))
 {
@@ -32,7 +51,7 @@ else
     <div class="grid-wrap">
         <table class="grid">
             <thead>
-                <tr><th></th><th>#</th><th>Status</th><th>Job</th><th>Step</th><th>Time / est.</th><th></th></tr>
+                <tr><th></th><th>#</th><th>Status</th><th>Source</th><th>Job</th><th>Step</th><th>Time / est.</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var j in jobs)
@@ -41,7 +60,11 @@ else
                         <td class="nowrap">@(expanded.Contains(j.Id) ? "▾" : "▸")</td>
                         <td class="nowrap">@j.Id</td>
                         <td><span class="badge badge-job-@j.Status">@j.Status</span></td>
-                        <td>@j.Title</td>
+                        <td><span class="badge badge-origin" title="Queued from @j.Origin">@j.Origin</span></td>
+                        <td>
+                            @j.Title
+                            <div class="row-sub">@j.Spec.Workspace · @j.Spec.Dataset</div>
+                        </td>
                         <td class="nowrap muted">@(j.Step ?? "")</td>
                         <td class="nowrap">@TimeCell(j)</td>
                         <td @onclick:stopPropagation="true">
@@ -58,11 +81,11 @@ else
                     </tr>
                     @if (j.Status == JobStatus.Running && j.Progress is { } p)
                     {
-                        <tr class="progress-row"><td colspan="7"><div class="pbar"><div class="pbar-fill" style="width:@((int)(p * 100))%"></div></div></td></tr>
+                        <tr class="progress-row"><td colspan="8"><div class="pbar"><div class="pbar-fill" style="width:@((int)(p * 100))%"></div></div></td></tr>
                     }
                     @if (expanded.Contains(j.Id))
                     {
-                        <tr class="detail-row"><td colspan="7">
+                        <tr class="detail-row"><td colspan="8">
                             <div class="job-detail">
                                 <div class="muted">@j.Spec.Workspace / @j.Spec.Dataset</div>
                                 <ul class="timeline">
@@ -85,7 +108,7 @@ else
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
 
-    private IReadOnlyList<Job> jobs = Array.Empty<Job>();
+    private IReadOnlyList<RefreshJob> jobs = Array.Empty<RefreshJob>();
     private readonly HashSet<int> expanded = new();
     private Timer? ticker;
 
@@ -93,8 +116,9 @@ else
     {
         Svc.Changed += OnChanged;
         Refresh();
-        // Tick once a second so elapsed time / progress update while a job runs.
-        ticker = new Timer(_ => InvokeAsync(() => { if (Svc.ActiveCount > 0) StateHasChanged(); }),
+        // Tick once a second so elapsed time / progress update while a job runs, and so jobs queued
+        // by the CLI/MCP server (other processes, same shared queue) surface promptly here too.
+        ticker = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }),
             null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
@@ -113,7 +137,7 @@ else
     private void Toggle(int id) { if (!expanded.Remove(id)) expanded.Add(id); }
     private void OnChanged() => InvokeAsync(() => { Refresh(); StateHasChanged(); });
 
-    private string TimeCell(Job j)
+    private string TimeCell(RefreshJob j)
     {
         var elapsed = j.Duration is { } d ? (d.TotalSeconds < 1 ? "<1s" : $"{(int)d.TotalSeconds}s") : "";
         if (j.Status == JobStatus.Running && j.EstimateSeconds is { } est)

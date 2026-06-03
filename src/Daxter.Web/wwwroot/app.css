@@ -185,6 +185,13 @@ label.inline input, label.inline select { min-width:auto; }
 .badge-job-Queued { background:var(--faint); } .badge-job-Running { background:var(--link); }
 .badge-job-Succeeded { background:var(--ok); } .badge-job-Failed { background:var(--bad); }
 .badge-job-Canceled { background:var(--faint); } .badge-job-Interrupted { background:var(--warn); }
+.badge-origin { background:var(--faint); text-transform:uppercase; letter-spacing:.02em; }
+.row-sub { font-size:.76rem; color:var(--muted); margin-top:.1rem; }
+.worker-status { display:flex; align-items:center; gap:.4rem; font-size:.8rem; padding:.35rem .6rem; border-radius:4px; margin:.5rem 0; }
+.worker-status .dot { font-size:.7rem; line-height:1; }
+.worker-alive { background:var(--info-bg); } .worker-alive .dot { color:var(--ok); }
+.worker-stale { background:var(--info-bg); } .worker-stale .dot { color:var(--warn); }
+.worker-none  { background:var(--bad-bg); } .worker-none .dot { color:var(--bad); }
 .grid tr.lvl-Failed td { background:var(--bad-bg); } .grid tr.lvl-Running td { background:var(--info-bg); }
 .grid tr.lvl-Canceled td { color:var(--faint); }
 .card.refreshing { border-color:var(--link); background:var(--info-bg); max-width:none; }

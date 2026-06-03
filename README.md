@@ -45,15 +45,31 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
 | **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
 | **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply |
-| **Ops** | `refresh model/table/partitions` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
+| **Ops** | `refresh model/table/partitions` (queued through the shared worker) · `refresh status` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
 | **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-The MCP server exposes these at **full parity** as **48 tools** (`daxter_login` + 30 read + 17 gated
-write/edit). See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
+The MCP server exposes these at **full parity** as **49 tools** (`daxter_login` + 31 read + 17 gated
+write/edit). Refreshes from any interface (CLI, MCP, UI) are **queued through one shared worker** that
+runs them **one per model at a time** — see [Refresh scheduler](#refresh-scheduler). See
+[`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
+
+## Refresh scheduler
+
+DAXter is one integrated system — the CLI, MCP server and web console are thin interfaces over a single
+engine. **All refreshes route through one shared queue** (file-backed on the `daxter-tokens` volume),
+drained by a single **worker hosted by the web container**. The worker runs **one refresh per model at a
+time** (different models in parallel), honours partition order + `--retries`, and records job status.
+
+- `daxter refresh model|table|partitions … --yes` (CLI) and `daxter_refresh` (MCP) **enqueue** a job and
+  return a **job id** — they don't execute inline. Two refreshes can never collide on the same model.
+- Track jobs with `daxter refresh status` (CLI), `daxter_refresh_jobs` (MCP), or the web **Jobs** page —
+  all read the same queue, so a CLI- or MCP-launched refresh shows up everywhere.
+- **Run the web container** (below) so its worker drains the queue — it does so whether or not you open
+  the UI. Without a worker, jobs simply wait (a heartbeat warning tells you none is running).
 
 ## Web console
 
@@ -68,7 +84,9 @@ docker run -d -p 8080:8080 --name daxter-web \
 
 Open it → **Status → Sign in** (device-code) → **⚙ Configure** to set defaults / *Allow writes*. The
 `daxter-tokens` volume holds your **token and settings** — the single config source the CLI and MCP
-server read too. Full page-by-page tour in [`docs/PRODUCT.md`](docs/PRODUCT.md).
+server read too. This container also **hosts the refresh worker** that drains the shared queue (see
+[Refresh scheduler](#refresh-scheduler)), so keep it running to execute refreshes launched from any
+interface. Full page-by-page tour in [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 ## CLI
 
@@ -98,9 +116,10 @@ runnable example in **[`examples/cli.md`](examples/cli.md)**.
 The same image is a **Model Context Protocol** server (stdio) via the `mcp` subcommand — add it with
 the [extension](#1-one-click-extension-easiest) or the config block in [`SETUP.md`](SETUP.md). Tools
 accept optional `workspace`/`dataset` (name **or** id); results are JSON, capped to 1,000 rows. The
-write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only execute when
+write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only act when
 `execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
-`DAXTER_MCP_ALLOW_WRITES=true`. Once on, **PROD is allowed by default**; set
+`DAXTER_MCP_ALLOW_WRITES=true`. `daxter_refresh` **queues** the job (returns a job id) for the shared
+worker to run — track it with `daxter_refresh_jobs`. Once on, **PROD is allowed by default**; set
 `DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block it. The **model-edit** tools (`daxter_edit_*`,
 `daxter_delete_*`, `daxter_set_*`, `daxter_create_*`, raw `daxter_edit_tmsl`) sit behind a **separate,
 stricter gate** — `DAXTER_MCP_ALLOW_MODEL_EDIT=true` or the web console *Allow model edits* — and take

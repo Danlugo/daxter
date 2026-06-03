@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "daxter",
   "display_name": "DAXter — Power BI Service",
-  "version": "1.8.4",
+  "version": "1.9.0",
   "description": "Query, inspect, refresh, and audit Power BI semantic models over XMLA + REST — from one Docker image.",
   "long_description": "DAXter is a Docker-only Power BI Service client. This extension launches the DAXter MCP server in its container, so the cross-platform .NET XMLA/ADOMD engine runs the same on macOS, Windows, and Linux. Sign in once with the `daxter_login` tool (device-code) or the web console; the token persists in the `daxter-tokens` volume. Reads and audits are always available; refresh/cache writes are gated behind an explicit opt-in. No env file and no credentials are stored in this extension — authentication is interactive sign-in.",
   "author": {

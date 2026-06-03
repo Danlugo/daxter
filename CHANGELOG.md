@@ -4,6 +4,37 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-06-03
+
+### Added
+- **Refresh scheduler engine — one shared queue, all interfaces.** DAXter is one integrated system:
+  the CLI, MCP server and web console are thin interfaces over a single `Daxter.Core` engine. Refreshes
+  now route through a shared **`RefreshQueueStore`** (file-backed on the `~/.daxter` volume) drained by a
+  single **`RefreshScheduler`** worker **hosted by the web container**. The worker serializes **one
+  refresh per model at a time** (different models run in parallel), honours ordered per-partition
+  processing and `--retries`, and writes a heartbeat so any interface can tell a worker is live.
+  - **New tool / commands:** `daxter refresh status` (CLI) and `daxter_refresh_jobs` (MCP) list the
+    shared queue (queued/running/finished, across **all** interfaces) and show worker liveness — bringing
+    the tool count to **49**.
+  - The web **Jobs** page now shows refreshes enqueued by the CLI and MCP server too (same shared queue),
+    with a **Source** badge per job (Web/CLI/MCP) and a **worker-liveness banner** so you can see at a
+    glance whether queued jobs will actually run. Cancel / Resume / remove operate on the shared queue.
+  - **Verified end-to-end:** the CLI enqueued two jobs for different models; the web container's worker
+    started, drained both in parallel, and reported status — with graceful per-job failure handling.
+
+### Changed
+- **CLI/MCP refreshes now QUEUE instead of executing inline.** `daxter refresh model|table|partition|partitions`
+  and `daxter_refresh` enqueue a job (returning a **job id**) and the worker runs it — guaranteeing two
+  refreshes can never run against the same model at once, no matter which interface launched them. Dry-run
+  prints the **plan** (connection-free); enqueueing needs no live XMLA connection. Run the DAXter web
+  container to host the worker that drains the queue (it drains the queue whether or not you use the UI).
+  `refresh trigger` (REST, async/server-managed) and `cache clear` are unchanged (not queued).
+
+### Note
+- The web Jobs list moved from `jobs.json` to the shared `queue.json` — existing job *history* resets once
+  (estimates in the separate history store are preserved). In-flight jobs are not auto-resumed across this
+  upgrade.
+
 ## [1.8.4] - 2026-06-03
 
 ### Added
@@ -417,9 +448,9 @@ All notable changes to DAXter are documented here. The format follows
   same spec, re-checking the write gates) and **×** (remove from the list), on both the Jobs page
   and the Refresh-page tracker. **Clear finished** now also removes interrupted jobs.
 - **Frequent sidebar disambiguates same-named tables/datasets.** Standardized models often reuse
-  table names across datasets, so the Frequent list couldn't tell two `FACT - Sales` apart. Each
+  table names across datasets, so the Frequent list couldn't tell two `Sales` facts apart. Each
   table now shows its **dataset** as a subtitle (and each dataset its **workspace**), plus a hover
-  **tooltip** with the full context (e.g. *"FACT - Sales — in dataset 'Sales Brand' (workspace
+  **tooltip** with the full context (e.g. *"Sales — in dataset 'Retail Model' (workspace
   'Sales Analytics - Dev')"*).
 
 ## [1.6.7] - 2026-05-30

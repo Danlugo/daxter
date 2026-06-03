@@ -4,7 +4,6 @@
 @inject UsageStore Usage
 @inject IJSRuntime JS
 @implements IDisposable
-@using Daxter.Core.Maintenance
 
 <PageTitle>DAXter — Refresh</PageTitle>
 
@@ -256,7 +255,7 @@ else
     private string? historyError;
     private bool historyBusy;
 
-    private IReadOnlyList<Job> Mine => Jobs.For(workspace, dataset);
+    private IReadOnlyList<RefreshJob> Mine => Jobs.For(workspace, dataset);
 
     private void ResumeJob(int id)
     {

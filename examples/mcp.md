@@ -78,19 +78,26 @@ Deployment rules are inferred by comparing a model's parameter values across pip
 | Ask | Tool |
 |-----|------|
 | "When was the model last refreshed?" | `daxter_refresh_history` |
+| "List the refresh jobs / what's queued or running?" | `daxter_refresh_jobs` (shared queue, all interfaces; shows worker liveness) |
 
 ## Gated write tools (off by default)
 
-`daxter_refresh` and `daxter_clear_cache` are **dry-run by default** and only execute when
-`execute=true` **and** writes are enabled. PROD targets are allowed by default once writes are on
-(set `DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them).
+`daxter_refresh` and `daxter_clear_cache` are **dry-run by default** and only act when `execute=true`
+**and** writes are enabled. PROD targets are allowed by default once writes are on (set
+`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them).
+
+**Refreshes are queued, not run inline.** `daxter_refresh` with `execute=true` **enqueues** a job onto
+the shared queue and returns a **job id**; the single worker hosted by the DAXter **web container** runs
+it, **one refresh per model at a time** (different models in parallel). So keep the web container running,
+and track progress with `daxter_refresh_jobs`. If no worker is live, the tool says so and the job waits.
 
 | Ask | Behavior |
 |-----|----------|
-| "Show me the TMSL to refresh the Sales table" | `daxter_refresh` (dry run — returns TMSL) |
+| "Show the plan to refresh the Sales table" | `daxter_refresh` (dry run — returns the plan, queues nothing) |
 | "Refresh the Sales table" (writes disabled) | refused with instructions to enable |
-| "Refresh the Sales table, execute it" (writes enabled) | runs the refresh |
-| "Refresh all Sales partitions newest-first, retry 3× on failure" | `daxter_refresh` with `scope: "partitions"`, `order: "newest-first"`, `execute: true`, `retries: 3` |
+| "Refresh the Sales table, do it" (writes enabled) | **queues** it → returns job #N; the worker runs it |
+| "Refresh all Sales partitions newest-first, retry 3× on failure" | `daxter_refresh` with `scope: "partitions"`, `order: "newest-first"`, `execute: true`, `retries: 3` (queued; worker honors order + retries) |
+| "Is that refresh done yet?" | `daxter_refresh_jobs` (optionally with `workspace`/`dataset` to filter to one model) |
 
 To enable writes, tick **⚙ Configure → Allow writes** in the web console (it saves to the shared
 volume the MCP server reads) — or set `DAXTER_MCP_ALLOW_WRITES=true` in the server env — then

@@ -10,6 +10,7 @@ using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
+using Daxter.Core.Scheduling;
 
 namespace Daxter.Cli;
 
@@ -968,52 +969,50 @@ internal static class Program
         var topOption = new Option<int>("--top") { Description = "Rows of refresh history.", DefaultValueFactory = _ => 10 };
         var retriesOption = new Option<int>("--retries") { Description = "Retry on transient failure: number of extra attempts (default 0; e.g. 3). Linear backoff." };
 
-        var model = new Command("model", "Refresh the whole model (TMSL).") { typeOption, dryRun, yes, force, retriesOption };
+        var model = new Command("model", "Queue a whole-model refresh (runs in the shared worker).") { typeOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(model);
-        model.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
-            svc => svc.BuildModelRefresh(MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
+        model.SetAction((pr, ct) => EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
+            RefreshKind.Model, null, null, PartitionOrder.NewestFirst,
+            MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
 
-        var table = new Command("table", "Refresh one table (TMSL).") { tableOption, typeOption, dryRun, yes, force, retriesOption };
+        var table = new Command("table", "Queue a single-table refresh.") { tableOption, typeOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(table);
-        table.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
-            svc => svc.BuildTableRefresh(RequireOption(pr, tableOption, "--table"),
-                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
+        table.SetAction((pr, ct) => EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
+            RefreshKind.Table, RequireOption(pr, tableOption, "--table"), null, PartitionOrder.NewestFirst,
+            MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
 
-        var partition = new Command("partition", "Refresh one named partition of a table (TMSL).")
+        var partition = new Command("partition", "Queue a single named-partition refresh.")
         {
             tableOption, partitionOption, typeOption, dryRun, yes, force, retriesOption,
         };
         connectionOptions.AddTo(partition);
-        partition.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
-            svc => svc.BuildPartitionRefresh(
-                RequireOption(pr, tableOption, "--table"),
-                RequireOption(pr, partitionOption, "--partition"),
-                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
+        partition.SetAction((pr, ct) => EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
+            RefreshKind.Partition, RequireOption(pr, tableOption, "--table"),
+            RequireOption(pr, partitionOption, "--partition"), PartitionOrder.NewestFirst,
+            MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
 
-        var partitions = new Command("partitions", "Refresh a table's partitions one at a time in order (newest-first), or a --partitions subset.")
+        var partitions = new Command("partitions", "Queue a partition refresh — all of a table in order (newest-first), or a --partitions subset.")
         {
             tableOption, partitionsListOption, orderOption, typeOption, dryRun, yes, force, retriesOption,
         };
         connectionOptions.AddTo(partitions);
-        partitions.SetAction((pr, ct) => RunOrderedPartitionsAsync(() => connectionOptions.Resolve(pr),
-            svc =>
-            {
-                var table = RequireOption(pr, tableOption, "--table");
-                var type = MaintenanceService.ParseRefreshType(pr.GetValue(typeOption));
-                var subset = pr.GetValue(partitionsListOption);
-                // One single-partition command each, executed sequentially → the order is honored
-                // (Analysis Services ignores partition order within a single TMSL request).
-                return string.IsNullOrWhiteSpace(subset)
-                    ? svc.BuildOrderedPartitionCommands(table, ParseOrder(pr.GetValue(orderOption)), type)
-                    : svc.BuildOrderedPartitionCommands(table,
-                        subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), type);
-            },
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
+        partitions.SetAction((pr, ct) =>
+        {
+            var subset = pr.GetValue(partitionsListOption);
+            var parts = string.IsNullOrWhiteSpace(subset)
+                ? null
+                : subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
+                parts is null ? RefreshKind.AllPartitions : RefreshKind.SomePartitions,
+                RequireOption(pr, tableOption, "--table"), null, ParseOrder(pr.GetValue(orderOption)),
+                MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), parts,
+                pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct);
+        });
 
-        var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force, retriesOption };
+        var trigger = new Command("trigger", "Trigger a model refresh via REST (async, server-managed — not queued through the worker).") { dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(trigger);
         trigger.SetAction((pr, ct) => RunRefreshTriggerAsync(() => connectionOptions.Resolve(pr),
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
@@ -1023,9 +1022,13 @@ internal static class Program
         history.SetAction((pr, ct) => RunRefreshHistoryAsync(() => connectionOptions.Resolve(pr),
             () => pr.GetValue(outputOption), pr.GetValue(topOption), ct));
 
-        return new Command("refresh", "Refresh models / tables / partition(s); view history.")
+        var status = new Command("status", "Show refresh jobs on the shared queue (queued/running/finished, all interfaces).") { topOption };
+        connectionOptions.AddTo(status);
+        status.SetAction((pr, ct) => RunRefreshStatusAsync(() => connectionOptions.Resolve(pr), pr.GetValue(topOption)));
+
+        return new Command("refresh", "Queue model / table / partition(s) refreshes; view status & history.")
         {
-            model, table, partition, partitions, trigger, history,
+            model, table, partition, partitions, trigger, history, status,
         };
     }
 
@@ -1069,40 +1072,100 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunOrderedPartitionsAsync(
+    /// <summary>
+    /// Enqueues a refresh onto the shared queue (no inline execution). The single worker — hosted by
+    /// the DAXter web container — drains the queue and runs it, serialized one refresh per model.
+    /// Dry-run prints the plan; without --yes it refuses; PROD-looking targets need --force. Prints the
+    /// job id to stdout. Connection-free: enqueueing only writes to the shared <c>~/.daxter</c> volume.
+    /// </summary>
+    private static Task<int> EnqueueRefreshAsync(
         Func<DaxterConfig> configFactory,
-        Func<MaintenanceService, IReadOnlyList<(string Partition, string Tmsl)>> plan,
+        RefreshKind kind, string? table, string? partition,
+        PartitionOrder order, RefreshType type, IReadOnlyList<string>? partitions,
         bool dryRun, bool yes, bool force, int retries, CancellationToken ct)
     {
         try
         {
             var config = configFactory();
             RequireDataset(config);
-            var factory = BuildSessionFactory(config);
+            if (string.IsNullOrWhiteSpace(config.Workspace))
+                throw new DaxterException("A workspace is required (set DAXTER_WORKSPACE or --workspace).");
 
-            using var session = await factory.CreateAsync(ct);
-            var service = new MaintenanceService(session, config.Dataset!);
-            var commands = plan(service);
+            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries);
+            var plan = RefreshTitle.Describe(spec);
 
-            var preview = $"Refresh {commands.Count} partition(s) one at a time, in this order:\n" +
-                          string.Join("\n", commands.Select((c, i) => $"  {i + 1}. {c.Partition}"));
-
-            return ApplySafety(config, preview, dryRun, yes, force, () =>
+            if (dryRun)
             {
-                var n = commands.Count;
-                var i = 0;
-                foreach (var (partition, tmsl) in commands)
-                {
-                    i++;
-                    RetryPolicy.Execute(() => service.Execute(tmsl), retries,
-                        onRetry: (a, m, ex) => Console.Error.WriteLine($"  {partition}: transient failure (retry {a}/{m}): {ex.Message}"));
-                    Console.Error.WriteLine($"  [{i}/{n}] refreshed {partition}");
-                }
-            }, successMessage: $"Refreshed {commands.Count} partition(s) in order.");
+                Console.Error.WriteLine("-- dry run; not queued --");
+                Console.Out.WriteLine(plan);
+                return Task.FromResult(0);
+            }
+
+            if (!yes)
+            {
+                Console.Out.WriteLine(plan);
+                Console.Error.WriteLine("Refusing to queue without --yes. Re-run with --yes (or --dry-run to preview).");
+                return Task.FromResult(0);
+            }
+
+            if (LooksLikeProd(config) && !force)
+            {
+                Console.Error.WriteLine($"daxter: target looks like PRODUCTION ('{config.Workspace}'). Re-run with --force to proceed.");
+                return Task.FromResult(1);
+            }
+
+            var store = new RefreshQueueStore();
+            var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Cli);
+            Console.Out.WriteLine(job.Id);
+            Console.Error.WriteLine($"Queued as job #{job.Id} — {plan}. The DAXter worker (web container) runs it, serialized per model.");
+
+            var age = store.HeartbeatAge();
+            Console.Error.WriteLine(age is null || age > TimeSpan.FromSeconds(30)
+                ? "⚠ No refresh worker detected — start the DAXter web container so queued jobs execute. Track with `daxter refresh status`."
+                : "Track with `daxter refresh status`.");
+            return Task.FromResult(0);
         }
         catch (Exception ex)
         {
-            return Fail(ex);
+            return Task.FromResult(Fail(ex));
+        }
+    }
+
+    /// <summary>Prints the shared refresh queue (all interfaces) plus whether a worker is draining it.</summary>
+    private static Task<int> RunRefreshStatusAsync(Func<DaxterConfig> configFactory, int top)
+    {
+        try
+        {
+            var store = new RefreshQueueStore();
+
+            DaxterConfig? config = null;
+            try { config = configFactory(); } catch { /* status needs no resolvable config */ }
+
+            var jobs = (config is { Workspace: { Length: > 0 } ws, Dataset: { Length: > 0 } ds })
+                ? store.For(ws, ds)
+                : store.All();
+
+            var age = store.HeartbeatAge();
+            var worker = age is null ? "none detected"
+                : age > TimeSpan.FromSeconds(30) ? $"stale ({(int)age.Value.TotalSeconds}s ago)"
+                : "alive";
+            Console.Error.WriteLine($"worker: {worker}   jobs: {jobs.Count}");
+
+            foreach (var j in jobs.Take(Math.Max(1, top)))
+            {
+                var parts = j.PartitionTotal is { } t ? $" [{j.PartitionDone ?? 0}/{t}]" : "";
+                var dur = j.Duration is { } d ? $" {(int)d.TotalSeconds}s" : "";
+                Console.Out.WriteLine($"#{j.Id,-4} {j.Status,-11} {j.Origin,-3} {j.Title}{parts}{dur}");
+                if (!string.IsNullOrWhiteSpace(j.Step) && j.IsActive)
+                    Console.Out.WriteLine($"        → {j.Step}");
+                if (!string.IsNullOrWhiteSpace(j.Error))
+                    Console.Out.WriteLine($"        ! {j.Error}");
+            }
+            return Task.FromResult(0);
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult(Fail(ex));
         }
     }
 

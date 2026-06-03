@@ -42,6 +42,12 @@ If your Claude Desktop has **Settings → Extensions**, this is the whole instal
 
 That's the whole thing for reading/querying — name the workspace in your request and go. **To set a default workspace, override the tenant, or enable writes (refresh from chat),** run the web console once ([step 3](#3-sign-in-to-power-bi-and-set-your-defaults)); those settings persist to the same volume the extension uses.
 
+> **Refreshes are queued and run by the web container.** When you ask Claude to refresh, the MCP server
+> **enqueues** a job onto the shared `daxter-tokens` volume and the **web console's worker runs it** (one
+> refresh per model at a time). So keep the web console **running** (`daxter web`) for chat/CLI refreshes
+> to execute — it drains the queue whether or not you have the page open. Track jobs with the
+> `daxter_refresh_jobs` tool, the web **Jobs** page, or `daxter refresh status` (CLI).
+
 No JSON editing, no env file. The extension is only a **launcher** for the same Docker image, so the .NET/XMLA engine still runs in the container on any OS. Auth is **sign-in only** — no credentials are stored in the extension. For an agent-driven setup, a hand-configured server, or service-principal / headless automation, use the manual steps below.
 
 > **Tool permissions — set them in one click.** Claude Desktop asks before each tool by default.

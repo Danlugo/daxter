@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Daxter.Core;
 using Daxter.Core.Editing;
 using Daxter.Core.Maintenance;
+using Daxter.Core.Scheduling;
 using ModelContextProtocol.Server;
 
 namespace Daxter.Cli.Mcp;
@@ -226,10 +227,12 @@ public static class DaxterTools
     // ---- Gated write tools (DRY-RUN by default; enable writes via the web console toggle or DAXTER_MCP_ALLOW_WRITES) ----
 
     [McpServerTool(Name = "daxter_refresh", Destructive = true, Title = "Refresh model / table / partition"), Description(
-        "Refresh a model/table/partition(s). DRY-RUN by default (returns the TMSL without running). " +
-        "To execute, set execute=true AND enable writes (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true). " +
+        "Refresh a model/table/partition(s). DRY-RUN by default (returns the plan without queueing). " +
+        "To run, set execute=true AND enable writes (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true). " +
+        "Refreshes are QUEUED onto a shared queue and run by the single worker (the web container), serialized one refresh per " +
+        "model (different models run in parallel); this returns a job id — track it with daxter_refresh_jobs. " +
         "PROD targets are allowed by default; set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block them. " +
-        "scope=partition refreshes ONE partition; scope=partitions refreshes all of a table's partitions (or the subset in 'partitions'), processed in order.")]
+        "scope=partition refreshes ONE partition; scope=partitions refreshes all of a table's partitions (or the subset in 'partitions'), in order.")]
     public static Task<string> Refresh(
         [Description("Scope: model | table | partition | partitions")] string scope = "model",
         [Description("Table name (required for table/partition/partitions).")] string? table = null,
@@ -237,39 +240,44 @@ public static class DaxterTools
         [Description("Comma-separated partition names for scope=partitions (a subset). Omit to refresh ALL partitions of the table.")] string? partitions = null,
         [Description("Refresh type: full|automatic|calculate|dataOnly|clearValues")] string? type = null,
         [Description("Partition order for scope=partitions: newest-first | oldest-first")] string? order = null,
-        [Description("Actually execute (default false = dry run).")] bool execute = false,
+        [Description("Actually queue it (default false = dry run).")] bool execute = false,
         [Description("Retry the refresh up to N times on transient failure (default 0; e.g. 3). Linear backoff.")] int retries = 0,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
     {
         var s = scope.Trim().ToLowerInvariant();
+        var rtype = MaintenanceService.ParseRefreshType(type);
 
-        // scope=partitions: execute one single-partition refresh at a time, in order (the engine
-        // ignores order within one TMSL request, so DAXter drives the order from the client).
-        if (s == "partitions")
+        var (kind, parts) = s switch
         {
-            var t = table ?? throw new DaxterException("table is required for scope=partitions.");
-            var rtype = MaintenanceService.ParseRefreshType(type);
-            return DaxterToolRuntime.RefreshPartitionsOrderedAsync(workspace, dataset,
-                svc => string.IsNullOrWhiteSpace(partitions)
-                    ? svc.BuildOrderedPartitionCommands(t, DaxterToolRuntime.ParseOrder(order), rtype)
-                    : svc.BuildOrderedPartitionCommands(t,
-                        partitions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), rtype),
-                execute, retries, ct);
-        }
-
-        return DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => s switch
-        {
-            "model" => svc.BuildModelRefresh(MaintenanceService.ParseRefreshType(type)),
-            "table" => svc.BuildTableRefresh(
-                table ?? throw new DaxterException("table is required for scope=table."),
-                MaintenanceService.ParseRefreshType(type)),
-            "partition" => svc.BuildPartitionRefresh(
-                table ?? throw new DaxterException("table is required for scope=partition."),
-                partition ?? throw new DaxterException("partition is required for scope=partition."),
-                MaintenanceService.ParseRefreshType(type)),
+            "model" => (RefreshKind.Model, (IReadOnlyList<string>?)null),
+            "table" => (RefreshKind.Table, null),
+            "partition" => (RefreshKind.Partition, null),
+            "partitions" => string.IsNullOrWhiteSpace(partitions)
+                ? (RefreshKind.AllPartitions, null)
+                : (RefreshKind.SomePartitions,
+                    partitions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)),
             _ => throw new DaxterException($"Unknown scope '{scope}'. Use model | table | partition | partitions."),
-        }, execute, ct, retries);
+        };
+
+        if (kind is RefreshKind.Table or RefreshKind.Partition or RefreshKind.AllPartitions or RefreshKind.SomePartitions
+            && string.IsNullOrWhiteSpace(table))
+            throw new DaxterException($"table is required for scope={s}.");
+        if (kind == RefreshKind.Partition && string.IsNullOrWhiteSpace(partition))
+            throw new DaxterException("partition is required for scope=partition.");
+
+        return DaxterToolRuntime.EnqueueRefreshAsync(
+            workspace, dataset, kind, table, partition,
+            DaxterToolRuntime.ParseOrder(order), rtype, parts, execute, retries, ct);
     }
+
+    [McpServerTool(Name = "daxter_refresh_jobs", ReadOnly = true, Title = "List refresh jobs"), Description(
+        "List refresh jobs on the shared queue (queued/running/finished) — across ALL interfaces (CLI, MCP, web). " +
+        "Pass workspace+dataset to filter to one model. Shows whether a worker is currently running to drain the queue.")]
+    public static string RefreshJobs(
+        [Description("Filter to one model's workspace (optional; needs dataset too).")] string? workspace = null,
+        [Description("Filter to one model's dataset (optional; needs workspace too).")] string? dataset = null,
+        [Description("Most recent N jobs (default 20).")] int top = 20)
+        => DaxterToolRuntime.RefreshJobsJson(workspace, dataset, top);
 
     [McpServerTool(Name = "daxter_clear_cache", Destructive = true, Title = "Clear data cache"), Description(
         "Clear the model's data cache. DRY-RUN by default; requires execute=true AND writes enabled " +
