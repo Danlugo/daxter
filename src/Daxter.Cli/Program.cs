@@ -968,25 +968,25 @@ internal static class Program
                 MaintenanceService.ParseRefreshType(pr.GetValue(typeOption))),
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
 
-        var partitions = new Command("partitions", "Refresh a table's partitions in order, or a --partitions subset (TMSL, sequential).")
+        var partitions = new Command("partitions", "Refresh a table's partitions one at a time in order (newest-first), or a --partitions subset.")
         {
             tableOption, partitionsListOption, orderOption, typeOption, dryRun, yes, force, retriesOption,
         };
         connectionOptions.AddTo(partitions);
-        partitions.SetAction((pr, ct) => RunTmslAsync(() => connectionOptions.Resolve(pr),
+        partitions.SetAction((pr, ct) => RunOrderedPartitionsAsync(() => connectionOptions.Resolve(pr),
             svc =>
             {
                 var table = RequireOption(pr, tableOption, "--table");
                 var type = MaintenanceService.ParseRefreshType(pr.GetValue(typeOption));
                 var subset = pr.GetValue(partitionsListOption);
-                // maxParallelism=1 → process in the listed order (a plain refresh runs in parallel).
+                // One single-partition command each, executed sequentially → the order is honored
+                // (Analysis Services ignores partition order within a single TMSL request).
                 return string.IsNullOrWhiteSpace(subset)
-                    ? svc.BuildPartitionsRefresh(table, ParseOrder(pr.GetValue(orderOption)), type, maxParallelism: 1)
-                    : svc.BuildPartitionsRefresh(table,
-                        subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                        type, maxParallelism: 1);
+                    ? svc.BuildOrderedPartitionCommands(table, ParseOrder(pr.GetValue(orderOption)), type)
+                    : svc.BuildOrderedPartitionCommands(table,
+                        subset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), type);
             },
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct, pr.GetValue(retriesOption)));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
 
         var trigger = new Command("trigger", "Trigger a model refresh via REST (no XMLA write needed).") { dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(trigger);
@@ -1037,6 +1037,43 @@ internal static class Program
             return ApplySafety(config, command, dryRun, yes, force, () =>
                 RetryPolicy.Execute(() => service.Execute(command), retries,
                     onRetry: (a, m, ex) => Console.Error.WriteLine($"daxter: transient failure (retry {a}/{m}): {ex.Message}")));
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunOrderedPartitionsAsync(
+        Func<DaxterConfig> configFactory,
+        Func<MaintenanceService, IReadOnlyList<(string Partition, string Tmsl)>> plan,
+        bool dryRun, bool yes, bool force, int retries, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var factory = BuildSessionFactory(config);
+
+            using var session = await factory.CreateAsync(ct);
+            var service = new MaintenanceService(session, config.Dataset!);
+            var commands = plan(service);
+
+            var preview = $"Refresh {commands.Count} partition(s) one at a time, in this order:\n" +
+                          string.Join("\n", commands.Select((c, i) => $"  {i + 1}. {c.Partition}"));
+
+            return ApplySafety(config, preview, dryRun, yes, force, () =>
+            {
+                var n = commands.Count;
+                var i = 0;
+                foreach (var (partition, tmsl) in commands)
+                {
+                    i++;
+                    RetryPolicy.Execute(() => service.Execute(tmsl), retries,
+                        onRetry: (a, m, ex) => Console.Error.WriteLine($"  {partition}: transient failure (retry {a}/{m}): {ex.Message}"));
+                    Console.Error.WriteLine($"  [{i}/{n}] refreshed {partition}");
+                }
+            }, successMessage: $"Refreshed {commands.Count} partition(s) in order.");
         }
         catch (Exception ex)
         {

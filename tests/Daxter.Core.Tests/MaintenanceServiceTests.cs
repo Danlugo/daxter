@@ -37,93 +37,58 @@ public class MaintenanceServiceTests
         Assert.Contains("\"table\": \"Sales\"", tmsl);
     }
 
+    // Ordered partition refresh = one single-partition command per partition, executed sequentially
+    // by the caller (the engine ignores order within a single TMSL request, so a multi-partition
+    // refresh can't control order). These assert the command list is correctly built and ordered.
+
     [Fact]
-    public void Partitions_refresh_orders_newest_first()
+    public void OrderedPartitionCommands_newest_first_one_command_each()
     {
         var session = new FakeSession(q =>
             q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
                 ? new QueryResult(["ID"], [[1L]])
                 : new QueryResult(["Name"], [["2025Q1"], ["2026Q1"], ["2025Q3"]]));
 
-        var tmsl = new MaintenanceService(session, "DB")
-            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full);
+        var cmds = new MaintenanceService(session, "DB")
+            .BuildOrderedPartitionCommands("Sales", PartitionOrder.NewestFirst, RefreshType.Full);
 
-        // Newest (2026Q1) should appear before the oldest (2025Q1).
-        Assert.True(tmsl.IndexOf("2026Q1", StringComparison.Ordinal)
-                    < tmsl.IndexOf("2025Q1", StringComparison.Ordinal));
+        Assert.Equal(["2026Q1", "2025Q3", "2025Q1"], cmds.Select(c => c.Partition).ToArray());  // newest → oldest
+        Assert.All(cmds, c =>
+        {
+            Assert.Contains($"\"partition\": \"{c.Partition}\"", c.Tmsl);   // each command is that one partition
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(c.Tmsl, "\"refresh\""));
+        });
     }
 
     [Fact]
-    public void Partitions_refresh_orders_oldest_first()
+    public void OrderedPartitionCommands_oldest_first()
     {
         var session = new FakeSession(q =>
             q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
                 ? new QueryResult(["ID"], [[1L]])
                 : new QueryResult(["Name"], [["2026Q1"], ["2025Q1"]]));
 
-        var tmsl = new MaintenanceService(session, "DB")
-            .BuildPartitionsRefresh("Sales", PartitionOrder.OldestFirst, RefreshType.Full);
+        var cmds = new MaintenanceService(session, "DB")
+            .BuildOrderedPartitionCommands("Sales", PartitionOrder.OldestFirst, RefreshType.Full);
 
-        Assert.True(tmsl.IndexOf("2025Q1", StringComparison.Ordinal)
-                    < tmsl.IndexOf("2026Q1", StringComparison.Ordinal));
+        Assert.Equal(["2025Q1", "2026Q1"], cmds.Select(c => c.Partition).ToArray());
     }
 
     [Fact]
-    public void Partitions_refresh_wraps_in_sequence_when_maxParallelism_set()
+    public void OrderedPartitionCommands_subset_preserves_given_order()
     {
-        var session = new FakeSession(q =>
-            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
-                ? new QueryResult(["ID"], [[1L]])
-                : new QueryResult(["Name"], [["2025Q1"], ["2026Q1"]]));
+        var cmds = new MaintenanceService(new FakeSession(_ => QueryResult.Empty), "DB")
+            .BuildOrderedPartitionCommands("Sales", new[] { "2026Q3", "2026Q1", "2026Q2" }, RefreshType.Full);
 
-        var tmsl = new MaintenanceService(session, "DB")
-            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full, maxParallelism: 1);
-
-        Assert.Contains("\"sequence\"", tmsl);
-        Assert.Contains("\"maxParallelism\": 1", tmsl);
-        Assert.Contains("\"refresh\"", tmsl);
+        Assert.Equal(["2026Q3", "2026Q1", "2026Q2"], cmds.Select(c => c.Partition).ToArray());
     }
 
     [Fact]
-    public void Partitions_refresh_gives_each_partition_its_own_ordered_operation()
-    {
-        // Regression: a single refresh with many objects does NOT honor order — the engine reorders
-        // the objects. Each partition must be its OWN refresh operation inside the sequence.
-        var session = new FakeSession(q =>
-            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
-                ? new QueryResult(["ID"], [[1L]])
-                : new QueryResult(["Name"], [["2025Q1"], ["2026Q1"], ["2025Q3"]]));
-
-        var tmsl = new MaintenanceService(session, "DB")
-            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full, maxParallelism: 1);
-
-        // One "refresh" operation per partition (3), not one refresh holding all three.
-        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(tmsl, "\"refresh\"").Count);
-        // And they appear newest → oldest.
-        Assert.True(tmsl.IndexOf("2026Q1", StringComparison.Ordinal) < tmsl.IndexOf("2025Q3", StringComparison.Ordinal));
-        Assert.True(tmsl.IndexOf("2025Q3", StringComparison.Ordinal) < tmsl.IndexOf("2025Q1", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Partitions_refresh_has_no_sequence_by_default()
-    {
-        var session = new FakeSession(q =>
-            q.Contains("TMSCHEMA_TABLES", StringComparison.Ordinal)
-                ? new QueryResult(["ID"], [[1L]])
-                : new QueryResult(["Name"], [["2025Q1"]]));
-
-        var tmsl = new MaintenanceService(session, "DB")
-            .BuildPartitionsRefresh("Sales", PartitionOrder.NewestFirst, RefreshType.Full);
-
-        Assert.DoesNotContain("\"sequence\"", tmsl);
-    }
-
-    [Fact]
-    public void Partitions_refresh_throws_when_table_absent()
+    public void OrderedPartitionCommands_throws_when_table_absent()
     {
         var session = new FakeSession(_ => QueryResult.Empty);
         Assert.Throws<DaxterException>(() =>
-            new MaintenanceService(session, "DB").BuildPartitionsRefresh("Nope", PartitionOrder.NewestFirst, RefreshType.Full));
+            new MaintenanceService(session, "DB").BuildOrderedPartitionCommands("Nope", PartitionOrder.NewestFirst, RefreshType.Full));
     }
 
     [Fact]

@@ -4,6 +4,19 @@ All notable changes to DAXter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.3] - 2026-06-03
+
+### Fixed
+- **Partition refresh order is now actually honored.** v1.8.2 changed the TMSL shape but Analysis
+  Services *still* ignored it — live testing showed partitions refreshing oldest-first regardless of
+  `--order`. DAXter now executes **one single-partition refresh at a time, sequentially**, so the
+  **client** drives the order (the engine can't be made to order partitions within a single TMSL
+  request). `refresh partitions --order newest-first|oldest-first`, and a `--partitions` subset in
+  list order, now process in the exact order requested, with per-partition progress; each partition
+  honors `--retries`. **Verified live:** a newest-first subset refreshed `2026Q206 → 2026Q205 →
+  2026Q204` in that order (newest committed first). `MaintenanceService.BuildPartitionsRefresh` is
+  replaced by `BuildOrderedPartitionCommands`.
+
 ## [1.8.2] - 2026-06-03
 
 ### Fixed

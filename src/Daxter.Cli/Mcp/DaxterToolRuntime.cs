@@ -181,6 +181,58 @@ internal static class DaxterToolRuntime
             return $"APPLIED (backup: {backup}):\n" + change;
         });
 
+    /// <summary>
+    /// Gated, ordered partition refresh: executes one single-partition refresh at a time, in order,
+    /// so the order is honored (the engine ignores partition order within a single TMSL request).
+    /// Dry-run lists the order; execute applies each with optional retry, returning a per-partition summary.
+    /// </summary>
+    public static Task<string> RefreshPartitionsOrderedAsync(
+        string? workspace, string? dataset,
+        Func<MaintenanceService, IReadOnlyList<(string Partition, string Tmsl)>> plan,
+        bool execute, int retries, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
+            if (string.IsNullOrWhiteSpace(config.Dataset))
+            {
+                throw new DaxterException("A dataset is required for maintenance operations.");
+            }
+
+            var factory = new AdomdXmlaSessionFactory(config, Provider(config));
+            using var session = await factory.CreateAsync(ct);
+            var service = new MaintenanceService(session, config.Dataset!);
+            var commands = plan(service);
+            var order = string.Join(", ", commands.Select(c => c.Partition));
+
+            if (!execute)
+            {
+                return $"DRY RUN — would refresh {commands.Count} partition(s) one at a time, in order: {order}";
+            }
+
+            if (!WritesAllowed())
+            {
+                return "REFUSED — writes are disabled. Enable them in the web console " +
+                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
+            }
+
+            if (LooksLikeProd(config) && ProdWritesBlocked())
+            {
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            }
+
+            var notes = new List<string>();
+            var done = new List<string>();
+            foreach (var (partition, tmsl) in commands)
+            {
+                RetryPolicy.Execute(() => service.Execute(tmsl), retries,
+                    onRetry: (a, m, ex) => notes.Add($"{partition}: transient failure (retry {a}/{m}): {ex.Message}"));
+                done.Add(partition);
+            }
+
+            var prefix = notes.Count > 0 ? string.Join("\n", notes) + "\n" : "";
+            return $"{prefix}EXECUTED — refreshed {done.Count} partition(s) in order: {string.Join(", ", done)}";
+        });
+
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" or "newest-first" or "newest" => PartitionOrder.NewestFirst,

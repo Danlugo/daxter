@@ -45,32 +45,25 @@ public sealed class MaintenanceService
         => RefreshTmsl(type, [Target(_database, table, partition)]);
 
     /// <summary>
-    /// TMSL to refresh every partition of a table, ordered (newest-first by default).
-    /// Partition names are sorted lexically — names like <c>2026Q205</c> sort correctly.
-    /// When <paramref name="maxParallelism"/> is set, the refresh is wrapped in a TMSL
-    /// <c>Sequence</c> with that thread limit — pass <c>1</c> to process the partitions
-    /// strictly in the listed order (a plain refresh runs them in parallel).
+    /// One single-partition refresh command PER partition, in order (newest- or oldest-first,
+    /// lexical). The caller executes these <b>sequentially</b> so the order is actually honored —
+    /// Analysis Services ignores partition order within a single TMSL request/sequence, so a single
+    /// multi-partition refresh (or a sequence of operations) cannot control processing order.
     /// </summary>
-    public string BuildPartitionsRefresh(string table, PartitionOrder order, RefreshType type, int? maxParallelism = null)
-    {
-        var ordered = OrderedPartitionNames(table, order);
-        var objects = ordered.Select(p => Target(_database, table, p)).ToList();
-        return RefreshTmsl(type, objects, maxParallelism);
-    }
+    public IReadOnlyList<(string Partition, string Tmsl)> BuildOrderedPartitionCommands(
+        string table, PartitionOrder order, RefreshType type)
+        => OrderedPartitionNames(table, order).Select(p => (p, BuildPartitionRefresh(table, p, type))).ToList();
 
-    /// <summary>
-    /// TMSL to refresh a specific set of partitions of a table, in the given order. With
-    /// <paramref name="maxParallelism"/> = 1 they process strictly in that order.
-    /// </summary>
-    public string BuildPartitionsRefresh(string table, IReadOnlyList<string> partitions, RefreshType type, int? maxParallelism = null)
+    /// <summary>One single-partition refresh command per partition, in the given list order.</summary>
+    public IReadOnlyList<(string Partition, string Tmsl)> BuildOrderedPartitionCommands(
+        string table, IReadOnlyList<string> partitions, RefreshType type)
     {
         if (partitions is null || partitions.Count == 0)
         {
             throw new DaxterException("No partitions specified.");
         }
 
-        var objects = partitions.Select(p => Target(_database, table, p)).ToList();
-        return RefreshTmsl(type, objects, maxParallelism);
+        return partitions.Select(p => (p, BuildPartitionRefresh(table, p, type))).ToList();
     }
 
     /// <summary>Partition names of a table in refresh order (newest- or oldest-first), Ordinal-sorted.</summary>
@@ -99,41 +92,15 @@ public sealed class MaintenanceService
     /// <summary>Executes a previously built command.</summary>
     public void Execute(string command) => _session.ExecuteCommand(command);
 
-    private static string RefreshTmsl(RefreshType type, IReadOnlyList<Dictionary<string, string>> objects, int? maxParallelism = null)
+    private static string RefreshTmsl(RefreshType type, IReadOnlyList<Dictionary<string, string>> objects)
     {
-        // A plain refresh processes its objects in an engine-chosen order. To honour the listed
-        // order, wrap a Sequence (maxParallelism = 1 = strictly sequential) and give each object its
-        // OWN refresh operation — a single refresh with many objects does NOT preserve order, the
-        // engine reorders the objects within it.
-        object payload;
-        if (maxParallelism is { } mp)
+        // A single refresh processes its objects in an engine-chosen order (and order can't be
+        // controlled within one TMSL request). Ordered partition refresh is done by executing one
+        // single-partition command at a time — see BuildOrderedPartitionCommands.
+        var payload = new Dictionary<string, object>
         {
-            var operations = objects.Select(o => new Dictionary<string, object>
-            {
-                ["refresh"] = new Dictionary<string, object>
-                {
-                    ["type"] = TypeName(type),
-                    ["objects"] = new[] { o },
-                },
-            }).ToArray();
-
-            payload = new Dictionary<string, object>
-            {
-                ["sequence"] = new Dictionary<string, object>
-                {
-                    ["maxParallelism"] = mp,
-                    ["operations"] = operations,
-                },
-            };
-        }
-        else
-        {
-            payload = new Dictionary<string, object>
-            {
-                ["refresh"] = new Dictionary<string, object> { ["type"] = TypeName(type), ["objects"] = objects },
-            };
-        }
-
+            ["refresh"] = new Dictionary<string, object> { ["type"] = TypeName(type), ["objects"] = objects },
+        };
         return JsonSerializer.Serialize(payload, Json);
     }
 
