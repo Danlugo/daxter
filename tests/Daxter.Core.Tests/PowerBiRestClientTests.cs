@@ -145,4 +145,35 @@ public class PowerBiRestClientTests
         Assert.Equal("acct.snowflakecomputing.com", result.Rows[0][3]);
         Assert.Equal("ANALYTICS_WH", result.Rows[0][4]);
     }
+
+    [Fact]
+    public async Task ItemConnectionsAsync_maps_name_connectivity_and_details()
+    {
+        var client = Client(_ =>
+            """{"value":[{"displayName":"RAP Cloud","connectivityType":"ShareableCloud","connectionDetails":{"type":"SQL","path":"host;DB"}},{"displayName":"Snow GW","connectivityType":"VirtualNetworkGateway","gatewayId":"gw-9","connectionDetails":{"type":"Snowflake","path":"acct;WH"}}]}""");
+        var result = await client.ItemConnectionsAsync("ws1", "item1");
+
+        Assert.Equal(["displayName", "connectivityType", "type", "path", "gatewayId"], result.Columns);
+        // cloud row: name + connectivity + flattened details, no gateway
+        Assert.Equal("RAP Cloud", result.Rows[0][0]);
+        Assert.Equal("ShareableCloud", result.Rows[0][1]);
+        Assert.Equal("SQL", result.Rows[0][2]);
+        Assert.Equal("host;DB", result.Rows[0][3]);
+        Assert.Null(result.Rows[0][4]);   // cloud connection has no gatewayId
+        // gateway row: connectivity + gatewayId carried through
+        Assert.Equal("VirtualNetworkGateway", result.Rows[1][1]);
+        Assert.Equal("gw-9", result.Rows[1][4]);
+    }
+
+    [Fact]
+    public async Task ItemConnectionsAsync_calls_the_fabric_item_endpoint()
+    {
+        string? seen = null;
+        var client = Client(url => { seen = url; return """{"value":[]}"""; });
+        await client.ItemConnectionsAsync("ws1", "item1");
+
+        Assert.NotNull(seen);
+        Assert.Contains("api.fabric.microsoft.com", seen);
+        Assert.Contains("/workspaces/ws1/items/item1/connections", seen);
+    }
 }

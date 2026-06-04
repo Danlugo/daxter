@@ -6,6 +6,31 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-06-04
+
+### Added
+- **Connections page now reads the real "maps to" mapping** — connection **name** + **connectivity
+  type** (Cloud / On-prem gateway / VNet gateway) per source — from the Fabric *List Item Connections*
+  API. This needs only model read/write, so it names bindings even to gateways the signed-in account
+  can't administer (e.g. a VNet gateway connection for a Snowflake source), matching the Service's
+  *Gateway and cloud connections* view. Falls back to the raw data-sources list if the Fabric API is
+  unreachable.
+- New readable capability across all three surfaces (parity): **CLI** `ws item-connections`, **MCP**
+  `daxter_item_connections`, **web** (the Connections current-mapping table).
+
+### Changed
+- **Connections re-bind is now an explicit single-gateway action.** The current mapping is read-only
+  (the public API can't write per-source-different gateways or cloud "Maps to"); to *change* a binding
+  you pick **one** gateway you administer and re-bind matching sources to it (`BindToGateway` is one
+  gateway per model). Per-source connection dropdowns now use **exact, kind-aware matching** (type +
+  server + database) with **no fallback** — a source with no connection on the chosen gateway says so
+  plainly instead of listing every connection.
+
+### Fixed
+- **`daxter_gateway_datasources` (MCP) no longer errors "No workspace configured."** It used the
+  workspace-scoped path; it now runs tenant-scoped like the CLI's `ws gateway-datasources` (which was
+  already correct), since a gateway id needs no workspace.
+
 ## [1.12.3] - 2026-06-04
 
 ### Fixed

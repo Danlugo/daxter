@@ -892,6 +892,15 @@ internal static class Program
             });
 
         // ---- take ownership + gateway binding (service config; XMLA can't do these) ----
+        var itemConnections = Sub("item-connections", "A model's connections + names/connectivity (Fabric API; requires --dataset).",
+            async (rest, cfg, ct) =>
+            {
+                RequireDataset(cfg);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, ct);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, ct);
+                return await rest.ItemConnectionsAsync(g, d, ct);
+            });
+
         var discoverGateways = Sub("discover-gateways", "Gateways a model can bind to (requires --dataset).",
             async (rest, cfg, ct) =>
             {
@@ -950,7 +959,7 @@ internal static class Program
         return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
         {
             ls, datasets, reports, lineage, gateways, permissions, datasources,
-            discoverGateways, gatewayDatasources, takeover, bindGateway,
+            itemConnections, discoverGateways, gatewayDatasources, takeover, bindGateway,
         };
     }
 

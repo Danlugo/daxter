@@ -129,6 +129,33 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
         => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
 
+    /// <summary>A model's current connections from the Fabric API — display name + connectivity type
+    /// (cloud / on-prem / VNet gateway) + the underlying connection details — using only model
+    /// read/write (no gateway-admin), so it can name bindings to gateways the caller can't manage.
+    /// <paramref name="itemId"/> is the semantic-model (dataset) id; <paramref name="workspaceId"/> the group id.</summary>
+    public async Task<QueryResult> ItemConnectionsAsync(string workspaceId, string itemId, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/items/{itemId}/connections");
+        var root = await SendJsonAsync(request, ct);
+        string[] columns = ["displayName", "connectivityType", "type", "path", "gatewayId"];
+        var rows = new List<object?[]>();
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            JsonElement cd = item.TryGetProperty("connectionDetails", out var c) && c.ValueKind == JsonValueKind.Object
+                ? c : default;
+            rows.Add(
+            [
+                Str(item, "displayName"),
+                Str(item, "connectivityType"),
+                Str(cd, "type"),
+                Str(cd, "path"),
+                Str(item, "gatewayId"),
+            ]);
+        }
+        return new QueryResult(columns, rows);
+    }
+
     // ---- take ownership + gateway binding (service-level config; XMLA can't do these) ----
 
     /// <summary>Takes over ownership of a dataset in a workspace (the "owner left" flow) — required

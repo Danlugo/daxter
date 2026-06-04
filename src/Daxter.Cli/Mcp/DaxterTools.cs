@@ -110,6 +110,15 @@ public static class DaxterTools
 
     // ---- take ownership + gateway binding (service config; XMLA can't do these) ----
 
+    [McpServerTool(Name = "daxter_item_connections", ReadOnly = true, Title = "List a model's connections"), Description("A model's current connections via the Fabric API: display name + connectivity type (cloud / on-prem / VNet gateway) + connection details. Works with model read/write (no gateway-admin), so it names bindings to gateways you can't manage.")]
+    public static Task<string> ItemConnections(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, c);
+            return await rest.ItemConnectionsAsync(g, d, c);
+        }, ct);
+
     [McpServerTool(Name = "daxter_discover_gateways", ReadOnly = true, Title = "Discover bindable gateways"), Description("List the gateways a model can be bound to (those with matching data sources), via REST.")]
     public static Task<string> DiscoverGateways(string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
@@ -122,7 +131,7 @@ public static class DaxterTools
     [McpServerTool(Name = "daxter_gateway_datasources", ReadOnly = true, Title = "List a gateway's data sources"), Description("List the data sources (connections) on a gateway; their ids are what daxter_bind_to_gateway maps to.")]
     public static Task<string> GatewayDatasources(
         [Description("Gateway id (GUID) — from daxter_discover_gateways.")] string gatewayId, CancellationToken ct = default)
-        => DaxterToolRuntime.RestAsync(null, null, (rest, cfg, c) => rest.GatewayDatasourcesAsync(gatewayId, c), ct);
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.GatewayDatasourcesAsync(gatewayId, c), ct);
 
     [McpServerTool(Name = "daxter_take_over", Destructive = true, Title = "Take over a model"), Description(
         "Take over ownership of a semantic model (the 'owner left' flow) — required before rebinding its gateway or credentials. " +

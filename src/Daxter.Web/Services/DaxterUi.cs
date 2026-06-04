@@ -277,6 +277,28 @@ public sealed class DaxterUi
             return await rest.GatewaysAsync(ct);
         });
 
+    /// <summary>A model's current connections (display name + connectivity type + details) from the Fabric
+    /// API. Needs only model read/write, so it names bindings to gateways the caller can't manage. Returns
+    /// null on failure (e.g. Fabric API unreachable) so the page can fall back to the raw data-sources view.</summary>
+    public async Task<QueryResult?> ItemConnectionsAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        try
+        {
+            return await Track("item-connections", $"{ws}/{ds}", async () =>
+            {
+                using var rest = new PowerBiRestClient(Provider(Config()));
+                var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+                var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+                return await rest.ItemConnectionsAsync(groupId, datasetId, ct);
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "item-connections unavailable for {Ws}/{Ds}; falling back to data sources", ws, ds);
+            return null;
+        }
+    }
+
     // ---- take ownership + gateway binding (service config — XMLA can't do these; gated like writes) ----
 
     /// <summary>Gateways the model can be bound to (those with matching data sources).</summary>
