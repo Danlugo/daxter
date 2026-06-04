@@ -6,6 +6,16 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-04
+
+### Changed
+- **Connections page redesigned to mirror Power BI's "Gateway and cloud connections" screen.** Now:
+  **Take over** + the **current owner** (`configuredBy`) at the top; a **"Gateway and cloud connections"**
+  header; a **gateway picker**; and a **per-data-source row** — `Connection: <source> — maps to: [▾]` —
+  where each source maps to one of the chosen gateway's connections, then **Apply** binds. Current
+  binding (gateway id, or "cloud / SSO") is shown per source. The shareable cloud-connection "Maps to"
+  remains read-only (no public API), called out inline. Same write gate + confirm modal + busy overlay.
+
 ## [1.11.2] - 2026-06-04
 
 ### Fixed

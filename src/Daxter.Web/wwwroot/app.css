@@ -241,6 +241,13 @@ label.inline input, label.inline select { min-width:auto; }
 .modal { background:var(--bg); border:2px solid var(--accent); border-radius:var(--radius); box-shadow:var(--shadow); width:min(680px, 92vw); max-height:82vh; overflow:auto; padding:1.2rem 1.4rem; }
 .modal h3 { margin-top:0; }
 .modal pre.code { max-height:46vh; overflow:auto; }
+/* Connections page — Power BI "Gateway and cloud connections" style */
+.conn-owner { align-items:center; gap:.8rem; }
+.conn-head { background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    padding:.6rem 1rem; font-weight:600; text-align:center; margin:.9rem 0 .6rem; }
+.conn-grid td { vertical-align:middle; }
+.conn-mapsto { text-align:right; white-space:nowrap; }
+.conn-mapsto select { min-width:280px; }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

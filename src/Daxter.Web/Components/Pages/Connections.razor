@@ -10,9 +10,9 @@
 <button class="btn-sm back-btn" @onclick="GoBack" title="Back to the previous page">← Back</button>
 <h1>Connections &amp; ownership</h1>
 <p class="muted">
-    Take over a model and bind its data-source connections to a gateway — the service-level config XMLA
-    can't touch. Gateway / VNet binding is API-driven here; shareable <strong>cloud-connection</strong>
-    "Maps to" is set in the Power BI Service (no public API).
+    Take over a model and map its data-source connections — like the Power BI <em>Gateway and cloud
+    connections</em> screen. Gateway / VNet bindings are applied here; shareable
+    <strong>cloud-connection</strong> "Maps to" is read-only (set in the Service — no public API).
 </p>
 
 @if (!Ui.WritesEnabled)
@@ -41,75 +41,87 @@
 
 @if (!string.IsNullOrEmpty(dataset))
 {
-    <div class="cmd-group">
-        <button class="btn" @onclick="AskTakeOver" disabled="@(!Ui.WritesEnabled || busy)">Take over</button>
-        <button class="btn-sm" @onclick="LoadAll" disabled="@busy">↻ Reload</button>
-    </div>
-
     <div class="card">
-        <h3>Current data sources</h3>
-        @if (datasources is null) { <p class="muted">Pick a model to load its data sources.</p> }
-        else { <ResultGrid Result="datasources" Empty="No data sources reported (a blank gatewayId means cloud/SSO)." /> }
-        <p class="muted">⚠ Apply writes to the Power BI Service. A blank <code>gatewayId</code> = cloud/SSO (not gateway-bound).</p>
-    </div>
+        <div class="cmd-group conn-owner">
+            <button class="btn" @onclick="AskTakeOver" disabled="@(!Ui.WritesEnabled || busy)">Take over</button>
+            <span class="muted">Owner: <strong>@(string.IsNullOrEmpty(owner) ? "—" : owner)</strong></span>
+            <button class="btn-sm" @onclick="LoadAll" disabled="@busy" title="Reload">↻</button>
+        </div>
 
-    <div class="card">
-        <h3>Bind to a gateway</h3>
-        @if (gateways is null) { <p class="muted">Loading bindable gateways…</p> }
-        else if (gateways.RowCount == 0) { <p class="muted">No bindable gateways found for this model.</p> }
+        <div class="conn-head">Gateway and cloud connections</div>
+
+        <div class="cmd-group">
+            <label>Bind to gateway
+                <select @bind="selectedGateway" @bind:after="OnGatewayChanged">
+                    <option value="">— pick a gateway —</option>
+                    @if (gateways is not null)
+                    {
+                        @foreach (var row in gateways.Rows)
+                        {
+                            <option value="@Cell(gateways, row, "id")">@Cell(gateways, row, "name") (@Cell(gateways, row, "type"))</option>
+                        }
+                    }
+                </select>
+            </label>
+            @if (gateways is not null && gateways.RowCount == 0)
+            {
+                <span class="muted">No bindable gateways found for this model.</span>
+            }
+        </div>
+
+        @if (datasources is null)
+        {
+            <p class="muted">Loading data sources…</p>
+        }
+        else if (datasources.RowCount == 0)
+        {
+            <p class="muted">No data sources reported for this model.</p>
+        }
         else
         {
-            <p class="muted">Pick a gateway, then optionally choose which of its connections to map (none = first matching per source).</p>
-            <table class="grid"><thead><tr><th></th><th>Gateway</th><th>Type</th><th>Id</th></tr></thead><tbody>
-                @foreach (var row in gateways.Rows)
+            <table class="grid conn-grid"><tbody>
+                @for (var i = 0; i < datasources.Rows.Count; i++)
                 {
-                    var id = Cell(gateways, row, "id");
-                    <tr class="row-pick @(selectedGateway == id ? "active" : "")" @onclick="() => SelectGateway(id)">
-                        <td><input type="radio" checked="@(selectedGateway == id)" @onclick:stopPropagation="true" @onclick="() => SelectGateway(id)" /></td>
-                        <td>@Cell(gateways, row, "name")</td>
-                        <td>@Cell(gateways, row, "type")</td>
-                        <td class="param-val">@id</td>
+                    var row = datasources.Rows[i];
+                    var ix = i;
+                    <tr>
+                        <td>
+                            <strong>Connection:</strong> @SourceLabel(row)
+                            <br /><small class="muted">current: @BoundLabel(row)</small>
+                        </td>
+                        <td class="nowrap conn-mapsto">
+                            <label>maps to:
+                                <select value="@maps.GetValueOrDefault(ix, "")"
+                                        @onchange="e => SetMap(ix, e)"
+                                        disabled="@(string.IsNullOrEmpty(selectedGateway) || busy)">
+                                    <option value="">— first matching on gateway —</option>
+                                    @if (gwDatasources is not null)
+                                    {
+                                        @foreach (var g in gwDatasources.Rows)
+                                        {
+                                            <option value="@Cell(gwDatasources, g, "id")">@GwConnLabel(g)</option>
+                                        }
+                                    }
+                                </select>
+                            </label>
+                        </td>
                     </tr>
                 }
             </tbody></table>
 
-            @if (selectedGateway is not null)
-            {
-                <h4>Connections on this gateway
-                    <span class="muted">— check to map specific sources (optional)</span></h4>
-                @if (gwDatasources is null) { <p class="muted">Loading…</p> }
-                else if (gwDatasources.RowCount == 0) { <p class="muted">No data sources on this gateway.</p> }
-                else
-                {
-                    <table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Server</th><th>Database</th></tr></thead><tbody>
-                        @foreach (var row in gwDatasources.Rows)
-                        {
-                            var did = Cell(gwDatasources, row, "id");
-                            <tr>
-                                <td><input type="checkbox" checked="@selectedDs.Contains(did)" @onchange="e => ToggleDs(did, e)" /></td>
-                                <td>@Cell(gwDatasources, row, "datasourceName")</td>
-                                <td>@Cell(gwDatasources, row, "datasourceType")</td>
-                                <td>@Cell(gwDatasources, row, "server")</td>
-                                <td>@Cell(gwDatasources, row, "database")</td>
-                            </tr>
-                        }
-                    </tbody></table>
-                }
-                <div class="cmd-group">
-                    <button class="btn" @onclick="AskBind" disabled="@(!Ui.WritesEnabled || busy)">Bind to this gateway</button>
-                </div>
-            }
+            <div class="cmd-group">
+                <button class="btn" @onclick="AskBind"
+                        disabled="@(!Ui.WritesEnabled || string.IsNullOrEmpty(selectedGateway) || busy)">
+                    Apply — bind to gateway
+                </button>
+            </div>
+            <p class="muted">
+                ⚠ A model uses a <strong>single</strong> gateway connection, so all gateway mappings use the
+                gateway picked above. The shareable <strong>cloud-connection</strong> "Maps to" (a source → a
+                named cloud connection, e.g. for Fabric/Lakehouse) is set in the Power BI Service —
+                <em>Settings → Gateway and cloud connections</em> — and has no public API.
+            </p>
         }
-    </div>
-
-    <div class="card">
-        <h3>Cloud connections <span class="muted">(read-only)</span></h3>
-        <p class="muted">
-            Shareable cloud-connection "Maps to" (e.g. a Fabric / Lakehouse source → a named cloud connection)
-            has <strong>no public REST API</strong> — set it in the Power BI Service: the model's
-            <em>Settings → Gateway and cloud connections → Maps to</em>. The current binding is shown under
-            <em>Current data sources</em> above.
-        </p>
     </div>
 }
 
@@ -142,11 +154,14 @@
     private string workspace = "";
     private string dataset = "";
 
-    private QueryResult? datasources;
-    private QueryResult? gateways;
-    private QueryResult? gwDatasources;
-    private string? selectedGateway;
-    private readonly HashSet<string> selectedDs = new();
+    private QueryResult? datasetsResult;   // kept to look up the owner (configuredBy)
+    private string? owner;
+
+    private QueryResult? datasources;      // the model's data sources (the "Connection:" rows)
+    private QueryResult? gateways;         // bindable gateways
+    private QueryResult? gwDatasources;    // the chosen gateway's connections (the "maps to" options)
+    private string selectedGateway = "";
+    private readonly Dictionary<int, string> maps = new();   // data-source row index → gateway connection id
 
     private string? result;
     private bool resultOk;
@@ -158,7 +173,6 @@
     protected override async Task OnInitializedAsync()
         => workspaces = Names(await Ui.WorkspacesAsync());
 
-    // Apply ?ws=&ds= on first load AND on a Frequent click while already here (same-component nav).
     protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(Qws)) return;
@@ -167,7 +181,8 @@
         {
             if (workspaces.Count == 0) workspaces = Names(await Ui.WorkspacesAsync());
             workspace = Qws!;
-            datasets = Names(await Ui.DatasetsAsync(workspace));
+            datasetsResult = await Ui.DatasetsAsync(workspace);
+            datasets = Names(datasetsResult);
             dataset = Qds ?? "";
             ResetModel();
             if (!string.IsNullOrEmpty(dataset)) await LoadAllCore();
@@ -176,9 +191,13 @@
 
     private async Task OnWorkspaceChanged()
     {
-        dataset = ""; datasets = new(); ResetModel();
+        dataset = ""; datasets = new(); datasetsResult = null; ResetModel();
         if (string.IsNullOrEmpty(workspace)) return;
-        await Busy(async () => datasets = Names(await Ui.DatasetsAsync(workspace)));
+        await Busy(async () =>
+        {
+            datasetsResult = await Ui.DatasetsAsync(workspace);
+            datasets = Names(datasetsResult);
+        });
         Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ConnectionsContext);
     }
 
@@ -193,27 +212,30 @@
     private void ResetModel()
     {
         datasources = gateways = gwDatasources = null;
-        selectedGateway = null; selectedDs.Clear(); result = null;
+        selectedGateway = ""; maps.Clear(); owner = null; result = null;
     }
 
     private Task LoadAll() => Busy(LoadAllCore);
 
     private async Task LoadAllCore()
     {
+        owner = LookupOwner(dataset);
         datasources = await Ui.DatasourcesAsync(workspace, dataset);
         gateways = await Ui.DiscoverGatewaysAsync(workspace, dataset);
-        selectedGateway = null; gwDatasources = null; selectedDs.Clear();
+        selectedGateway = ""; gwDatasources = null; maps.Clear();
     }
 
-    private async Task SelectGateway(string id)
+    private async Task OnGatewayChanged()
     {
-        selectedGateway = id; selectedDs.Clear(); gwDatasources = null;
-        await Busy(async () => gwDatasources = await Ui.GatewayDatasourcesAsync(id));
+        maps.Clear(); gwDatasources = null;
+        if (!string.IsNullOrEmpty(selectedGateway))
+            await Busy(async () => gwDatasources = await Ui.GatewayDatasourcesAsync(selectedGateway));
     }
 
-    private void ToggleDs(string id, ChangeEventArgs e)
+    private void SetMap(int i, ChangeEventArgs e)
     {
-        if (e.Value is true) selectedDs.Add(id); else selectedDs.Remove(id);
+        var v = e.Value?.ToString() ?? "";
+        if (string.IsNullOrEmpty(v)) maps.Remove(i); else maps[i] = v;
     }
 
     private void AskTakeOver()
@@ -224,10 +246,10 @@
 
     private void AskBind()
     {
-        var ids = selectedDs.ToList();
+        var ids = maps.Values.Where(v => !string.IsNullOrEmpty(v)).Distinct().ToList();
         pendingText = $"Bind '{dataset}' to gateway {selectedGateway}"
             + (ids.Count > 0 ? $", mapping {ids.Count} connection(s)?" : " (auto-map matching sources)?");
-        pendingAction = () => Run(() => Ui.BindToGatewayAsync(workspace, dataset, selectedGateway!, ids.Count > 0 ? ids : null));
+        pendingAction = () => Run(() => Ui.BindToGatewayAsync(workspace, dataset, selectedGateway, ids.Count > 0 ? ids : null));
     }
 
     private async Task DoConfirm()
@@ -248,7 +270,7 @@
             {
                 result = await op();
                 resultOk = true;
-                await LoadAllCore();   // reflect the new binding/ownership
+                await LoadAllCore();
             });
         }
         catch (Exception ex) { result = ex.Message; resultOk = false; }
@@ -264,6 +286,49 @@
     });
 
     private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    // ---- presentation helpers ----
+
+    private string? LookupOwner(string name)
+    {
+        if (datasetsResult is null) return null;
+        foreach (var row in datasetsResult.Rows)
+            if (string.Equals(Cell(datasetsResult, row, "name"), name, StringComparison.OrdinalIgnoreCase))
+            {
+                var by = Cell(datasetsResult, row, "configuredBy");
+                return string.IsNullOrEmpty(by) ? null : by;
+            }
+        return null;
+    }
+
+    private string SourceLabel(object?[] row)
+    {
+        var type = Cell(datasources!, row, "datasourceType");
+        var server = Cell(datasources!, row, "server");
+        var db = Cell(datasources!, row, "database");
+        var pathOrUrl = Cell(datasources!, row, "path");
+        if (string.IsNullOrEmpty(pathOrUrl)) pathOrUrl = Cell(datasources!, row, "url");
+        var detail = !string.IsNullOrEmpty(server)
+            ? (string.IsNullOrEmpty(db) ? server : $"{server} / {db}")
+            : pathOrUrl;
+        return string.IsNullOrEmpty(detail) ? type : $"{type} — {detail}";
+    }
+
+    private string BoundLabel(object?[] row)
+    {
+        var gw = Cell(datasources!, row, "gatewayId");
+        return string.IsNullOrEmpty(gw) ? "cloud / SSO (no gateway)" : $"gateway {gw}";
+    }
+
+    private string GwConnLabel(object?[] g)
+    {
+        var name = Cell(gwDatasources!, g, "datasourceName");
+        var type = Cell(gwDatasources!, g, "datasourceType");
+        var server = Cell(gwDatasources!, g, "server");
+        var db = Cell(gwDatasources!, g, "database");
+        var detail = string.IsNullOrEmpty(server) ? type : (string.IsNullOrEmpty(db) ? server : $"{server}/{db}");
+        return string.IsNullOrEmpty(name) ? detail : $"{name} — {detail}";
+    }
 
     private static List<string> Names(QueryResult r)
     {
