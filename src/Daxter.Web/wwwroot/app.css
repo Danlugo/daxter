@@ -246,8 +246,9 @@ label.inline input, label.inline select { min-width:auto; }
 .conn-head { background:var(--surface); border:1px solid var(--line); border-radius:8px;
     padding:.6rem 1rem; font-weight:600; text-align:center; margin:.9rem 0 .6rem; }
 .conn-grid td { vertical-align:middle; }
-.conn-mapsto { text-align:right; white-space:nowrap; }
-.conn-mapsto select { min-width:280px; }
+.conn-mapsto { display:flex; gap:.6rem; align-items:flex-end; flex-wrap:wrap; }
+.conn-mapsto .conn-lbl { align-self:center; font-weight:600; }
+.conn-mapsto select { min-width:200px; }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

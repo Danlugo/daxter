@@ -6,6 +6,14 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-06-04
+
+### Changed
+- **Connections: per-source gateway + connection pickers.** Each data-source row now has its own
+  **Gateway** dropdown *and* a **connection** dropdown driven by that gateway (so when more than one
+  gateway is available you choose gateway → then connection, per source). Apply still enforces the
+  API's one-gateway-per-model rule — if rows pick different gateways it asks you to use the same one.
+
 ## [1.12.0] - 2026-06-04
 
 ### Changed
