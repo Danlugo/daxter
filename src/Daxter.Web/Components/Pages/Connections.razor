@@ -111,7 +111,8 @@
             </div>
             @if (gateways is not null && gateways.RowCount == 0)
             {
-                <p class="muted">No bindable gateways found for this model.</p>
+                <p class="muted">No gateways are visible to this account — you must <strong>administer</strong> the gateway
+                    (sign in as a user who does). A service principal usually administers none.</p>
             }
 
             <div class="cmd-group">
@@ -226,7 +227,11 @@
     {
         owner = LookupOwner(dataset);
         datasources = await Ui.DatasourcesAsync(workspace, dataset);
-        gateways = await Ui.DiscoverGatewaysAsync(workspace, dataset);
+        // All gateways visible to the account — DiscoverGateways is too narrow (only on-prem gateways
+        // with pre-matching data sources, and effectively needs ownership), so it often shows none even
+        // when valid gateways exist. Listing all lets the user pick any; the per-row connection dropdown
+        // then filters to connections matching that source.
+        gateways = await Ui.GatewaysAsync();
         rowGw.Clear(); rowConn.Clear(); gwCache.Clear();
     }
 

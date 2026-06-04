@@ -6,6 +6,16 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.3] - 2026-06-04
+
+### Fixed
+- **Connections gateway picker now lists every gateway visible to the account.** It used
+  `DiscoverGateways`, which only returns on-premises gateways with *pre-matching* data sources (and
+  effectively needs ownership) — so it showed "no bindable gateways" even when valid ones existed. The
+  picker now uses `GatewaysAsync` (all gateways the account can administer); the per-row connection
+  dropdown still filters to connections matching that source. (`daxter_discover_gateways` remains
+  available as a tool for the narrower "already-bindable" view.)
+
 ## [1.12.2] - 2026-06-04
 
 ### Fixed
