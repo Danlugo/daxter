@@ -129,6 +129,59 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
         => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
 
+    // ---- take ownership + gateway binding (service-level config; XMLA can't do these) ----
+
+    /// <summary>Takes over ownership of a dataset in a workspace (the "owner left" flow) — required
+    /// before you can rebind its gateway or set credentials. POST Default.TakeOver, no body.</summary>
+    public async Task TakeOverAsync(string groupId, string datasetId, CancellationToken ct = default)
+        => await PostAsync($"groups/{groupId}/datasets/{datasetId}/Default.TakeOver", null, ct);
+
+    /// <summary>Gateways the dataset can be bound to (those with matching data sources).</summary>
+    public async Task<QueryResult> DiscoverGatewaysAsync(string groupId, string datasetId, CancellationToken ct = default)
+        => ToTable(await GetAsync($"groups/{groupId}/datasets/{datasetId}/Default.DiscoverGateways", ct),
+            "id", "name", "type");
+
+    /// <summary>The data sources defined on a gateway — their object ids are what BindToGateway maps to.</summary>
+    public async Task<QueryResult> GatewayDatasourcesAsync(string gatewayId, CancellationToken ct = default)
+    {
+        var root = await GetAsync($"gateways/{gatewayId}/datasources", ct);
+        string[] columns = ["id", "datasourceName", "datasourceType", "server", "database"];
+        var rows = new List<object?[]>();
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            JsonElement details = item.TryGetProperty("connectionDetails", out var cd) && cd.ValueKind == JsonValueKind.Object
+                ? cd : default;
+            rows.Add(
+            [
+                Str(item, "id"),
+                Str(item, "datasourceName"),
+                Str(item, "datasourceType"),
+                Str(details, "server"),
+                Str(details, "database"),
+            ]);
+        }
+        return new QueryResult(columns, rows);
+    }
+
+    /// <summary>Binds the dataset to a gateway, optionally mapping its sources to specific gateway
+    /// data-source/connection ids. With no ids, binds to the first matching data source per source.
+    /// (Public REST supports the gateway/VNet binding; shareable-cloud-connection "Maps to" is UI-only.)</summary>
+    public async Task BindToGatewayAsync(string groupId, string datasetId, string gatewayObjectId,
+        IReadOnlyList<string>? datasourceObjectIds, CancellationToken ct = default)
+        => await PostAsync($"groups/{groupId}/datasets/{datasetId}/Default.BindToGateway",
+            BuildBindToGatewayBody(gatewayObjectId, datasourceObjectIds), ct);
+
+    /// <summary>The BindToGateway request body. <c>datasourceObjectIds</c> is omitted when none are given
+    /// (then the service binds the first matching data source per source). Ids are GUIDs from the API, so
+    /// direct interpolation is safe (matches the manual-JSON pattern, e.g. TriggerRefreshAsync).</summary>
+    public static string BuildBindToGatewayBody(string gatewayObjectId, IReadOnlyList<string>? datasourceObjectIds)
+    {
+        var ids = datasourceObjectIds is { Count: > 0 }
+            ? ",\"datasourceObjectIds\":[" + string.Join(",", datasourceObjectIds.Select(id => $"\"{id}\"")) + "]"
+            : "";
+        return $"{{\"gatewayObjectId\":\"{gatewayObjectId}\"{ids}}}";
+    }
+
     // ---- deployment pipelines (the dev/qa/prod stages and their workspaces) ----
 
     public async Task<QueryResult> PipelinesAsync(CancellationToken ct = default)

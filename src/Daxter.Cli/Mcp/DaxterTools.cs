@@ -108,6 +108,48 @@ public static class DaxterTools
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.ReportsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
 
+    // ---- take ownership + gateway binding (service config; XMLA can't do these) ----
+
+    [McpServerTool(Name = "daxter_discover_gateways", ReadOnly = true, Title = "Discover bindable gateways"), Description("List the gateways a model can be bound to (those with matching data sources), via REST.")]
+    public static Task<string> DiscoverGateways(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, c);
+            return await rest.DiscoverGatewaysAsync(g, d, c);
+        }, ct);
+
+    [McpServerTool(Name = "daxter_gateway_datasources", ReadOnly = true, Title = "List a gateway's data sources"), Description("List the data sources (connections) on a gateway; their ids are what daxter_bind_to_gateway maps to.")]
+    public static Task<string> GatewayDatasources(
+        [Description("Gateway id (GUID) — from daxter_discover_gateways.")] string gatewayId, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(null, null, (rest, cfg, c) => rest.GatewayDatasourcesAsync(gatewayId, c), ct);
+
+    [McpServerTool(Name = "daxter_take_over", Destructive = true, Title = "Take over a model"), Description(
+        "Take over ownership of a semantic model (the 'owner left' flow) — required before rebinding its gateway or credentials. " +
+        "DRY-RUN by default; set execute=true AND enable writes (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to apply. " +
+        "Refused on PROD targets when DAXTER_MCP_BLOCK_PROD_WRITES=true.")]
+    public static Task<string> TakeOver(
+        [Description("Actually take over (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.TakeOverAsync(workspace, dataset, execute, ct);
+
+    [McpServerTool(Name = "daxter_bind_to_gateway", Destructive = true, Title = "Bind a model to a gateway"), Description(
+        "Bind a semantic model to a gateway, optionally mapping its sources to specific gateway connection ids " +
+        "(comma-separated 'datasourceIds'; omit to bind the first matching data source per source). Supports on-premises and " +
+        "VNet gateways. DRY-RUN by default; set execute=true AND enable writes to apply. PROD-blockable. " +
+        "(Shareable-cloud-connection 'Maps to' is UI-only and can't be set here.)")]
+    public static Task<string> BindToGateway(
+        [Description("Gateway id (GUID) to bind to — from daxter_discover_gateways.")] string gatewayId,
+        [Description("Comma-separated gateway data-source/connection ids to map (optional; from daxter_gateway_datasources).")] string? datasourceIds = null,
+        [Description("Actually bind (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+    {
+        var ids = string.IsNullOrWhiteSpace(datasourceIds)
+            ? null
+            : datasourceIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return DaxterToolRuntime.BindToGatewayAsync(workspace, dataset, gatewayId, ids, execute, ct);
+    }
+
     [McpServerTool(Name = "daxter_lineage", ReadOnly = true, Title = "Report to dataset lineage"), Description("Report → dataset lineage for a workspace.")]
     public static Task<string> Lineage(string? workspace = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>

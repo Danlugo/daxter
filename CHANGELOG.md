@@ -6,6 +6,26 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-04
+
+### Added
+- **Take control of a model + bind its connections to a gateway** — a new service-level capability
+  (ownership + gateway binding live in the Power BI service, not in the model, so this is REST, not XMLA).
+  Across all surfaces:
+  - **Web** — a new **Connections** page: pick a model (Frequent + deep-link + Back), see its current
+    data sources and bindings, **Take over** ownership, **Discover** bindable gateways, pick one and
+    optionally map specific gateway connections, then **Bind** — each write behind a confirm modal and
+    the **Allow writes** gate (prod-blocked), with the global busy overlay.
+  - **MCP** — `daxter_discover_gateways`, `daxter_gateway_datasources`, `daxter_take_over`,
+    `daxter_bind_to_gateway` (dry-run by default; `execute=true` + writes enabled to apply).
+  - **CLI** — `daxter ws discover-gateways`, `ws gateway-datasources --gateway`, `ws takeover`,
+    `ws bind-gateway --gateway [--datasources]` (dry-run unless `--yes`).
+  - Core: `PowerBiRestClient.TakeOverAsync` / `DiscoverGatewaysAsync` / `GatewayDatasourcesAsync` /
+    `BindToGatewayAsync` (`Default.TakeOver` / `Default.DiscoverGateways` / `Default.BindToGateway`).
+  - **Scope note:** supports on-premises and VNet **gateway** bindings. Per-source **shareable
+    cloud-connection** "Maps to" has no public REST API (UI-only in the Service), so it's shown
+    read-only with guidance. (`PowerBiRestClientTests` cover the bind-body + response mapping.)
+
 ## [1.10.4] - 2026-06-03
 
 ### Fixed

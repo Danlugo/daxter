@@ -27,6 +27,7 @@
         <NavLink href="pipelines">Pipelines</NavLink>
         <NavLink href="audit">Audit</NavLink>
         <NavLink href="model-edit">Model Edit</NavLink>
+        <NavLink href="connections">Connections</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -42,6 +43,7 @@
             UsageStore.AuditContext => " · Audit",
             UsageStore.ExploreContext => " · Explore",
             UsageStore.ModelEditContext => " · Model Edit",
+            UsageStore.ConnectionsContext => " · Connections",
             _ => "" })</div>
 
         @if (context is null)
@@ -244,6 +246,7 @@
             "pipelines" => UsageStore.PipelineContext,
             "audit" => UsageStore.AuditContext,
             "model-edit" => UsageStore.ModelEditContext,
+            "connections" => UsageStore.ConnectionsContext,
             _ => null,
         };
     }

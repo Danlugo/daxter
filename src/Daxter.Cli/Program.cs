@@ -891,10 +891,93 @@ internal static class Program
                 return await rest.DatasourcesAsync(groupId, datasetId, ct);
             });
 
-        return new Command("ws", "Workspace inventory (REST): datasets, reports, lineage, permissions, gateways.")
+        // ---- take ownership + gateway binding (service config; XMLA can't do these) ----
+        var discoverGateways = Sub("discover-gateways", "Gateways a model can bind to (requires --dataset).",
+            async (rest, cfg, ct) =>
+            {
+                RequireDataset(cfg);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, ct);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, ct);
+                return await rest.DiscoverGatewaysAsync(g, d, ct);
+            });
+
+        var gwDsOpt = new Option<string>("--gateway") { Description = "Gateway id (GUID)." };
+        var gatewayDatasources = new Command("gateway-datasources", "List a gateway's data sources (--gateway).")
+            { gwDsOpt, outputOption };
+        gatewayDatasources.SetAction((pr, ct) => RunRestQueryAsync(
+            () => connectionOptions.Resolve(pr, requireWorkspace: false),
+            () => pr.GetValue(outputOption),
+            (rest, _, c) => rest.GatewayDatasourcesAsync(
+                pr.GetValue(gwDsOpt) ?? throw new DaxterException("--gateway is required."), c), ct));
+
+        var yesOpt = new Option<bool>("--yes") { Description = "Apply the change (omit for a dry run)." };
+
+        var takeover = new Command("takeover", "Take over ownership of a model (requires --dataset).") { yesOpt };
+        connectionOptions.AddTo(takeover);
+        takeover.SetAction((pr, ct) => RunRestActionAsync(
+            () => connectionOptions.Resolve(pr), pr.GetValue(yesOpt),
+            cfg => $"take over '{cfg.Dataset}' in '{cfg.Workspace}'",
+            async (rest, cfg, c) =>
+            {
+                RequireDataset(cfg);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, c);
+                await rest.TakeOverAsync(g, d, c);
+                return $"Took over '{cfg.Dataset}' — you are now the owner.";
+            }, ct));
+
+        var bindGwOpt = new Option<string>("--gateway") { Description = "Gateway id (GUID) — from `ws discover-gateways`." };
+        var bindDsOpt = new Option<string>("--datasources") { Description = "Comma-separated gateway connection ids to map (optional)." };
+        var bindGateway = new Command("bind-gateway", "Bind a model to a gateway (requires --dataset, --gateway).")
+            { bindGwOpt, bindDsOpt, yesOpt };
+        connectionOptions.AddTo(bindGateway);
+        bindGateway.SetAction((pr, ct) => RunRestActionAsync(
+            () => connectionOptions.Resolve(pr), pr.GetValue(yesOpt),
+            cfg => $"bind '{cfg.Dataset}' to gateway {pr.GetValue(bindGwOpt)}",
+            async (rest, cfg, c) =>
+            {
+                RequireDataset(cfg);
+                var gw = pr.GetValue(bindGwOpt) ?? throw new DaxterException("--gateway is required.");
+                var raw = pr.GetValue(bindDsOpt);
+                var ids = string.IsNullOrWhiteSpace(raw) ? null
+                    : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, c);
+                await rest.BindToGatewayAsync(g, d, gw, ids, c);
+                return $"Bound '{cfg.Dataset}' to gateway {gw}" + (ids is { Length: > 0 } ? $" — {ids.Length} data source(s) mapped." : ".");
+            }, ct));
+
+        return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
         {
             ls, datasets, reports, lineage, gateways, permissions, datasources,
+            discoverGateways, gatewayDatasources, takeover, bindGateway,
         };
+    }
+
+    /// <summary>Runs a REST write that returns a status line. Dry-run unless <paramref name="yes"/>.</summary>
+    private static async Task<int> RunRestActionAsync(
+        Func<DaxterConfig> configFactory, bool yes,
+        Func<DaxterConfig, string> planFactory,
+        Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<string>> action,
+        CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            if (!yes)
+            {
+                Console.Out.WriteLine($"DRY RUN — would {planFactory(config)}. Pass --yes to apply.");
+                return 0;
+            }
+
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+            Console.Out.WriteLine(await action(rest, config, ct));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
     }
 
     private static async Task<int> RunRestQueryAsync(

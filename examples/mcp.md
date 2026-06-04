@@ -55,6 +55,8 @@ principal there's nothing to sign in — it's already authenticated.)
 | "Who are the members of this workspace?" | `daxter_permissions` (no dataset) |
 | **"List the gateways"** | `daxter_gateways` |
 | "What datasource/gateway does Retail Model refresh through?" | `daxter_datasources` |
+| "Which gateways can this model bind to?" | `daxter_discover_gateways` |
+| "List the connections on gateway `<id>`" | `daxter_gateway_datasources` |
 | "List the deployment pipelines" | `daxter_pipelines` |
 | "Show the stages of pipeline <id>" | `daxter_pipeline_stages` |
 | "Show recent deploy operations for pipeline <id>" | `daxter_pipeline_operations` |
@@ -102,6 +104,22 @@ and track progress with `daxter_refresh_jobs`. If no worker is live, the tool sa
 To enable writes, tick **⚙ Configure → Allow writes** in the web console (it saves to the shared
 volume the MCP server reads) — or set `DAXTER_MCP_ALLOW_WRITES=true` in the server env — then
 restart Claude Desktop.
+
+### Take control & bind to a gateway (gated)
+
+`daxter_take_over` and `daxter_bind_to_gateway` are **dry-run by default**; set `execute: true` (with
+writes enabled) to apply. Same prod-block as refresh.
+
+| You say | Tool |
+|---------|------|
+| "Take over the Retail Model" | `daxter_take_over` (dry run → confirms what it would do) |
+| "Take over the Retail Model, do it" | `daxter_take_over` with `execute: true` |
+| "Which gateways can it bind to?" | `daxter_discover_gateways` |
+| "Bind it to gateway `<id>`" | `daxter_bind_to_gateway` with `gatewayId`, `execute: true` |
+| "Bind it to gateway `<id>`, mapping connections `a,b`" | `daxter_bind_to_gateway` with `gatewayId`, `datasourceIds: "a,b"`, `execute: true` |
+
+Supports on-prem and VNet gateways. The shareable **cloud-connection** "Maps to" has no public API —
+set it in the Service (model *Settings → Gateway and cloud connections*).
 
 ## Targeting environments / other workspaces
 

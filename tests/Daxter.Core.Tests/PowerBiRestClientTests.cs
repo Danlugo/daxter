@@ -100,4 +100,49 @@ public class PowerBiRestClientTests
         var client = Client(_ => """{"value":[{"id":"g1","name":"Analytics WS"}]}""");
         Assert.Equal("Analytics WS", await client.GroupNameByIdAsync("g1"));
     }
+
+    // ---- take ownership + gateway binding ----
+
+    [Fact]
+    public void BindBody_without_ids_is_gateway_only()
+        => Assert.Equal(
+            "{\"gatewayObjectId\":\"gw1\"}",
+            PowerBiRestClient.BuildBindToGatewayBody("gw1", null));
+
+    [Fact]
+    public void BindBody_with_empty_list_is_gateway_only()
+        => Assert.Equal(
+            "{\"gatewayObjectId\":\"gw1\"}",
+            PowerBiRestClient.BuildBindToGatewayBody("gw1", new List<string>()));
+
+    [Fact]
+    public void BindBody_maps_the_given_connection_ids()
+        => Assert.Equal(
+            "{\"gatewayObjectId\":\"gw1\",\"datasourceObjectIds\":[\"dc2f\",\"3bfe\"]}",
+            PowerBiRestClient.BuildBindToGatewayBody("gw1", ["dc2f", "3bfe"]));
+
+    [Fact]
+    public async Task DiscoverGatewaysAsync_maps_value_array()
+    {
+        var client = Client(_ => """{"value":[{"id":"gw1","name":"VNet GW","type":"VirtualNetwork"}]}""");
+        var result = await client.DiscoverGatewaysAsync("g1", "d1");
+
+        Assert.Equal(["id", "name", "type"], result.Columns);
+        Assert.Equal("gw1", result.Rows[0][0]);
+        Assert.Equal("VNet GW", result.Rows[0][1]);
+    }
+
+    [Fact]
+    public async Task GatewayDatasourcesAsync_flattens_connection_details()
+    {
+        var client = Client(_ =>
+            """{"value":[{"id":"ds1","datasourceName":"Snowflake Prod","datasourceType":"Extension","connectionDetails":{"server":"acct.snowflakecomputing.com","database":"ANALYTICS_WH"}}]}""");
+        var result = await client.GatewayDatasourcesAsync("gw1");
+
+        Assert.Equal(["id", "datasourceName", "datasourceType", "server", "database"], result.Columns);
+        Assert.Equal("ds1", result.Rows[0][0]);
+        Assert.Equal("Snowflake Prod", result.Rows[0][1]);
+        Assert.Equal("acct.snowflakecomputing.com", result.Rows[0][3]);
+        Assert.Equal("ANALYTICS_WH", result.Rows[0][4]);
+    }
 }

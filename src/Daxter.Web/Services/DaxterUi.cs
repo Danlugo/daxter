@@ -249,6 +249,61 @@ public sealed class DaxterUi
             return await rest.GatewaysAsync(ct);
         });
 
+    // ---- take ownership + gateway binding (service config — XMLA can't do these; gated like writes) ----
+
+    /// <summary>Gateways the model can be bound to (those with matching data sources).</summary>
+    public Task<QueryResult> DiscoverGatewaysAsync(string ws, string ds, CancellationToken ct = default)
+        => Track("discover-gateways", $"{ws}/{ds}", async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+            return await rest.DiscoverGatewaysAsync(groupId, datasetId, ct);
+        });
+
+    /// <summary>The data sources (connections) defined on a gateway — their ids are what a bind maps to.</summary>
+    public Task<QueryResult> GatewayDatasourcesAsync(string gatewayId, CancellationToken ct = default)
+        => Track("gateway-datasources", gatewayId, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.GatewayDatasourcesAsync(gatewayId, ct);
+        });
+
+    /// <summary>Takes over ownership of the model (gated; refused on production). Returns a status line.</summary>
+    public async Task<string> TakeOverAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, ds), "take over a model");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+        await rest.TakeOverAsync(groupId, datasetId, ct);
+        _log.LogInformation("take-over [{Ws}/{Ds}] → OK", ws, ds);
+        return $"Took over '{ds}' — you are now the owner.";
+    }
+
+    /// <summary>Binds the model to a gateway, optionally mapping its sources to specific gateway
+    /// connection ids (none = first matching per source). Gated; refused on production.</summary>
+    public async Task<string> BindToGatewayAsync(string ws, string ds, string gatewayObjectId,
+        IReadOnlyList<string>? datasourceObjectIds, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, ds), "bind a model to a gateway");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+        await rest.BindToGatewayAsync(groupId, datasetId, gatewayObjectId, datasourceObjectIds, ct);
+        var n = datasourceObjectIds?.Count ?? 0;
+        _log.LogInformation("bind-to-gateway [{Ws}/{Ds}] → gateway {Gw}, {N} datasource(s)", ws, ds, gatewayObjectId, n);
+        return $"Bound '{ds}' to gateway {gatewayObjectId}" + (n > 0 ? $" — {n} data source(s) mapped." : ".");
+    }
+
+    private void EnsureWritable(DaxterConfig cfg, string what)
+    {
+        if (!_state.AllowWrites)
+            throw new DaxterException($"Writes are disabled. Turn on \"Allow writes\" on the Configure page to {what}.");
+        if (cfg.IsProductionTarget())
+            throw new DaxterException($"Refusing to {what} on a production target ('{cfg.Workspace}').");
+    }
+
     public Task<QueryResult> PipelinesAsync(CancellationToken ct = default)
         => Track("pipelines", null, async () =>
         {

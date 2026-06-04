@@ -1,0 +1,284 @@
+@page "/connections"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+
+<PageTitle>DAXter — Connections</PageTitle>
+
+<button class="btn-sm back-btn" @onclick="GoBack" title="Back to the previous page">← Back</button>
+<h1>Connections &amp; ownership</h1>
+<p class="muted">
+    Take over a model and bind its data-source connections to a gateway — the service-level config XMLA
+    can't touch. Gateway / VNet binding is API-driven here; shareable <strong>cloud-connection</strong>
+    "Maps to" is set in the Power BI Service (no public API).
+</p>
+
+@if (!Ui.WritesEnabled)
+{
+    <div class="worker-status worker-none">
+        <span class="dot">●</span>
+        <span>Writes are <strong>off</strong> — enable <a href="configure">⚙ Configure → Allow writes</a> to take over or
+            bind. You can still view current connections below.</span>
+    </div>
+}
+
+<div class="cmd-group">
+    <label>Workspace
+        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
+            <option value="">— pick a workspace —</option>
+            @foreach (var w in workspaces) { <option value="@w">@w</option> }
+        </select>
+    </label>
+    <label>Dataset
+        <select @bind="dataset" @bind:after="OnDatasetChanged" disabled="@(string.IsNullOrEmpty(workspace))">
+            <option value="">— pick a model —</option>
+            @foreach (var d in datasets) { <option value="@d">@d</option> }
+        </select>
+    </label>
+</div>
+
+@if (!string.IsNullOrEmpty(dataset))
+{
+    <div class="cmd-group">
+        <button class="btn" @onclick="AskTakeOver" disabled="@(!Ui.WritesEnabled || busy)">Take over</button>
+        <button class="btn-sm" @onclick="LoadAll" disabled="@busy">↻ Reload</button>
+    </div>
+
+    <div class="card">
+        <h3>Current data sources</h3>
+        @if (datasources is null) { <p class="muted">Pick a model to load its data sources.</p> }
+        else { <ResultGrid Result="datasources" Empty="No data sources reported (a blank gatewayId means cloud/SSO)." /> }
+        <p class="muted">⚠ Apply writes to the Power BI Service. A blank <code>gatewayId</code> = cloud/SSO (not gateway-bound).</p>
+    </div>
+
+    <div class="card">
+        <h3>Bind to a gateway</h3>
+        @if (gateways is null) { <p class="muted">Loading bindable gateways…</p> }
+        else if (gateways.RowCount == 0) { <p class="muted">No bindable gateways found for this model.</p> }
+        else
+        {
+            <p class="muted">Pick a gateway, then optionally choose which of its connections to map (none = first matching per source).</p>
+            <table class="grid"><thead><tr><th></th><th>Gateway</th><th>Type</th><th>Id</th></tr></thead><tbody>
+                @foreach (var row in gateways.Rows)
+                {
+                    var id = Cell(gateways, row, "id");
+                    <tr class="row-pick @(selectedGateway == id ? "active" : "")" @onclick="() => SelectGateway(id)">
+                        <td><input type="radio" checked="@(selectedGateway == id)" @onclick:stopPropagation="true" @onclick="() => SelectGateway(id)" /></td>
+                        <td>@Cell(gateways, row, "name")</td>
+                        <td>@Cell(gateways, row, "type")</td>
+                        <td class="param-val">@id</td>
+                    </tr>
+                }
+            </tbody></table>
+
+            @if (selectedGateway is not null)
+            {
+                <h4>Connections on this gateway
+                    <span class="muted">— check to map specific sources (optional)</span></h4>
+                @if (gwDatasources is null) { <p class="muted">Loading…</p> }
+                else if (gwDatasources.RowCount == 0) { <p class="muted">No data sources on this gateway.</p> }
+                else
+                {
+                    <table class="grid"><thead><tr><th></th><th>Name</th><th>Type</th><th>Server</th><th>Database</th></tr></thead><tbody>
+                        @foreach (var row in gwDatasources.Rows)
+                        {
+                            var did = Cell(gwDatasources, row, "id");
+                            <tr>
+                                <td><input type="checkbox" checked="@selectedDs.Contains(did)" @onchange="e => ToggleDs(did, e)" /></td>
+                                <td>@Cell(gwDatasources, row, "datasourceName")</td>
+                                <td>@Cell(gwDatasources, row, "datasourceType")</td>
+                                <td>@Cell(gwDatasources, row, "server")</td>
+                                <td>@Cell(gwDatasources, row, "database")</td>
+                            </tr>
+                        }
+                    </tbody></table>
+                }
+                <div class="cmd-group">
+                    <button class="btn" @onclick="AskBind" disabled="@(!Ui.WritesEnabled || busy)">Bind to this gateway</button>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="card">
+        <h3>Cloud connections <span class="muted">(read-only)</span></h3>
+        <p class="muted">
+            Shareable cloud-connection "Maps to" (e.g. a Fabric / Lakehouse source → a named cloud connection)
+            has <strong>no public REST API</strong> — set it in the Power BI Service: the model's
+            <em>Settings → Gateway and cloud connections → Maps to</em>. The current binding is shown under
+            <em>Current data sources</em> above.
+        </p>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(result))
+{
+    <pre class="code @(resultOk ? "" : "bad-text")">@result</pre>
+}
+
+@if (pendingAction is not null)
+{
+    <div class="modal-overlay" @onclick="CancelConfirm">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Confirm</h3>
+            <p>@pendingText</p>
+            <p class="muted">This writes to the Power BI Service.</p>
+            <div class="cmd-group">
+                <button class="btn" @onclick="DoConfirm" disabled="@busy">✓ Confirm</button>
+                <button class="btn-sm" @onclick="CancelConfirm" disabled="@busy">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+
+    private List<string> workspaces = new();
+    private List<string> datasets = new();
+    private string workspace = "";
+    private string dataset = "";
+
+    private QueryResult? datasources;
+    private QueryResult? gateways;
+    private QueryResult? gwDatasources;
+    private string? selectedGateway;
+    private readonly HashSet<string> selectedDs = new();
+
+    private string? result;
+    private bool resultOk;
+    private bool busy;
+
+    private Func<Task>? pendingAction;
+    private string? pendingText;
+
+    protected override async Task OnInitializedAsync()
+        => workspaces = Names(await Ui.WorkspacesAsync());
+
+    // Apply ?ws=&ds= on first load AND on a Frequent click while already here (same-component nav).
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        if (Qws == workspace && (Qds ?? "") == dataset) return;
+        await Busy(async () =>
+        {
+            if (workspaces.Count == 0) workspaces = Names(await Ui.WorkspacesAsync());
+            workspace = Qws!;
+            datasets = Names(await Ui.DatasetsAsync(workspace));
+            dataset = Qds ?? "";
+            ResetModel();
+            if (!string.IsNullOrEmpty(dataset)) await LoadAllCore();
+        });
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        dataset = ""; datasets = new(); ResetModel();
+        if (string.IsNullOrEmpty(workspace)) return;
+        await Busy(async () => datasets = Names(await Ui.DatasetsAsync(workspace)));
+        Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.ConnectionsContext);
+    }
+
+    private async Task OnDatasetChanged()
+    {
+        ResetModel();
+        if (string.IsNullOrEmpty(dataset)) return;
+        Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.ConnectionsContext);
+        await LoadAll();
+    }
+
+    private void ResetModel()
+    {
+        datasources = gateways = gwDatasources = null;
+        selectedGateway = null; selectedDs.Clear(); result = null;
+    }
+
+    private Task LoadAll() => Busy(LoadAllCore);
+
+    private async Task LoadAllCore()
+    {
+        datasources = await Ui.DatasourcesAsync(workspace, dataset);
+        gateways = await Ui.DiscoverGatewaysAsync(workspace, dataset);
+        selectedGateway = null; gwDatasources = null; selectedDs.Clear();
+    }
+
+    private async Task SelectGateway(string id)
+    {
+        selectedGateway = id; selectedDs.Clear(); gwDatasources = null;
+        await Busy(async () => gwDatasources = await Ui.GatewayDatasourcesAsync(id));
+    }
+
+    private void ToggleDs(string id, ChangeEventArgs e)
+    {
+        if (e.Value is true) selectedDs.Add(id); else selectedDs.Remove(id);
+    }
+
+    private void AskTakeOver()
+    {
+        pendingText = $"Take over ownership of '{dataset}' in '{workspace}'? You become the model owner.";
+        pendingAction = () => Run(() => Ui.TakeOverAsync(workspace, dataset));
+    }
+
+    private void AskBind()
+    {
+        var ids = selectedDs.ToList();
+        pendingText = $"Bind '{dataset}' to gateway {selectedGateway}"
+            + (ids.Count > 0 ? $", mapping {ids.Count} connection(s)?" : " (auto-map matching sources)?");
+        pendingAction = () => Run(() => Ui.BindToGatewayAsync(workspace, dataset, selectedGateway!, ids.Count > 0 ? ids : null));
+    }
+
+    private async Task DoConfirm()
+    {
+        var act = pendingAction!;
+        pendingAction = null; pendingText = null;
+        await act();
+    }
+
+    private void CancelConfirm() { pendingAction = null; pendingText = null; }
+
+    private async Task Run(Func<Task<string>> op)
+    {
+        busy = true; result = null;
+        try
+        {
+            await BusyState.Run(async () =>
+            {
+                result = await op();
+                resultOk = true;
+                await LoadAllCore();   // reflect the new binding/ownership
+            });
+        }
+        catch (Exception ex) { result = ex.Message; resultOk = false; }
+        finally { busy = false; }
+    }
+
+    private Task Busy(Func<Task> work) => BusyState.Run(async () =>
+    {
+        busy = true;
+        try { await work(); }
+        catch (Exception ex) { result = ex.Message; resultOk = false; }
+        finally { busy = false; }
+    });
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private static List<string> Names(QueryResult r)
+    {
+        var idx = 0;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], "Name", StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        return r.Rows.Select(row => idx < row.Length ? row[idx]?.ToString() ?? "" : "")
+            .Where(s => s.Length > 0).ToList();
+    }
+
+    private static string Cell(QueryResult r, object?[] row, string col)
+    {
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], col, StringComparison.OrdinalIgnoreCase))
+                return i < row.Length ? row[i]?.ToString() ?? "" : "";
+        return "";
+    }
+}

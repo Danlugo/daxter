@@ -117,6 +117,26 @@ queue.
 ./bin/daxter ws datasources --dataset "Retail Model"   # datasource + gateway binding (server/db/path + gatewayId)
 ```
 
+### Take control & bind to a gateway (⚠ writes; dry-run unless `--yes`)
+
+```bash
+# Take over ownership (required before rebinding a model you don't own)
+./bin/daxter ws takeover --dataset "Retail Model"            # dry run
+./bin/daxter ws takeover --dataset "Retail Model" --yes      # apply
+
+# Discover bindable gateways, then list one gateway's connections
+./bin/daxter ws discover-gateways --dataset "Retail Model"
+./bin/daxter ws gateway-datasources --gateway <gateway-guid>
+
+# Bind the model to a gateway (optionally map specific connection ids)
+./bin/daxter ws bind-gateway --dataset "Retail Model" --gateway <gateway-guid> --yes
+./bin/daxter ws bind-gateway --dataset "Retail Model" --gateway <gateway-guid> --datasources id1,id2 --yes
+```
+
+> Supports **on-premises and VNet gateways**. A model uses a **single** gateway connection; the
+> shareable **cloud-connection** "Maps to" (e.g. a Fabric source → a named cloud connection) has no
+> public API — set it in the Service (model *Settings → Gateway and cloud connections*).
+
 > **Gateway names:** `ws gateways` only returns gateways the **caller administers**, and
 > `ws datasources` gives a dataset's `gatewayId` (not its name). A service principal usually
 > administers no gateways, so it sees none. To get names, run **device-code as a user who
