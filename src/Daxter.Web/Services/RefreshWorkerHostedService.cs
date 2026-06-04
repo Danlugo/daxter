@@ -66,12 +66,11 @@ public sealed class RefreshWorkerHostedService : BackgroundService
         var spec = job.Spec;
         var cfg = _state.ToConfig(spec.Workspace, spec.Dataset);
         ITokenProvider provider = new MsalTokenProvider(cfg, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
-        var factory = new AdomdXmlaSessionFactory(cfg, provider);
+        IXmlaSessionFactory factory = new AdomdXmlaSessionFactory(cfg, provider);
+        var retries = Math.Max(0, spec.Retries);
 
-        progress.Event("Connecting to the model…");
-        var session = await factory.CreateAsync();
-
-        // Watch for a cross-process cancel request and abort the live session (stops a running command).
+        // A cross-process cancel request cancels this token; the live session is registered on it so a
+        // cancel disposes the running session and aborts the in-flight command.
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var watcher = Task.Run(async () =>
         {
@@ -79,12 +78,7 @@ public sealed class RefreshWorkerHostedService : BackgroundService
             {
                 while (!linked.Token.IsCancellationRequested)
                 {
-                    if (progress.CancelRequested)
-                    {
-                        try { session.Dispose(); } catch { /* aborting the running command */ }
-                        linked.Cancel();
-                        break;
-                    }
+                    if (progress.CancelRequested) { linked.Cancel(); break; }
                     await Task.Delay(1000, linked.Token);
                 }
             }
@@ -93,40 +87,37 @@ public sealed class RefreshWorkerHostedService : BackgroundService
 
         try
         {
-            var maint = new MaintenanceService(session, spec.Dataset);
-            var retries = Math.Max(0, spec.Retries);
-
-            void Run(string tmsl) => RetryPolicy.Execute(
-                () => maint.Execute(tmsl), retries,
-                onRetry: (n, max, ex) => progress.Event($"transient failure — retry {n}/{max}: {ex.Message}"));
-
             if (spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions)
             {
-                // One single-partition command each, executed sequentially in the requested order —
-                // the engine ignores order *within* a TMSL request, so client-driven sequencing is
-                // the only way to honour newest→oldest / oldest→newest.
-                var parts = spec.Kind == RefreshKind.AllPartitions
-                    ? maint.OrderedPartitionNames(spec.Table!, spec.Order)
-                    : spec.Partitions ?? Array.Empty<string>();
-
-                progress.Partitions(0, parts.Count);
-                progress.Event($"Refreshing {parts.Count} partition(s) of '{spec.Table}', one at a time");
-
-                for (var i = 0; i < parts.Count; i++)
+                // Refresh each partition on its OWN fresh session so a long serial refresh re-acquires
+                // the access token before every partition (one token, captured at connect time, expires
+                // mid-run on big tables — see SerialPartitionRefresh). AllPartitions needs one session
+                // up front to enumerate the partition names.
+                progress.Event("Connecting to the model…");
+                IReadOnlyList<string> parts;
+                if (spec.Kind == RefreshKind.AllPartitions)
                 {
-                    if (progress.CancelRequested) throw new OperationCanceledException();
-
-                    var name = parts[i];
-                    progress.Event($"[{i + 1}/{parts.Count}] refreshing {name}…");
-                    var sw = System.Diagnostics.Stopwatch.StartNew();
-                    Run(maint.BuildPartitionRefresh(spec.Table!, name, spec.Type));
-                    sw.Stop();
-                    progress.Partitions(i + 1, parts.Count);
-                    progress.Event($"[{i + 1}/{parts.Count}] ✓ {name} — {(int)sw.Elapsed.TotalSeconds}s");
+                    using var listing = await factory.CreateAsync(linked.Token);
+                    parts = new MaintenanceService(listing, spec.Dataset).OrderedPartitionNames(spec.Table!, spec.Order);
                 }
+                else
+                {
+                    parts = spec.Partitions ?? Array.Empty<string>();
+                }
+
+                await SerialPartitionRefresh.RunAsync(
+                    spec.Table!, parts, spec.Dataset,
+                    buildRefresh: (m, name) => m.BuildPartitionRefresh(spec.Table!, name, spec.Type),
+                    openSession: tok => factory.CreateAsync(tok),
+                    retries, progress, linked.Token);
             }
             else
             {
+                progress.Event("Connecting to the model…");
+                using var session = await factory.CreateAsync(linked.Token);
+                using var reg = linked.Token.Register(() => { try { session.Dispose(); } catch { /* aborting the running command */ } });
+
+                var maint = new MaintenanceService(session, spec.Dataset);
                 var tmsl = spec.Kind switch
                 {
                     RefreshKind.Model => maint.BuildModelRefresh(spec.Type),
@@ -136,7 +127,8 @@ public sealed class RefreshWorkerHostedService : BackgroundService
                 };
 
                 progress.Event("Processing (TMSL refresh)…");
-                Run(tmsl);
+                RetryPolicy.Execute(() => maint.Execute(tmsl), retries,
+                    onRetry: (n, max, ex) => progress.Event($"transient failure — retry {n}/{max}: {ex.Message}"));
             }
 
             // Record the duration so future estimates improve (success only).
@@ -147,7 +139,6 @@ public sealed class RefreshWorkerHostedService : BackgroundService
         {
             linked.Cancel();
             try { await watcher; } catch { /* watcher already done */ }
-            try { session.Dispose(); } catch { /* may already be disposed by the watcher */ }
         }
     }
 }

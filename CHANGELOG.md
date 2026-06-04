@@ -6,6 +6,18 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-06-03
+
+### Fixed
+- **Long partition refreshes no longer fail mid-run on token expiry.** A serial multi-partition
+  refresh (e.g. `daxter_refresh scope=partitions`/`AllPartitions`) reused one XMLA session — and the
+  one access token captured when it connected — for the whole job. On big tables the job outran the
+  token's lifetime and died with **`Refreshing the expired access-token has failed`** (observed at
+  partition 41 of 67, ~21 min in). The worker now opens a **fresh session per partition** (a cheap,
+  silent token-cache acquire via the new `SerialPartitionRefresh` Core helper), so a refresh of any
+  length keeps a valid token and runs to completion without manual batching. Cancellation still aborts
+  the in-flight partition. Covered by `SerialPartitionRefreshTests`.
+
 ## [1.10.2] - 2026-06-03
 
 ### Fixed
