@@ -6,6 +6,18 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-06-04
+
+### Fixed
+- **Workspace/dataset pickers are now sorted and model-only.** Dropdowns showed datasets in raw API
+  order and included Fabric internal **dataflow-staging** artifacts (`StagingLakehouseForDataflows`,
+  `StagingWarehouseForDataflows`, etc.) that `/datasets` surfaces but aren't user semantic models. The
+  `DaxterUi` bridge now **alphabetically sorts** workspaces + datasets and **filters those staging
+  artifacts** from the dataset picker — once, so every page (Connections, Model Edit, Query…) inherits
+  it. (Lakehouse/warehouse *default* semantic models share their item's name and have no public flag,
+  so a few may still appear — Microsoft is decoupling/sunsetting them.) Folded the "sorted, scoped
+  dropdowns" rule into the UI contract.
+
 ## [1.11.0] - 2026-06-04
 
 ### Added

@@ -131,7 +131,7 @@ public sealed class DaxterUi
         => Track("workspaces", null, async () =>
         {
             using var rest = new PowerBiRestClient(Provider(Config()));
-            return await rest.GroupsAsync(ct);
+            return SortedByName(await rest.GroupsAsync(ct));   // alphabetised for the picker
         });
 
     public Task<QueryResult> DatasetsAsync(string workspace, CancellationToken ct = default)
@@ -139,8 +139,36 @@ public sealed class DaxterUi
         {
             using var rest = new PowerBiRestClient(Provider(Config()));
             var groupId = await rest.ResolveGroupIdAsync(workspace, ct);
-            return await rest.DatasetsAsync(groupId, ct);
+            // Sorted + only real semantic models for the pickers: hide Fabric's internal dataflow
+            // staging artifacts that /datasets surfaces. (Lakehouse/warehouse *default* models share
+            // their item's name and have no public flag, so a few may still appear — Microsoft is
+            // decoupling/sunsetting them.) The CLI/MCP inventory keeps the full list.
+            return SortedByName(await rest.DatasetsAsync(groupId, ct), n => !NonModelDatasets.Contains(n));
         });
+
+    // Fabric internal artifacts that /datasets surfaces but are never user semantic models.
+    private static readonly HashSet<string> NonModelDatasets = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "StagingLakehouseForDataflows", "StagingWarehouseForDataflows",
+        "DataflowsStagingLakehouse", "DataflowsStagingWarehouse",
+    };
+
+    /// <summary>Result sorted by its "name" column (Ordinal, case-insensitive), optionally dropping rows
+    /// whose name fails <paramref name="keep"/>. Used so workspace/dataset pickers are alphabetised and
+    /// free of non-model noise — apply to every selectable dropdown (see ui-contract).</summary>
+    private static QueryResult SortedByName(QueryResult r, Func<string, bool>? keep = null)
+    {
+        var ni = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], "name", StringComparison.OrdinalIgnoreCase)) { ni = i; break; }
+        if (ni < 0) return r;
+        string Name(object?[] row) => ni < row.Length ? row[ni]?.ToString() ?? "" : "";
+        var rows = r.Rows
+            .Where(row => keep is null || keep(Name(row)))
+            .OrderBy(Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new QueryResult(r.Columns, rows);
+    }
 
     public Task<QueryResult> RefreshHistoryAsync(string workspace, string dataset, int top = 10, CancellationToken ct = default)
         => Track("refresh-history", $"{workspace}/{dataset}", async () =>
