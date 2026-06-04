@@ -1,10 +1,10 @@
 {
   "manifest_version": "0.2",
   "name": "daxter",
-  "display_name": "DAXter — Power BI Service",
-  "version": "1.10.3",
-  "description": "Query, inspect, refresh, and audit Power BI semantic models over XMLA + REST — from one Docker image.",
-  "long_description": "DAXter is a Docker-only Power BI Service client. This extension launches the DAXter MCP server in its container, so the cross-platform .NET XMLA/ADOMD engine runs the same on macOS, Windows, and Linux. Sign in once with the `daxter_login` tool (device-code) or the web console; the token persists in the `daxter-tokens` volume. Reads and audits are always available; refresh/cache writes are gated behind an explicit opt-in. No env file and no credentials are stored in this extension — authentication is interactive sign-in.",
+  "display_name": "DAXter \u2014 Power BI Service",
+  "version": "1.10.4",
+  "description": "Query, inspect, refresh, and audit Power BI semantic models over XMLA + REST \u2014 from one Docker image.",
+  "long_description": "DAXter is a Docker-only Power BI Service client. This extension launches the DAXter MCP server in its container, so the cross-platform .NET XMLA/ADOMD engine runs the same on macOS, Windows, and Linux. Sign in once with the `daxter_login` tool (device-code) or the web console; the token persists in the `daxter-tokens` volume. Reads and audits are always available; refresh/cache writes are gated behind an explicit opt-in. No env file and no credentials are stored in this extension \u2014 authentication is interactive sign-in.",
   "author": {
     "name": "danlugo",
     "url": "https://github.com/Danlugo"
@@ -13,7 +13,16 @@
   "documentation": "https://github.com/Danlugo/daxter/blob/main/SETUP.md",
   "support": "https://github.com/Danlugo/daxter/issues",
   "license": "MIT",
-  "keywords": ["power-bi", "fabric", "xmla", "dax", "tmsl", "semantic-model", "mcp", "docker"],
+  "keywords": [
+    "power-bi",
+    "fabric",
+    "xmla",
+    "dax",
+    "tmsl",
+    "semantic-model",
+    "mcp",
+    "docker"
+  ],
   "server": {
     "type": "binary",
     "entry_point": "docker",
@@ -42,6 +51,10 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"]
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
   }
 }

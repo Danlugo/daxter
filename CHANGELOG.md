@@ -6,6 +6,18 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.10.4] - 2026-06-03
+
+### Fixed
+- **Busy spinner now shows on model/XMLA loads** (clicking a table in Model Edit, loading roles/
+  relationships/columns, the DAX-query field tree, and model-edit dry-runs). These handlers were
+  already wrapped in the global `UiBusy` overlay, but the ADOMD/TOM work behind them
+  (`connection.Open`, `Execute`, `ReadTable`, `SaveChanges`) is **synchronous** and ran on the Blazor
+  circuit thread — so the "show overlay" re-render couldn't paint until the blocking read had already
+  finished. The `DaxterUi` bridge now **offloads the synchronous XMLA/TOM work to a thread-pool thread**
+  (`Task.Run`) at the `XmlaAsync` choke point and the `ModelEditService` read/edit methods, freeing the
+  circuit thread to render the spinner immediately. (REST loads already yielded, so they were unaffected.)
+
 ## [1.10.3] - 2026-06-03
 
 ### Fixed

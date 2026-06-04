@@ -369,9 +369,12 @@ public sealed class DaxterUi
         });
 
     /// <summary>Loads the model's fields tree (tables → their columns + measures) for the DAX explorer.</summary>
-    public async Task<ModelTree> ModelTreeAsync(string ws, string ds, CancellationToken ct = default)
+    public Task<ModelTree> ModelTreeAsync(string ws, string ds, CancellationToken ct = default)
     {
         var cfg = _state.ToConfig(ws, ds);
+        // Offload the synchronous ADOMD reads so the circuit thread can render the busy overlay.
+        return Task.Run(async () =>
+        {
         var factory = new AdomdXmlaSessionFactory(cfg, Provider(cfg));
         using var session = await factory.CreateAsync(ct);
 
@@ -411,6 +414,7 @@ public sealed class DaxterUi
         }
 
         return new ModelTree(nodes);
+        }, ct);
     }
 
     /// <summary>
@@ -436,19 +440,23 @@ public sealed class DaxterUi
             }
 
             var token = await Provider(cfg).GetTokenAsync(ct);
-            using var svc = new ModelEditService(cfg, token);
-            var desc = op(svc);   // stages the change in-memory (TOM)
-
-            if (!apply)
+            // Offload the synchronous TOM staging/apply so the circuit thread can render the busy overlay.
+            return await Task.Run(() =>
             {
-                _log.LogInformation("{Label} → DRY RUN in {Ms} ms", label, sw.ElapsedMilliseconds);
-                return "DRY RUN — not applied:\n" + desc;
-            }
+                using var svc = new ModelEditService(cfg, token);
+                var desc = op(svc);   // stages the change in-memory (TOM)
 
-            var backup = new ModelBackupService(cfg, token).Backup();
-            svc.Apply();
-            _log.LogInformation("{Label} → APPLIED in {Ms} ms (backup {Backup})", label, sw.ElapsedMilliseconds, backup);
-            return $"APPLIED — backup saved to {backup}\n{desc}";
+                if (!apply)
+                {
+                    _log.LogInformation("{Label} → DRY RUN in {Ms} ms", label, sw.ElapsedMilliseconds);
+                    return "DRY RUN — not applied:\n" + desc;
+                }
+
+                var backup = new ModelBackupService(cfg, token).Backup();
+                svc.Apply();
+                _log.LogInformation("{Label} → APPLIED in {Ms} ms (backup {Backup})", label, sw.ElapsedMilliseconds, backup);
+                return $"APPLIED — backup saved to {backup}\n{desc}";
+            }, ct);
         }
         catch (Exception ex)
         {
@@ -463,8 +471,12 @@ public sealed class DaxterUi
     {
         var cfg = _state.ToConfig(ws, ds);
         var token = await Provider(cfg).GetTokenAsync(ct);
-        using var svc = new ModelEditService(cfg, token);
-        return svc.ReadTable(table);
+        // Offload the synchronous TOM read so the circuit thread can render the busy overlay.
+        return await Task.Run(() =>
+        {
+            using var svc = new ModelEditService(cfg, token);
+            return svc.ReadTable(table);
+        }, ct);
     }
 
     /// <summary>Reads a table's incremental refresh policy settings (null if it has none).</summary>
@@ -472,18 +484,25 @@ public sealed class DaxterUi
     {
         var cfg = _state.ToConfig(ws, ds);
         var token = await Provider(cfg).GetTokenAsync(ct);
-        using var svc = new ModelEditService(cfg, token);
-        return svc.ReadRefreshPolicy(table);
+        // Offload the synchronous TOM read so the circuit thread can render the busy overlay.
+        return await Task.Run(() =>
+        {
+            using var svc = new ModelEditService(cfg, token);
+            return svc.ReadRefreshPolicy(table);
+        }, ct);
     }
 
     private Task<QueryResult> XmlaAsync(string op, string ws, string ds, Func<IXmlaSession, QueryResult> body, CancellationToken ct)
-        => Track(op, $"{ws}/{ds}", async () =>
+        // Offload the synchronous ADOMD work (connection.Open + Execute have no async API) to a
+        // thread-pool thread so the Blazor circuit thread stays free to render the busy overlay —
+        // otherwise the spinner can't paint until the blocking read has already finished.
+        => Track(op, $"{ws}/{ds}", () => Task.Run(async () =>
         {
             var cfg = _state.ToConfig(ws, ds);
             var factory = new AdomdXmlaSessionFactory(cfg, Provider(cfg));
             using var session = await factory.CreateAsync(ct);
             return body(session);
-        });
+        }, ct));
 
     /// <summary>Runs an operation with start/success/failure logging (op, target, rows, elapsed).</summary>
     private async Task<QueryResult> Track(string op, string? target, Func<Task<QueryResult>> body)
