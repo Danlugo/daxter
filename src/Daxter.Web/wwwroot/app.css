@@ -245,10 +245,15 @@ label.inline input, label.inline select { min-width:auto; }
 .conn-owner { align-items:center; gap:.8rem; }
 .conn-head { background:var(--surface); border:1px solid var(--line); border-radius:8px;
     padding:.6rem 1rem; font-weight:600; text-align:center; margin:.9rem 0 .6rem; }
-.conn-grid td { vertical-align:middle; }
-.conn-mapsto { display:flex; gap:.6rem; align-items:flex-end; flex-wrap:wrap; }
+.conn-list { border:1px solid var(--line); border-radius:8px; }
+.conn-row { padding:.7rem 1rem; border-bottom:1px solid var(--line); }
+.conn-row:last-child { border-bottom:0; }
+.conn-src { word-break:break-all; }
+.conn-mapsto { display:flex; gap:.7rem; align-items:flex-end; flex-wrap:wrap; margin-top:.5rem; }
 .conn-mapsto .conn-lbl { align-self:center; font-weight:600; }
-.conn-mapsto select { min-width:200px; }
+.conn-fld { display:flex; flex-direction:column; font-size:.82rem; color:var(--muted); }
+.conn-fld select { min-width:240px; margin-top:.15rem; }
+.conn-filtered { align-self:center; }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

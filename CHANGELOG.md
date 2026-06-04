@@ -6,6 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-06-04
+
+### Fixed
+- **Connections layout no longer shoves the pickers off the card.** The 2-column table pushed the
+  Gateway/connection dropdowns far right (and overflowed) when a data source's server string was long.
+  Each connection is now a **stacked block** — source on top, `maps to: Gateway [▾] connection [▾]`
+  left-aligned beneath it — inside a bordered list.
+- **Connection dropdown shows only applicable connections.** Instead of every connection on the
+  gateway, each source's dropdown now lists only the gateway connections whose **server matches that
+  source** (with a safe fallback to all if none match, and a "showing N of M" hint when filtered).
+
 ## [1.12.1] - 2026-06-04
 
 ### Changed

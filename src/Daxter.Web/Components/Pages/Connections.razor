@@ -61,21 +61,22 @@
         }
         else
         {
-            <table class="grid conn-grid"><tbody>
+            <div class="conn-list">
                 @for (var i = 0; i < datasources.Rows.Count; i++)
                 {
                     var row = datasources.Rows[i];
                     var ix = i;
                     var gid = rowGw.GetValueOrDefault(ix, "");
-                    var conns = !string.IsNullOrEmpty(gid) && gwCache.TryGetValue(gid, out var c) ? c : null;
-                    <tr>
-                        <td>
+                    var allConns = !string.IsNullOrEmpty(gid) && gwCache.TryGetValue(gid, out var c) ? c : null;
+                    var conns = allConns is null ? null : MatchingConns(allConns, row);
+                    <div class="conn-row">
+                        <div class="conn-src">
                             <strong>Connection:</strong> @SourceLabel(row)
                             <br /><small class="muted">current: @BoundLabel(row)</small>
-                        </td>
-                        <td class="conn-mapsto">
+                        </div>
+                        <div class="conn-mapsto">
                             <span class="conn-lbl">maps to:</span>
-                            <label class="conn-gw">Gateway
+                            <label class="conn-fld">Gateway
                                 <select value="@gid" @onchange="e => SetRowGateway(ix, e)" disabled="@busy">
                                     <option value="">— pick a gateway —</option>
                                     @if (gateways is not null)
@@ -87,23 +88,27 @@
                                     }
                                 </select>
                             </label>
-                            <label class="conn-conn">connection
+                            <label class="conn-fld">connection
                                 <select value="@rowConn.GetValueOrDefault(ix, "")" @onchange="e => SetRowConn(ix, e)"
                                         disabled="@(string.IsNullOrEmpty(gid) || busy)">
                                     <option value="">— first matching —</option>
-                                    @if (conns is not null)
+                                    @if (allConns is not null)
                                     {
-                                        @foreach (var g in conns.Rows)
+                                        @foreach (var g in conns!)
                                         {
-                                            <option value="@Cell(conns, g, "id")">@GwConnLabel(conns, g)</option>
+                                            <option value="@Cell(allConns, g, "id")">@GwConnLabel(allConns, g)</option>
                                         }
                                     }
                                 </select>
                             </label>
-                        </td>
-                    </tr>
+                            @if (allConns is not null && conns!.Count < allConns.RowCount)
+                            {
+                                <span class="muted conn-filtered">showing @conns!.Count of @allConns.RowCount (matched to this source)</span>
+                            }
+                        </div>
+                    </div>
                 }
-            </tbody></table>
+            </div>
             @if (gateways is not null && gateways.RowCount == 0)
             {
                 <p class="muted">No bindable gateways found for this model.</p>
@@ -335,6 +340,21 @@
     {
         var gw = Cell(datasources!, row, "gatewayId");
         return string.IsNullOrEmpty(gw) ? "cloud / SSO (no gateway)" : $"gateway {gw}";
+    }
+
+    /// <summary>The gateway connections applicable to a source — those whose server matches the
+    /// source's server (host). Falls back to all if none match, so a valid option is never hidden.</summary>
+    private List<object?[]> MatchingConns(QueryResult conns, object?[] sourceRow)
+    {
+        var srcServer = Cell(datasources!, sourceRow, "server").Trim().ToLowerInvariant();
+        if (srcServer.Length == 0) return conns.Rows.ToList();
+        bool ServerMatches(object?[] g)
+        {
+            var s = Cell(conns, g, "server").Trim().ToLowerInvariant();
+            return s.Length > 0 && (s == srcServer || s.Contains(srcServer) || srcServer.Contains(s));
+        }
+        var matched = conns.Rows.Where(ServerMatches).ToList();
+        return matched.Count > 0 ? matched : conns.Rows.ToList();
     }
 
     private static string GwConnLabel(QueryResult r, object?[] g)
