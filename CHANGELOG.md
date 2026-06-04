@@ -6,6 +6,19 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-06-04
+
+### Fixed
+- **Connections page picker now sorts on its own** (defensive) — every per-page list-builder
+  (`Names`/`ColumnValues`) sorts A→Z, so a dropdown is alphabetised even if its source isn't (the
+  Connections `Names` was the one that relied solely on the bridge sort). All dynamic dropdowns across
+  the console are confirmed sorted.
+
+### Docs
+- Folded two recurring rules into `.claude/ui-contract.md` + `daxter-new-feature`: **every page gets
+  its OWN Frequent context** (separate per page — never reuse another's), and **all dropdowns are
+  sorted + type-scoped**.
+
 ## [1.11.1] - 2026-06-04
 
 ### Fixed
