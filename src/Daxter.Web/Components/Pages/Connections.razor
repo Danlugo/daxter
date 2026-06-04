@@ -127,13 +127,13 @@
             @if (!string.IsNullOrEmpty(bindGateway))
             {
                 <div class="conn-list">
-                    @for (var i = 0; i < datasources.Rows.Count; i++)
+                    @for (var i = 0; i < bindSources.Count; i++)
                     {
-                        var row = datasources.Rows[i];
+                        var src = bindSources[i];
                         var ix = i;
-                        var matches = gwConns is null ? null : ExactConns(gwConns, row);
+                        var matches = gwConns is null ? null : MatchGwConns(gwConns, src);
                         <div class="conn-row">
-                            <div class="conn-src"><strong>@SourceLabel(row)</strong></div>
+                            <div class="conn-src"><strong>@src.Label</strong></div>
                             <div class="conn-mapsto">
                                 <span class="conn-lbl">maps to:</span>
                                 <label class="conn-fld">connection
@@ -213,6 +213,10 @@
     private QueryResult? gwConns;
     private readonly Dictionary<int, string> rowConn = new();
 
+    // The model's sources unified for re-binding (named when the Fabric read is available).
+    private record BindSource(string Label, string Name, string Type, string Server, string Db);
+    private List<BindSource> bindSources = new();
+
     private string? result;
     private bool resultOk;
     private bool busy;
@@ -262,7 +266,7 @@
     private void ResetModel()
     {
         itemConns = datasources = gateways = gwConns = null;
-        bindGateway = ""; rowConn.Clear(); owner = null; result = null;
+        bindGateway = ""; rowConn.Clear(); bindSources = new(); owner = null; result = null;
     }
 
     private Task LoadAll() => Busy(LoadAllCore);
@@ -277,6 +281,7 @@
         datasources = await Ui.DatasourcesAsync(workspace, dataset);
         // Gateways the account administers — the only ones a re-bind can target.
         gateways = await Ui.GatewaysAsync();
+        bindSources = BuildBindSources();
         bindGateway = ""; gwConns = null; rowConn.Clear();
     }
 
@@ -391,23 +396,67 @@
         return string.IsNullOrEmpty(gw) ? "cloud / SSO (no gateway)" : $"gateway {gw}";
     }
 
-    /// <summary>Gateway connections that EXACTLY match a source — same type and same server+database
-    /// (normalized). No fallback: if none match, the source has no connection on this gateway.</summary>
-    private List<object?[]> ExactConns(QueryResult conns, object?[] sourceRow)
+    /// <summary>The model's sources unified for re-binding. Prefers the Fabric read (which carries the
+    /// connection <em>name</em> — the only reliable key, since the gateway endpoint often returns null
+    /// server/database); falls back to the raw data sources (server/database only) when it's unavailable.</summary>
+    private List<BindSource> BuildBindSources()
+    {
+        var list = new List<BindSource>();
+        if (itemConns is not null && itemConns.RowCount > 0)
+        {
+            foreach (var r in itemConns.Rows)
+            {
+                var name = Cell(itemConns, r, "displayName");
+                var type = Cell(itemConns, r, "type");
+                var (srv, db) = SplitPath(Cell(itemConns, r, "path"));
+                var conn = Connectivity(Cell(itemConns, r, "connectivityType"));
+                var label = string.IsNullOrEmpty(name) ? $"{type} — {srv}" : $"{name} — {type} ({conn})";
+                list.Add(new BindSource(label, name, type, srv, db));
+            }
+        }
+        else if (datasources is not null)
+        {
+            foreach (var r in datasources.Rows)
+                list.Add(new BindSource(SourceLabel(r), "", Cell(datasources, r, "datasourceType"),
+                    Cell(datasources, r, "server"), Cell(datasources, r, "database")));
+        }
+        return list;
+    }
+
+    /// <summary>Split a Fabric connection path ("server;database") into its two parts.</summary>
+    private static (string Server, string Db) SplitPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return ("", "");
+        var i = path.IndexOf(';');
+        return i < 0 ? (path, "") : (path[..i], path[(i + 1)..]);
+    }
+
+    /// <summary>Gateway connections that match a source. Primary key is the connection <em>name</em>
+    /// (gateway <c>datasourceName</c> == the source's display name) — reliable even when the gateway
+    /// endpoint returns null server/database. Falls back to type + server + database when both sides
+    /// carry them. No match-all fallback: empty means the source has no connection on this gateway.</summary>
+    private List<object?[]> MatchGwConns(QueryResult conns, BindSource src)
     {
         string Norm(string s) => s.Trim().ToLowerInvariant();
-        var srcType = Norm(Cell(datasources!, sourceRow, "datasourceType"));
-        var srcServer = Norm(Cell(datasources!, sourceRow, "server"));
-        var srcDb = Norm(Cell(datasources!, sourceRow, "database"));
+        var name = Norm(src.Name);
+        var type = Norm(src.Type);
+        var server = Norm(src.Server);
+        var db = Norm(src.Db);
         bool Matches(object?[] g)
         {
-            var t = Norm(Cell(conns, g, "datasourceType"));
-            var s = Norm(Cell(conns, g, "server"));
-            var d = Norm(Cell(conns, g, "database"));
-            if (srcType.Length > 0 && t.Length > 0 && t != srcType) return false;
-            if (srcServer.Length > 0 && s != srcServer) return false;
-            if (srcDb.Length > 0 && d != srcDb) return false;
-            return s.Length > 0 || d.Length > 0;   // require at least an identity match, not type-only
+            var gn = Norm(Cell(conns, g, "datasourceName"));
+            var gt = Norm(Cell(conns, g, "datasourceType"));
+            var gs = Norm(Cell(conns, g, "server"));
+            var gd = Norm(Cell(conns, g, "database"));
+            if (name.Length > 0 && gn.Length > 0 && gn == name) return true;   // reliable name match
+            if (server.Length > 0 && gs.Length > 0)                            // identity match if both have it
+            {
+                if (gt.Length > 0 && type.Length > 0 && gt != type) return false;
+                if (gs != server) return false;
+                if (db.Length > 0 && gd.Length > 0 && gd != db) return false;
+                return true;
+            }
+            return false;
         }
         return conns.Rows.Where(Matches).ToList();
     }

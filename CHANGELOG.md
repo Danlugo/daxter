@@ -6,6 +6,18 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-06-04
+
+### Fixed
+- **Connections re-bind dropdown was always empty.** It matched the gateway's connections to a model
+  source by server+database, but the `/gateways/{id}/datasources` endpoint frequently returns
+  **null server/database** (e.g. on VNet/Resource gateways) — so nothing ever matched, even when the
+  gateway clearly hosts the connection. The matcher now keys primarily on the connection **name**
+  (gateway `datasourceName` == the source's display name from the Fabric read), falling back to
+  type + server + database only when both sides carry them. The re-bind list is now built from the
+  named Fabric connections (falling back to raw data sources when Fabric is unavailable), so a source
+  whose connection exists on the selected gateway is now selectable.
+
 ## [1.13.0] - 2026-06-04
 
 ### Added
