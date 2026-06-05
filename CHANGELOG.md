@@ -6,16 +6,34 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-06-05
+
+### Added
+- **Edit an existing column's properties** — format string, data type, sort-by column, summarize-by,
+  display folder, description, hidden, data category — on **any** column (data or calculated), without
+  needing a DAX expression. This closes a real gap: raw TMSL `createOrReplace.column` is rejected by the
+  engine (*"Unrecognized JSON property: column"*), so a column's format/sort-by previously had to be
+  changed in Tabular Editor. DAXter now uses **TOM + `SaveChanges()`** — the same path Tabular Editor /
+  Power BI Desktop use — sending only the fields you change (so a sourced column's data type is never
+  re-stamped unless you pick a new one). Gated behind the model-edit write gate; `.bim` backup before apply.
+- Across all three surfaces (parity): **CLI** `model edit edit-column`, **MCP** `daxter_edit_column`,
+  **web** (a new **Columns** tab on the Model Edit page — pick a table, click a column, edit its
+  properties, Preview/Apply).
+
 ## [1.14.0] - 2026-06-05
 
 ### Added
-- **Connections page now lists your shareable cloud connections** — the cloud half of the Service's
-  *Gateway and cloud connections* screen, independent of any model. A read-only, searchable, exportable
-  grid (Connection · Type · Detail) from the Fabric *List Connections* API (paginated). Read-only because
-  a source's "Maps to" a cloud connection has no public write API.
+- **Connections page rebuilt to mirror the Power BI *Gateway and cloud connections* screen** — two
+  sections, each listing every data source in the model with a per-source **"Maps to:"** dropdown:
+  - **Gateway connections** — pick a gateway you administer; each source shows a ✓/✗ match indicator and
+    a dropdown of that gateway's matching connections (pre-selected to the current binding). **Apply is a
+    real write** via the public `BindToGateway` API.
+  - **Cloud connections** — each source shows its matching shareable cloud connections (pre-selected to
+    the current mapping). **Read-only** with a *Manage in Power BI Service ↗* deep link, because setting
+    a cloud "Maps to" has **no public write API** (confirmed against Microsoft Learn — it's Service-only).
 - New readable capability across all three surfaces (parity): **CLI** `ws connections`, **MCP**
-  `daxter_connections`, **web** (the Cloud connections card). Lists every connection you can access
-  (cloud + gateway); the web card filters to shareable cloud.
+  `daxter_connections`, **web**. Lists every connection you can access (cloud + gateway) via the Fabric
+  *List Connections* API (paginated); the web Cloud section filters to shareable cloud per source.
 
 ## [1.13.1] - 2026-06-04
 

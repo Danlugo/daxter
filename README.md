@@ -44,7 +44,7 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 |--------|----------|
 | **Query** | `query` (DAX/MDX), `dmv`, `ls` — table / CSV / JSON |
 | **Model** | `model measures` · `measure` · `mcode` · `parameters` · `partitions` · `rls` · `export` (.bim) · `diff` |
-| **Edit** ⚠ | `model edit measure/parameter/role/column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply. Available in **CLI · MCP · web (Model Edit page)** — one shared engine |
+| **Edit** ⚠ | `model edit measure/parameter/role/column/edit-column/source/calc-table/import-table/relationship` (+ `delete-*`, raw `tmsl`) — **dry-run by default**, gated, `.bim` backup before apply. `edit-column` changes an existing column's **format / data type / sort-by / summarize-by / folder / hidden** (via TOM — raw TMSL can't edit a standalone column). Available in **CLI · MCP · web (Model Edit page)** — one shared engine |
 | **Ops** | `refresh model/table/partitions` (queued through the shared worker) · `refresh status` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/permissions/gateways/datasources` (REST) |
 | **Connections** ⚠ | See a model's **current "maps to" mapping** (connection name + cloud / on-prem / VNet gateway, from the Fabric API — needs only model access): `ws item-connections`. List your **shareable cloud connections**: `ws connections`. **Take over** + **re-bind** sources to one gateway you administer: `ws takeover` · `ws item-connections` · `ws connections` · `ws discover-gateways` · `ws gateway-datasources` · `ws bind-gateway` — **dry-run by default**, gated. In **CLI · MCP (`daxter_item_connections`/`daxter_connections`/`daxter_take_over`/`daxter_bind_to_gateway`) · web (Connections page)**. Re-bind is one gateway per model; per-source-different gateways and cloud "Maps to" are Service-only |
@@ -168,7 +168,8 @@ DAXter's own layers add no critical/high vulnerabilities.
 
 ## Limitations
 
-- **Model editing** (measures, parameters, RLS/OLS roles, calculated columns, partition M sources,
+- **Model editing** (measures, parameters, RLS/OLS roles, calculated columns, **column properties**
+  — format / data type / sort-by / summarize-by / folder / hidden — partition M sources,
   calculated tables, + raw TMSL) is supported — **dry-run by default**, behind a dedicated gate, with
   a `.bim` backup before every apply. ⚠ Editing a Power BI Desktop–authored model over XMLA is
   **irreversible for PBIX download** (keep your original .pbix) and requires the workspace XMLA

@@ -429,6 +429,28 @@ public static class DaxterTools
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
             svc => svc.UpsertCalculatedColumn(table, name, dax, dataType), execute, ct);
 
+    [McpServerTool(Name = "daxter_edit_column", Destructive = true, Title = "Edit column properties"),
+     Description("Edit an EXISTING column's presentation/metadata on any column (data or calculated) — format string, " +
+                "data type, sort-by column, summarize-by, display folder, description, hidden, data category — via TOM " +
+                "(no DAX needed). This is the path Tabular Editor/Desktop use; raw TMSL can't edit a standalone column. " +
+                "Only the properties you pass change (omit to leave as-is; empty string clears a text property)." + EditNote)]
+    public static Task<string> EditColumn(
+        [Description("Table that owns the column.")] string table,
+        [Description("Column name.")] string name,
+        [Description("Format string, e.g. \"#,0\" or \"$#,0.00\" or \"0.0%\" (optional).")] string? formatString = null,
+        [Description("Data type: string | int64 | double | decimal | dateTime | boolean (optional).")] string? dataType = null,
+        [Description("Name of another column on the same table to sort this column by (optional; empty string clears it).")] string? sortByColumn = null,
+        [Description("Default summarization: none | sum | average | min | max | count | distinctCount (optional).")] string? summarizeBy = null,
+        [Description("Display folder (optional).")] string? displayFolder = null,
+        [Description("Description (optional).")] string? description = null,
+        [Description("Hide the column from report view (optional).")] bool? isHidden = null,
+        [Description("Data category, e.g. Years | Months | Place | WebUrl (optional).")] string? dataCategory = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ModelEditAsync(workspace, dataset,
+            svc => svc.EditColumn(table, name, formatString, dataType, sortByColumn, summarizeBy,
+                displayFolder, description, isHidden, dataCategory), execute, ct);
+
     [McpServerTool(Name = "daxter_delete_column", Destructive = true, Title = "Delete column"),
      Description("Delete a column from a table." + EditNote)]
     public static Task<string> DeleteColumn(

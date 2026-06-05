@@ -9,7 +9,7 @@
 
 <h1>Model Edit</h1>
 <p class="muted">
-    Add, change, or remove model objects — parameters, roles, relationships, tables — over XMLA, using
+    Add, change, or remove model objects — parameters, roles, relationships, tables, columns — over XMLA, using
     the <strong>same engine as the CLI and MCP</strong>. <em>Preview</em> is a dry-run; <em>Apply</em>
     writes (a <code>.bim</code> backup is saved first).
 </p>
@@ -338,6 +338,100 @@
             }
         </div>
     }
+    else if (tab == "Columns")
+    {
+        <div class="card">
+            <h3>Columns</h3>
+            <label>Table
+                <select @bind="colTable" @bind:after="LoadColumnsForTable">
+                    <option value="">— pick a table —</option>
+                    @foreach (var tn in tables) { <option value="@tn">@tn</option> }
+                </select>
+            </label>
+            @if (!string.IsNullOrEmpty(colTable))
+            {
+                @if (columns.Count == 0)
+                {
+                    <p class="muted">No editable columns on this table.</p>
+                }
+                else
+                {
+                    <p class="muted">Click a column to load its properties into the form below.</p>
+                    <table class="grid">
+                        <thead><tr><th>Column</th><th>Kind</th><th>Type</th><th>Format</th><th>Sort by</th><th>Hidden</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in columns)
+                            {
+                                <tr class="row-pick @(selectedColumn == c.Name ? "active" : "")" @onclick="() => SelectColumn(c)">
+                                    <td>@c.Name</td>
+                                    <td>@c.Kind</td>
+                                    <td>@c.DataType</td>
+                                    <td class="nowrap">@c.FormatString</td>
+                                    <td>@c.SortByColumn</td>
+                                    <td>@(c.IsHidden ? "✓" : "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(selectedColumn))
+        {
+            <div class="card" id="me-editor">
+                <h3>Edit column '@colName' on '@colTable'</h3>
+                <div class="form me-form">
+                    <label>Format string <input @bind="colFormat" placeholder="#,0 · $#,0.00 · 0.0% · yyyy-MM-dd" /></label>
+                    <label>Data type
+                        <select @bind="colDataType">
+                            <option value="">(unchanged)</option>
+                            <option value="String">string</option>
+                            <option value="Int64">int64</option>
+                            <option value="Double">double</option>
+                            <option value="Decimal">decimal</option>
+                            <option value="DateTime">dateTime</option>
+                            <option value="Boolean">boolean</option>
+                        </select>
+                    </label>
+                    <label>Sort by column
+                        <select @bind="colSortBy">
+                            <option value="">(none)</option>
+                            @foreach (var sn in siblingCols) { <option value="@sn">@sn</option> }
+                        </select>
+                    </label>
+                    <label>Summarize by
+                        <select @bind="colSummarize">
+                            <option value="">(unchanged)</option>
+                            <option value="None">none</option>
+                            <option value="Sum">sum</option>
+                            <option value="Average">average</option>
+                            <option value="Min">min</option>
+                            <option value="Max">max</option>
+                            <option value="Count">count</option>
+                            <option value="DistinctCount">distinctCount</option>
+                        </select>
+                    </label>
+                    <label>Display folder <input @bind="colFolder" /></label>
+                    <label>Description <input @bind="colDesc" /></label>
+                    <label>Data category <input @bind="colCategory" placeholder="Years · Months · Place · WebUrl" /></label>
+                    <label class="me-check"><input type="checkbox" @bind="colHidden" /> Hidden from report view</label>
+                    <div class="cmd-group">
+                        <button class="btn-sm" @onclick="() => SaveColumn(false)" disabled="@busy">Preview</button>
+                        <button class="btn" @onclick="() => SaveColumn(true)" disabled="@(busy || !Ui.ModelEditEnabled)"
+                                title="@(Ui.ModelEditEnabled ? "Apply the change" : "Enable Allow model edits first")">Apply</button>
+                        <button class="btn-sm" @onclick="ClearColumn" disabled="@busy">Clear</button>
+                    </div>
+                    @if (!Ui.ModelEditEnabled)
+                    {
+                        <p class="muted">Apply is disabled — turn on <a href="configure">⚙ Allow model edits</a> to save. (Preview works without it.)</p>
+                    }
+                </div>
+                <p class="muted">⚠ Apply writes over XMLA — irreversible for PBIX download; a <code>.bim</code> backup is saved first.
+                   Only the fields you change are sent. Changing <strong>data type</strong> may require a refresh.</p>
+            </div>
+        }
+    }
 }
 
 @if (pendingApplyOp is not null)
@@ -364,7 +458,7 @@
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
 
-    private readonly string[] tabs = { "Parameters", "Roles", "Relationships", "Tables" };
+    private readonly string[] tabs = { "Parameters", "Roles", "Relationships", "Tables", "Columns" };
     private string tab = "Parameters";
 
     private List<string> workspaces = new();
@@ -452,6 +546,7 @@
             case "Roles": await LoadRoles(); break;
             case "Relationships": await LoadRelationships(); break;
             case "Tables": await LoadTables(); break;
+            case "Columns": await LoadColumnsTab(); break;
         }
     }
 
@@ -560,6 +655,7 @@
             case "Roles": ClearRole(); break;
             case "Relationships": ClearRel(); break;
             case "Tables": ClearTable(); break;
+            case "Columns": ClearColumn(); break;
         }
     }
 
@@ -813,6 +909,73 @@
         tableEditing = false; tablePolicy = false; selectedTable = null;
         policyPolling = ""; policyRollGran = "Month"; policyIncrGran = "Day";
         policyRollPeriods = 1; policyIncrPeriods = 1; policyIncrOffset = 0;
+    }
+
+    // ---- Columns ----
+    private string colTable = "";
+    private List<ColumnInfo> columns = new();
+    private List<string> siblingCols = new();
+    private string? selectedColumn;
+    private ColumnInfo? colOriginal;
+    private string colName = "", colFormat = "", colDataType = "", colSortBy = "", colSummarize = "",
+        colFolder = "", colDesc = "", colCategory = "";
+    private bool colHidden;
+
+    private async Task LoadColumnsTab()
+    {
+        tables = Names(await Ui.TablesAsync(workspace, dataset));
+        if (!string.IsNullOrEmpty(colTable))
+            columns = (await Ui.ReadColumnsAsync(workspace, dataset, colTable)).ToList();
+        siblingCols = columns.Select(c => c.Name).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private Task LoadColumnsForTable() => Busy(async () =>
+    {
+        ClearColumn();
+        columns = string.IsNullOrEmpty(colTable)
+            ? new() : (await Ui.ReadColumnsAsync(workspace, dataset, colTable)).ToList();
+        siblingCols = columns.Select(c => c.Name).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+    });
+
+    private void SelectColumn(ColumnInfo c)
+    {
+        selectedColumn = c.Name; colOriginal = c; colName = c.Name;
+        colFormat = c.FormatString; colSortBy = c.SortByColumn; colFolder = c.DisplayFolder;
+        colDesc = c.Description; colCategory = c.DataCategory; colHidden = c.IsHidden;
+        colDataType = ""; colSummarize = "";   // enum dropdowns default to "(unchanged)" for safety
+        scrollToForm = true;
+        Show($"Column [{c.Name}] on [{colTable}] ({c.Kind}) — type {c.DataType}, format '{c.FormatString}', " +
+             $"sortBy '{c.SortByColumn}', summarizeBy {c.SummarizeBy}, folder '{c.DisplayFolder}', hidden {c.IsHidden}", true);
+    }
+
+    private async Task SaveColumn(bool apply)
+    {
+        if (string.IsNullOrEmpty(selectedColumn) || colOriginal is null) { Show("Pick a column first.", false); return; }
+        var o = colOriginal;
+        // Send only changed fields (null = leave as-is). Data type is sent only when explicitly chosen, so
+        // we never re-stamp a sourced column's type (which could force a reprocess).
+        string? fmt = colFormat != o.FormatString ? colFormat : null;
+        string? dt = string.IsNullOrEmpty(colDataType) ? null : colDataType;
+        string? sb = colSortBy != o.SortByColumn ? colSortBy : null;     // "" clears the sort-by
+        string? smb = string.IsNullOrEmpty(colSummarize) ? null : colSummarize;
+        string? fld = colFolder != o.DisplayFolder ? colFolder : null;
+        string? dsc = colDesc != o.Description ? colDesc : null;
+        bool? hid = colHidden != o.IsHidden ? colHidden : (bool?)null;
+        string? cat = colCategory != o.DataCategory ? colCategory : null;
+        if (fmt is null && dt is null && sb is null && smb is null && fld is null && dsc is null && hid is null && cat is null)
+        { Show("No changes to apply — edit a field first.", false); return; }
+
+        var table = colTable; var nm = colName;
+        Func<ModelEditService, string> op = svc => svc.EditColumn(table, nm, fmt, dt, sb, smb, fld, dsc, hid, cat);
+        if (apply) await ConfirmApply(op);
+        else await Run(() => Ui.ModelEditAsync(workspace, dataset, op, false), false);
+    }
+
+    private void ClearColumn()
+    {
+        selectedColumn = null; colOriginal = null; colName = "";
+        colFormat = ""; colDataType = ""; colSortBy = ""; colSummarize = "";
+        colFolder = ""; colDesc = ""; colCategory = ""; colHidden = false;
     }
 
     /// <summary>Pull the "Name" column (or column 0) out of a tabular result as a list.</summary>

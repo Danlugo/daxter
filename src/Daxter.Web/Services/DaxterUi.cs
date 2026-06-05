@@ -299,6 +299,24 @@ public sealed class DaxterUi
         }
     }
 
+    /// <summary>Deep link to a model's "Gateway and cloud connections" settings in the Power BI Service —
+    /// where the cloud "Maps to" is set (no public write API). Returns null if the ids can't be resolved.</summary>
+    public async Task<string?> ModelSettingsUrlAsync(string ws, string ds, CancellationToken ct = default)
+    {
+        try
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+            return $"https://app.powerbi.com/groups/{groupId}/settings/datasets/{datasetId}";
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "could not build model settings URL for {Ws}/{Ds}", ws, ds);
+            return null;
+        }
+    }
+
     /// <summary>All connections the account can access (cloud + gateway) from the Fabric API — used to
     /// list the shareable <em>cloud</em> connections. Returns null on failure so the page can hide the
     /// section gracefully.</summary>
@@ -614,6 +632,20 @@ public sealed class DaxterUi
         {
             using var svc = new ModelEditService(cfg, token);
             return svc.ReadRefreshPolicy(table);
+        }, ct);
+    }
+
+    /// <summary>Reads a table's columns + their editable properties (format, sort-by, summarize-by, …) via
+    /// TOM, for the Model Edit page's Columns tab to pre-fill when a column is selected.</summary>
+    public async Task<IReadOnlyList<ColumnInfo>> ReadColumnsAsync(string ws, string ds, string table, CancellationToken ct = default)
+    {
+        var cfg = _state.ToConfig(ws, ds);
+        var token = await Provider(cfg).GetTokenAsync(ct);
+        // Offload the synchronous TOM read so the circuit thread can render the busy overlay.
+        return await Task.Run(() =>
+        {
+            using var svc = new ModelEditService(cfg, token);
+            return svc.ReadColumns(table);
         }, ct);
     }
 

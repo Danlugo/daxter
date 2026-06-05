@@ -15,6 +15,11 @@ public sealed record TableFilter(string Table, string FilterDax);
 /// the M output column <paramref name="Source"/>.</summary>
 public sealed record SourceColumn(string Name, string DataType, string Source);
 
+/// <summary>An existing column's editable presentation/metadata properties (for the editor to pre-fill).</summary>
+public sealed record ColumnInfo(
+    string Name, string Kind, string DataType, string FormatString, string SortByColumn,
+    string SummarizeBy, string DisplayFolder, string Description, bool IsHidden, string DataCategory);
+
 /// <summary>An incremental-refresh policy's editable settings (the M template lives in <paramref name="Source"/>).</summary>
 public sealed record RefreshPolicyInfo(
     string Source, string Polling,
@@ -175,6 +180,73 @@ public sealed class ModelEditService : IDisposable
         var c = t.Columns.Find(name) ?? throw new DaxterException($"Column not found: [{name}] on [{table}].");
         t.Columns.Remove(c);
         return $"delete column [{name}] from table [{table}]";
+    }
+
+    /// <summary>Edits an <b>existing</b> column's presentation/metadata properties — format string,
+    /// data type, sort-by column, summarize-by, display folder, description, hidden, data category —
+    /// on <i>any</i> column (data or calculated), without needing a DAX expression. This is the path
+    /// Tabular Editor / Desktop use: hand-built <c>createOrReplace.column</c> TMSL is rejected by the
+    /// engine ("Unrecognized JSON property: column"), but TOM + SaveChanges edits a column in place.
+    /// Only the properties you pass are changed (null = leave as-is; "" clears string properties).</summary>
+    public string EditColumn(string table, string name,
+        string? formatString = null, string? dataType = null, string? sortByColumn = null,
+        string? summarizeBy = null, string? displayFolder = null, string? description = null,
+        bool? isHidden = null, string? dataCategory = null)
+    {
+        var t = Table(table);
+        var c = t.Columns.Find(name) ?? throw new DaxterException($"Column not found: [{name}] on [{table}].");
+        if (c.Type == Tom.ColumnType.RowNumber)
+            throw new DaxterException($"Column [{name}] on [{table}] is a system row-number column and can't be edited.");
+
+        var changes = new List<string>();
+        if (formatString is not null) { c.FormatString = formatString; changes.Add($"format='{formatString}'"); }
+        if (!string.IsNullOrWhiteSpace(dataType)) { c.DataType = ParseDataType(dataType); changes.Add($"dataType={c.DataType}"); }
+        if (sortByColumn is not null)
+        {
+            if (sortByColumn.Length == 0) { c.SortByColumn = null; changes.Add("sortBy=cleared"); }
+            else
+            {
+                c.SortByColumn = t.Columns.Find(sortByColumn)
+                    ?? throw new DaxterException($"Sort-by column not found on [{table}]: [{sortByColumn}].");
+                changes.Add($"sortBy=[{sortByColumn}]");
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(summarizeBy)) { c.SummarizeBy = ParseSummarizeBy(summarizeBy); changes.Add($"summarizeBy={c.SummarizeBy}"); }
+        if (displayFolder is not null) { c.DisplayFolder = displayFolder; changes.Add($"folder='{displayFolder}'"); }
+        if (description is not null) { c.Description = description; changes.Add("description set"); }
+        if (isHidden is not null) { c.IsHidden = isHidden.Value; changes.Add($"hidden={isHidden.Value}"); }
+        if (dataCategory is not null) { c.DataCategory = dataCategory; changes.Add($"dataCategory='{dataCategory}'"); }
+
+        if (changes.Count == 0)
+            throw new DaxterException("No column properties to change — pass at least one of: formatString, " +
+                                     "dataType, sortByColumn, summarizeBy, displayFolder, description, isHidden, dataCategory.");
+        return $"alter column [{name}] on [{table}]: {string.Join(", ", changes)}";
+    }
+
+    /// <summary>Reads a table's columns and their current editable properties (for the editor to pre-fill).
+    /// System row-number columns are omitted.</summary>
+    public IReadOnlyList<ColumnInfo> ReadColumns(string table)
+    {
+        var t = Table(table);
+        return t.Columns
+            .Where(c => c.Type != Tom.ColumnType.RowNumber)
+            .Select(c => new ColumnInfo(
+                c.Name,
+                c.Type switch
+                {
+                    Tom.ColumnType.Calculated => "calculated",
+                    Tom.ColumnType.CalculatedTableColumn => "calculated-table",
+                    _ => "data",
+                },
+                c.DataType.ToString(),
+                c.FormatString ?? "",
+                c.SortByColumn?.Name ?? "",
+                c.SummarizeBy.ToString(),
+                c.DisplayFolder ?? "",
+                c.Description ?? "",
+                c.IsHidden,
+                c.DataCategory ?? ""))
+            .ToList();
     }
 
     // ---- partition (M) source ----
@@ -442,6 +514,18 @@ public sealed class ModelEditService : IDisposable
         "datetime" or "date" => Tom.DataType.DateTime,
         "boolean" or "bool" => Tom.DataType.Boolean,
         _ => throw new DaxterException($"Unknown data type '{value}'. Use string|int64|double|decimal|dateTime|boolean."),
+    };
+
+    private static Tom.AggregateFunction ParseSummarizeBy(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "none" or "donotsummarize" => Tom.AggregateFunction.None,
+        "sum" => Tom.AggregateFunction.Sum,
+        "average" or "avg" => Tom.AggregateFunction.Average,
+        "min" => Tom.AggregateFunction.Min,
+        "max" => Tom.AggregateFunction.Max,
+        "count" => Tom.AggregateFunction.Count,
+        "distinctcount" or "distinct" => Tom.AggregateFunction.DistinctCount,
+        _ => throw new DaxterException($"Unknown summarizeBy '{value}'. Use none|sum|average|min|max|count|distinctCount."),
     };
 
     private static void Require(string value, string field)

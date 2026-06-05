@@ -226,6 +226,8 @@ label.inline input, label.inline select { min-width:auto; }
 /* Model-edit form: wider, with a tall code-style M-expression box. */
 .me-form { max-width:880px; }
 .me-form textarea { width:100%; min-height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.84rem; }
+.me-form .me-check { flex-direction:row; align-items:center; gap:.45rem; }
+.me-form .me-check input { min-width:auto; width:auto; }
 /* Clickable rows (pick a parameter/role/etc. to load it into the editor). */
 .grid tr.row-pick { cursor:pointer; }
 .grid tr.row-pick:hover td { background:var(--surface-2); }
@@ -254,6 +256,11 @@ label.inline input, label.inline select { min-width:auto; }
 .conn-fld { display:flex; flex-direction:column; font-size:.82rem; color:var(--muted); }
 .conn-fld select { min-width:240px; margin-top:.15rem; }
 .conn-filtered { align-self:center; }
+.conn-section { margin:1.2rem 0 .4rem; font-size:1rem; }
+.conn-subhead { margin:.2rem 0 .4rem; }
+.conn-status { display:inline-block; width:1.1rem; font-weight:700; }
+.conn-status.ok { color:#2e7d32; }
+.conn-status.bad { color:#c62828; }
 select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--line); border-radius:6px; min-width:240px; }
 .actions { margin:1rem 0; }
 .query { display:flex; gap:.6rem; align-items:flex-start; margin:1rem 0; }

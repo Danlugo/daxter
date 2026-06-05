@@ -261,6 +261,10 @@ internal static class Program
         var fromColumn = new Option<string?>("--from-column") { Description = "Relationship 'from' column." };
         var toTable = new Option<string?>("--to-table") { Description = "Relationship 'to' (one-side) table." };
         var toColumn = new Option<string?>("--to-column") { Description = "Relationship 'to' column." };
+        var sortBy = new Option<string?>("--sort-by") { Description = "Sort this column by another column on the same table (empty to clear)." };
+        var summarizeBy = new Option<string?>("--summarize-by") { Description = "Default summarization: none|sum|average|min|max|count|distinctCount." };
+        var hidden = new Option<bool?>("--hidden") { Description = "Hide the column from report view (true|false)." };
+        var dataCategory = new Option<string?>("--data-category") { Description = "Data category, e.g. Years|Months|Place|WebUrl." };
         var crossFilter = new Option<string?>("--cross-filter") { Description = "Cross-filter: single | both | automatic (default single)." };
         var active = new Option<bool>("--active") { Description = "Relationship is active (default true).", DefaultValueFactory = _ => true };
 
@@ -303,6 +307,11 @@ internal static class Program
                 (pr, svc) => svc.UpsertCalculatedColumn(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
                     RequireOption(pr, dax, "--dax"), pr.GetValue(dataType)),
                 table, name, dax, dataType),
+            Edit("edit-column", "Edit an existing column's properties (format, data type, sort-by, summarize-by, folder, hidden, …).",
+                (pr, svc) => svc.EditColumn(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name"),
+                    pr.GetValue(format), pr.GetValue(dataType), pr.GetValue(sortBy), pr.GetValue(summarizeBy),
+                    pr.GetValue(folder), pr.GetValue(desc), pr.GetValue(hidden), pr.GetValue(dataCategory)),
+                table, name, format, dataType, sortBy, summarizeBy, folder, desc, hidden, dataCategory),
             Edit("delete-column", "Delete a column.",
                 (pr, svc) => svc.DeleteColumn(RequireOption(pr, table, "--table"), RequireOption(pr, name, "--name")),
                 table, name),
