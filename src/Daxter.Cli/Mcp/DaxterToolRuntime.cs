@@ -1,4 +1,7 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
+using ModelContextProtocol.Server;
 using Daxter.Core;
 using Daxter.Core.Audit;
 using Daxter.Core.Auth;
@@ -373,6 +376,34 @@ internal static class DaxterToolRuntime
                    $"partition(s) with daxter_resume_refresh(job_id={j.Id}, execute=true).";
         return $"{j.Status} — re-run with daxter_resume_refresh(job_id={j.Id}, execute=true) " +
                "(full re-run; no partial partition progress was recorded for this job).";
+    }
+
+    /// <summary>The full catalogue of registered MCP tools — name, title, read/write kind, and description —
+    /// plus the running version. Built by <b>reflecting the registered tools at runtime</b>, so it is always
+    /// complete and never drifts: every release automatically surfaces its new features here. This is how an
+    /// agent discovers everything DAXter can do in one call.</summary>
+    public static string CapabilitiesJson()
+    {
+        var tools = typeof(DaxterTools).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            .Select(m => (m, attr: m.GetCustomAttribute<McpServerToolAttribute>()))
+            .Where(x => x.attr is not null)
+            .Select(x => new
+            {
+                name = x.attr!.Name ?? x.m.Name,
+                title = x.attr.Title,
+                kind = x.attr.Destructive == true ? "write (gated, destructive)"
+                     : x.attr.ReadOnly == true ? "read"
+                     : "write (gated)",
+                description = x.m.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "",
+            })
+            .OrderBy(t => t.name, StringComparer.Ordinal)
+            .ToList();
+
+        var version = Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev";
+        return JsonSerializer.Serialize(
+            new { version, tool_count = tools.Count, tools },
+            new JsonSerializerOptions { WriteIndented = true });
     }
 
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch

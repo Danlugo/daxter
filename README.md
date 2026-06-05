@@ -116,7 +116,9 @@ runnable example in **[`examples/cli.md`](examples/cli.md)**.
 ## MCP server
 
 The same image is a **Model Context Protocol** server (stdio) via the `mcp` subcommand — add it with
-the [extension](#1-one-click-extension-easiest) or the config block in [`SETUP.md`](SETUP.md). Tools
+the [extension](#1-one-click-extension-easiest) or the config block in [`SETUP.md`](SETUP.md). Call
+**`daxter_capabilities`** to discover every tool/feature in one shot (auto-generated from the registered
+tools, so it's always current). Tools
 accept optional `workspace`/`dataset` (name **or** id); results are JSON, capped to 1,000 rows. The
 write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only act when
 `execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
