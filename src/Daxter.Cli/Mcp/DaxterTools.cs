@@ -350,6 +350,9 @@ public static class DaxterTools
         "To run, set execute=true AND enable writes (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true). " +
         "Refreshes are QUEUED onto a shared queue and run by the single worker (the web container), serialized one refresh per " +
         "model (different models run in parallel); this returns a job id — track it with daxter_refresh_jobs. " +
+        "If a partition refresh FAILS or is INTERRUPTED, you do NOT need to start over: call " +
+        "daxter_resume_refresh(job_id) to pick up where it left off — it re-runs only the not-yet-done partitions. " +
+        "(daxter_refresh_jobs also returns a ready-to-use resume_hint for each failed/interrupted job.) " +
         "PROD targets are allowed by default; set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block them. " +
         "scope=partition refreshes ONE partition; scope=partitions refreshes all of a table's partitions (or the subset in 'partitions'), in order.")]
     public static Task<string> Refresh(
@@ -404,7 +407,9 @@ public static class DaxterTools
 
     [McpServerTool(Name = "daxter_refresh_jobs", ReadOnly = true, Title = "List refresh jobs"), Description(
         "List refresh jobs on the shared queue (queued/running/finished) — across ALL interfaces (CLI, MCP, web). " +
-        "Pass workspace+dataset to filter to one model. Shows whether a worker is currently running to drain the queue.")]
+        "Pass workspace+dataset to filter to one model. Shows whether a worker is currently running to drain the queue. " +
+        "Each FAILED/INTERRUPTED job carries a 'resume_hint' — the exact daxter_resume_refresh call to recover it, " +
+        "re-running only the not-yet-done partitions. Use it to self-recover failed refreshes without starting over.")]
     public static string RefreshJobs(
         [Description("Filter to one model's workspace (optional; needs dataset too).")] string? workspace = null,
         [Description("Filter to one model's dataset (optional; needs workspace too).")] string? dataset = null,

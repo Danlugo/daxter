@@ -349,11 +349,30 @@ internal static class DaxterToolRuntime
             started = j.Started,
             finished = j.Finished,
             error = j.Error,
+            // Tells the calling agent exactly how to recover a failed/interrupted job — and that resume
+            // picks up where it left off (only the not-yet-done partitions).
+            resume_hint = ResumeHint(j),
         });
 
         return JsonSerializer.Serialize(
             new { worker, total = jobs.Count, jobs = list },
             new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>For a failed/interrupted/canceled job, the exact <c>daxter_resume_refresh</c> call to
+    /// recover it — and whether it will pick up where it left off (only the remaining partitions) or be a
+    /// full re-run. Null for active/succeeded jobs. Lets the calling agent self-recover on failure.</summary>
+    private static string? ResumeHint(RefreshJob j)
+    {
+        if (j.Status is not (JobStatus.Failed or JobStatus.Interrupted or JobStatus.Canceled))
+            return null;
+        var done = j.PartitionDone ?? 0;
+        if (j.Spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions
+            && j.OrderedPartitions is { Count: > 0 } ord && done > 0 && done < ord.Count)
+            return $"{j.Status} — resume to pick up where it left off: re-run the remaining {ord.Count - done} " +
+                   $"partition(s) with daxter_resume_refresh(job_id={j.Id}, execute=true).";
+        return $"{j.Status} — re-run with daxter_resume_refresh(job_id={j.Id}, execute=true) " +
+               "(full re-run; no partial partition progress was recorded for this job).";
     }
 
     public static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch

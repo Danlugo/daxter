@@ -16,6 +16,9 @@ All notable changes to DAXter are documented here. The format follows
 - Across surfaces (parity): **MCP** `daxter_resume_refresh` (job id; `remaining_only=true` by default),
   **CLI** `refresh resume <job-id>` (`--full` for a full re-run), **web** (Jobs page Resume button shows
   *"↻ Resume N left"* for partial jobs, with a *full* option). Same write gate as a normal enqueue.
+- **Self-recovery for agents:** `daxter_refresh_jobs` now returns a `resume_hint` on every failed/
+  interrupted job — the exact `daxter_resume_refresh` call to pick up where it left off — and the
+  `daxter_refresh`/`daxter_refresh_jobs` descriptions tell the agent to use it instead of starting over.
 
 ### Note
 - Resume-remaining requires the job to have recorded its partition order — i.e. jobs run on **this
