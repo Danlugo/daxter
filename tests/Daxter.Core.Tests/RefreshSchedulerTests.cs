@@ -33,6 +33,19 @@ public sealed class RefreshSchedulerTests : IDisposable
 
     // ---- store ----------------------------------------------------------
 
+    [Theory]
+    [InlineData(null, 4)]          // unset → default
+    [InlineData("", 4)]            // blank → default
+    [InlineData("not-a-number", 4)]// junk → default
+    [InlineData("1", 1)]
+    [InlineData("8", 8)]
+    [InlineData(" 6 ", 6)]         // trimmed
+    [InlineData("0", 1)]           // clamped up to the floor
+    [InlineData("-3", 1)]          // negative → floor
+    [InlineData("999", 16)]        // clamped down to the ceiling
+    public void ParseMaxConcurrentModels_clamps_and_defaults(string? raw, int expected)
+        => Assert.Equal(expected, RefreshScheduler.ParseMaxConcurrentModels(raw));
+
     [Fact]
     public void Enqueue_assigns_incrementing_ids_and_persists()
     {

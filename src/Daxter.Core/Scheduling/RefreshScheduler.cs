@@ -59,6 +59,26 @@ public sealed class RefreshScheduler
         _onChanged = onChanged;
     }
 
+    /// <summary>Default number of models the worker refreshes concurrently.</summary>
+    public const int DefaultMaxConcurrentModels = 4;
+
+    /// <summary>Upper bound for the concurrency cap — concurrent refreshes consume capacity and XMLA
+    /// sessions, so a runaway value is clamped to protect the capacity.</summary>
+    public const int MaxConcurrentModelsCeiling = 16;
+
+    /// <summary>The env var that overrides the concurrent-model cap.</summary>
+    public const string MaxConcurrentModelsEnv = "DAXTER_REFRESH_MAX_CONCURRENT_MODELS";
+
+    /// <summary>Parses the <see cref="MaxConcurrentModelsEnv"/> value into a concurrency cap: a valid
+    /// integer clamped to [1, <see cref="MaxConcurrentModelsCeiling"/>], else the default 4.</summary>
+    public static int ParseMaxConcurrentModels(string? raw)
+        => int.TryParse(raw?.Trim(), out var n)
+            ? Math.Clamp(n, 1, MaxConcurrentModelsCeiling)
+            : DefaultMaxConcurrentModels;
+
+    /// <summary>The effective concurrency cap this worker is running with.</summary>
+    public int MaxConcurrentModels => _maxConcurrentModels;
+
     public string WorkerId => _workerId;
 
     /// <summary>Jobs currently executing in this worker.</summary>

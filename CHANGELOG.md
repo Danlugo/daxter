@@ -6,7 +6,14 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.17.0] - 2026-06-05
+## [1.18.0] - 2026-06-05
+
+### Added
+- **Refresh concurrency is now configurable** via `DAXTER_REFRESH_MAX_CONCURRENT_MODELS` (default **4**,
+  clamped to **1–16**). The shared worker drains the queue up to this many *models* at once (still
+  serialized one refresh per model; queue depth stays unbounded). Raise it when the capacity can take the
+  extra concurrent XMLA refreshes; the ceiling guards against runaway values that would exhaust capacity.
+  The worker logs the effective cap at startup.
 
 ### Added
 - **Export a report's definition** (PBIR / PBIR-Legacy) via the Fabric *Get Report Definition* API —

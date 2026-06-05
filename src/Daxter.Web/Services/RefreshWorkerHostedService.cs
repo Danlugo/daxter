@@ -37,15 +37,21 @@ public sealed class RefreshWorkerHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Concurrent-model cap is configurable via DAXTER_REFRESH_MAX_CONCURRENT_MODELS (default 4,
+        // clamped to [1, 16] — concurrent refreshes consume capacity + XMLA sessions).
+        var maxConcurrent = RefreshScheduler.ParseMaxConcurrentModels(
+            Environment.GetEnvironmentVariable(RefreshScheduler.MaxConcurrentModelsEnv));
+
         var scheduler = new RefreshScheduler(
             _store,
             executor: ExecuteRefreshAsync,
             workerId: $"web-{Guid.NewGuid():N}",
-            maxConcurrentModels: 4,
+            maxConcurrentModels: maxConcurrent,
             pollInterval: TimeSpan.FromSeconds(2),
             onChanged: _ => _jobs.RaiseChanged());
 
-        _log.LogInformation("Refresh worker {Id} started (draining the shared queue)", scheduler.WorkerId);
+        _log.LogInformation("Refresh worker {Id} started — draining the shared queue, up to {Max} model(s) concurrently",
+            scheduler.WorkerId, maxConcurrent);
         try
         {
             await scheduler.RunAsync(stoppingToken);
