@@ -166,6 +166,28 @@ public class PowerBiRestClientTests
     }
 
     [Fact]
+    public async Task ReportInventoryAsync_classifies_thin_thick_and_downloadable()
+    {
+        var client = Client(url => url.Contains("/datasets", StringComparison.Ordinal)
+            ? """{"value":[{"id":"d1","name":"Sales Model"},{"id":"d2","name":"Thick Report"},{"id":"d3","name":"Web Dataset"}]}"""
+            : """{"value":[{"id":"r1","name":"Sales Exec","datasetId":"d1","isFromPbix":true,"reportType":"PowerBIReport"},{"id":"r2","name":"Sales Ops","datasetId":"d1","isFromPbix":true,"reportType":"PowerBIReport"},{"id":"r3","name":"Thick Report","datasetId":"d2","isFromPbix":true,"reportType":"PowerBIReport"},{"id":"r4","name":"Web Built","datasetId":"d3","isFromPbix":false,"reportType":"PowerBIReport"}]}""");
+        var result = await client.ReportInventoryAsync("g1");
+
+        Assert.Equal(["report", "dataset", "type", "fromPbix", "downloadable", "reason"], result.Columns);
+        object?[] Row(string name) => result.Rows.First(r => (string?)r[0] == name);
+
+        // r1 + r2 share dataset d1 → both thin.
+        Assert.Equal("thin", Row("Sales Exec")[2]);
+        Assert.Equal("thin", Row("Sales Ops")[2]);
+        Assert.Equal("yes", Row("Sales Exec")[4]);
+        // r3 alone on a same-named dataset → thick (XMLA-edit warning).
+        Assert.Equal("thick", Row("Thick Report")[2]);
+        Assert.Contains("XMLA", (string)Row("Thick Report")[5]!);
+        // r4 not from a .pbix → service-authored, not downloadable.
+        Assert.Equal("no (service-authored)", Row("Web Built")[4]);
+    }
+
+    [Fact]
     public async Task ConnectionsAsync_maps_rows_and_follows_pagination()
     {
         // First page returns a continuationToken; second page closes it out.

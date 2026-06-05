@@ -83,6 +83,8 @@ else if (string.IsNullOrEmpty(dataset))
         <button class="btn-sm @(wsView == WsView.Datasets ? "active" : "")" @onclick="BrowseDatasets">Datasets</button>
         <button class="btn-sm @(wsView == WsView.Reports ? "active" : "")" @onclick="ShowReports">Reports</button>
         <button class="btn-sm @(wsView == WsView.Lineage ? "active" : "")" @onclick="ShowLineage">Lineage</button>
+        <button class="btn-sm @(wsView == WsView.ReportTypes ? "active" : "")" @onclick="ShowReportInventory"
+                title="Classify reports thin/thick + downloadable (which are safe to export)">Report types</button>
     </div>
     @if (wsView == WsView.Datasets)
     {
@@ -239,7 +241,7 @@ else
 }
 
 @code {
-    private enum WsView { Datasets, Reports, Lineage }
+    private enum WsView { Datasets, Reports, Lineage, ReportTypes }
     private enum ModelView { None, Tables, Measures }
     private enum TableView { Mcode, Partitions }
 
@@ -463,6 +465,7 @@ else
     private Task BrowseDatasets() { wsView = WsView.Datasets; result = null; return Task.CompletedTask; }
     private Task ShowReports() { PushBack(); wsView = WsView.Reports; return Show(() => Ui.ReportsAsync(workspace)); }
     private Task ShowLineage() { PushBack(); wsView = WsView.Lineage; return Show(() => Ui.LineageAsync(workspace)); }
+    private Task ShowReportInventory() { PushBack(); wsView = WsView.ReportTypes; return Show(() => Ui.ReportInventoryAsync(workspace)); }
 
     private async Task BrowseTables()
     {

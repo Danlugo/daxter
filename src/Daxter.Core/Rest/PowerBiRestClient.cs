@@ -92,6 +92,64 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> ReportsAsync(string groupId, CancellationToken ct = default)
         => ToTable(await GetAsync($"groups/{groupId}/reports", ct), "id", "name", "datasetId");
 
+    /// <summary>Classifies every report in a workspace as <b>thin</b> (decoupled from its model — a shared
+    /// dataset), <b>thick</b> (embeds its own model — XMLA-editing that model permanently blocks future
+    /// <c>.pbix</c> download), or <b>paginated</b>, and whether it's <b>downloadable</b> as a <c>.pbix</c>
+    /// (<c>isFromPbix</c> — service-authored reports can't be exported). Signals come straight from the
+    /// <c>/reports</c> response (<c>datasetWorkspaceId</c>, <c>isFromPbix</c>, <c>reportType</c>) plus the
+    /// reports-per-dataset fan-out. Thin + downloadable reports are the safe ones to pull for analysis.</summary>
+    public async Task<QueryResult> ReportInventoryAsync(string groupId, CancellationToken ct = default)
+    {
+        var datasetsJson = await GetAsync($"groups/{groupId}/datasets", ct);
+        var dsName = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var d in Value(datasetsJson).EnumerateArray())
+            if (d.TryGetProperty("id", out var id) && id.GetString() is { } k)
+                dsName[k] = d.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+
+        var reportsJson = await GetAsync($"groups/{groupId}/reports", ct);
+        var reports = Value(reportsJson).EnumerateArray().ToList();
+
+        // Reports-per-dataset fan-out: a dataset backing >1 report is shared (its reports are thin).
+        var perDataset = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in reports)
+            if (Str(r, "datasetId") is { } did && did.Length > 0)
+                perDataset[did] = perDataset.GetValueOrDefault(did) + 1;
+
+        var rows = new List<object?[]>();
+        foreach (var r in reports)
+        {
+            var name = Str(r, "name") ?? "";
+            var datasetId = Str(r, "datasetId") ?? "";
+            var datasetWs = Str(r, "datasetWorkspaceId") ?? "";
+            var fromPbix = r.TryGetProperty("isFromPbix", out var fp) && fp.ValueKind == JsonValueKind.True;
+            var reportType = Str(r, "reportType") ?? "";
+            var datasetNm = dsName.TryGetValue(datasetId, out var nm) ? nm : datasetId;
+
+            var crossWs = datasetWs.Length > 0 && !string.Equals(datasetWs, groupId, StringComparison.OrdinalIgnoreCase);
+            var shared = perDataset.GetValueOrDefault(datasetId) > 1 || crossWs;
+
+            string type;
+            if (string.Equals(reportType, "PaginatedReport", StringComparison.OrdinalIgnoreCase)) type = "paginated";
+            else if (shared) type = "thin";
+            else if (string.Equals(name, datasetNm, StringComparison.OrdinalIgnoreCase)) type = "thick";
+            else type = "thin";
+
+            var downloadable = type == "paginated" ? "no (paginated)"
+                : fromPbix ? "yes" : "no (service-authored)";
+            var reason = type switch
+            {
+                "thin" => crossWs ? "shared dataset (other workspace)"
+                          : perDataset.GetValueOrDefault(datasetId) > 1 ? "shared dataset"
+                          : "decoupled from model",
+                "thick" => "embeds its model — XMLA edits block future .pbix",
+                _ => "",
+            };
+            rows.Add([name, datasetNm, type, fromPbix ? "yes" : "no", downloadable, reason]);
+        }
+        rows.Sort((a, b) => string.Compare(a[0]?.ToString(), b[0]?.ToString(), StringComparison.OrdinalIgnoreCase));
+        return new QueryResult(["report", "dataset", "type", "fromPbix", "downloadable", "reason"], rows);
+    }
+
     /// <summary>Report → dataset lineage (dataset ids resolved to names).</summary>
     public async Task<QueryResult> LineageAsync(string groupId, CancellationToken ct = default)
     {

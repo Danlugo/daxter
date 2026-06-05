@@ -250,6 +250,15 @@ public sealed class DaxterUi
             return await rest.LineageAsync(await rest.ResolveGroupIdAsync(ws, ct), ct);
         });
 
+    /// <summary>Classifies a workspace's reports as thin / thick / paginated + downloadable, so you can
+    /// pick which are safe to export for analysis (thin ones are decoupled from model edits).</summary>
+    public Task<QueryResult> ReportInventoryAsync(string ws, CancellationToken ct = default)
+        => Track("report-inventory", ws, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            return await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(ws, ct), ct);
+        });
+
     public Task<QueryResult> DatasourcesAsync(string ws, string ds, CancellationToken ct = default)
         => Track("datasources", $"{ws}/{ds}", async () =>
         {

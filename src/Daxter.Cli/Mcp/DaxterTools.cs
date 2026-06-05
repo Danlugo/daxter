@@ -114,6 +114,11 @@ public static class DaxterTools
     public static Task<string> Connections(CancellationToken ct = default)
         => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.ConnectionsAsync(c), ct);
 
+    [McpServerTool(Name = "daxter_report_inventory", ReadOnly = true, Title = "Classify reports (thin/thick + downloadable)"), Description("Classify every report in a workspace as thin (decoupled from a shared model), thick (embeds its own model — XMLA-editing that model permanently blocks future .pbix download), or paginated, plus whether it's downloadable as a .pbix (service-authored reports aren't). Use to pick which reports are safe to export for analysis.")]
+    public static Task<string> ReportInventory(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
     [McpServerTool(Name = "daxter_item_connections", ReadOnly = true, Title = "List a model's connections"), Description("A model's current connections via the Fabric API: display name + connectivity type (cloud / on-prem / VNet gateway) + connection details. Works with model read/write (no gateway-admin), so it names bindings to gateways you can't manage.")]
     public static Task<string> ItemConnections(string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>

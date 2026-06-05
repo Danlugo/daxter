@@ -877,6 +877,8 @@ internal static class Program
             await rest.ReportsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
         var lineage = Sub("lineage", "Report → dataset lineage.", async (rest, cfg, ct) =>
             await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
+        var reportInventory = Sub("report-inventory", "Classify reports: thin/thick/paginated + downloadable (.pbix).",
+            async (rest, cfg, ct) => await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
         var gateways = Sub("gateways", "List gateways (needs gateway admin).", (rest, _, ct) => rest.GatewaysAsync(ct),
             requiresWorkspace: false);
         var connections = Sub("connections", "List all connections you can access (cloud + gateway), via the Fabric API.",
@@ -969,7 +971,7 @@ internal static class Program
 
         return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
         {
-            ls, datasets, reports, lineage, gateways, connections, permissions, datasources,
+            ls, datasets, reports, lineage, reportInventory, gateways, connections, permissions, datasources,
             itemConnections, discoverGateways, gatewayDatasources, takeover, bindGateway,
         };
     }

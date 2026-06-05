@@ -6,7 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.15.0] - 2026-06-05
+## [1.16.0] - 2026-06-05
+
+### Added
+- **Report classifier — thin vs thick + downloadable.** Classifies every report in a workspace as
+  **thin** (decoupled from a shared model), **thick** (embeds its own model — XMLA-editing that model
+  permanently blocks future `.pbix` download), or **paginated**, and whether it's downloadable as a
+  `.pbix` (`isFromPbix` — service-authored reports can't be exported). Signals: `datasetWorkspaceId`,
+  `isFromPbix`, `reportType`, and the reports-per-dataset fan-out. Use it to pick which reports are safe
+  to pull for analysis (the thin, `.pbix`-backed ones) and which to leave alone before a model edit.
+- Across all surfaces (parity): **CLI** `ws report-inventory`, **MCP** `daxter_report_inventory`,
+  **web** (Explore → workspace → **Report types**).
 
 ### Added
 - **Edit an existing column's properties** — format string, data type, sort-by column, summarize-by,
