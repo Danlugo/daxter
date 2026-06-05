@@ -15,8 +15,10 @@ All notable changes to DAXter are documented here. The format follows
   Optional **`.pbix`** download too (Power BI *Export Report In Group*), which surfaces a clear error for
   service-authored / XMLA-edited reports that can't be exported.
 - Across surfaces (parity): **CLI** `ws export-report --report <name> [--out <dir>] [--pbix]` (writes the
-  definition files / `.pbix`, or prints a manifest), **MCP** `daxter_export_report` (manifest, or a named
-  part's content for inline analysis), **web** (Explore → workspace → **Report types** → *Download JSON*).
+  definition files / `.pbix`, or prints a manifest), **MCP** `daxter_export_report` (**downloads both the
+  definition and the `.pbix` by default** to `~/.daxter/exports/` in the token volume — `pbix=false` /
+  `definition=false` to pick one, `output_dir` to write elsewhere, `part` to also return a file inline),
+  **web** (Explore → workspace → **Report types** → *Download JSON*).
 
 ### Added
 - **Report classifier — thin vs thick + downloadable.** Classifies every report in a workspace as

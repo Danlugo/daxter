@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using Daxter.Core;
 using Daxter.Core.Editing;
 using Daxter.Core.Maintenance;
@@ -119,24 +120,62 @@ public static class DaxterTools
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
 
-    [McpServerTool(Name = "daxter_export_report", ReadOnly = true, Title = "Export a report's definition"), Description("Export a report's definition (PBIR / PBIR-Legacy) via the Fabric API — the JSON that carries every field reference (Table[Column], measures), the substrate for column-usage analysis. Without 'part', returns a manifest of the definition files + sizes; pass 'part' (e.g. report.json) to return that file's content. Needs only report read/write. (.pbix binary download is CLI-only: `ws export-report --pbix`.)")]
+    [McpServerTool(Name = "daxter_export_report", ReadOnly = true, Title = "Export a report (definition + .pbix)"), Description("Download a report's artifacts: its PBIR/PBIR-Legacy definition (the JSON carrying every field reference — Table[Column], measures — for column-usage analysis) and/or its .pbix. By DEFAULT both are downloaded. Files are written under the persistent token volume (~/.daxter/exports/<report>/) and the tool returns where they landed; pass 'output_dir' to write elsewhere (mount a host path in the MCP config to land them on your machine). Pass pbix=false for just the definition, or definition=false for just the .pbix. Pass 'part' (e.g. report.json) to also return that definition file's content inline for analysis. .pbix fails for service-authored / XMLA-edited reports — that's reported, the definition still comes through. Reads only.")]
     public static Task<string> ExportReport(
         [Description("Report name or id.")] string report,
-        [Description("Definition file to return (e.g. report.json). Omit for a manifest of all parts.")] string? part = null,
+        [Description("Download the .pbix binary (default true).")] bool pbix = true,
+        [Description("Download the PBIR/legacy definition JSON (default true).")] bool definition = true,
+        [Description("Directory to write into (default: ~/.daxter/exports, which persists in the token volume).")] string? output_dir = null,
+        [Description("Also return this definition file's content inline (e.g. report.json) for analysis.")] string? part = null,
         string? workspace = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestTextAsync(workspace, async (rest, cfg, c) =>
         {
             var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
             var rid = await rest.ResolveReportIdAsync(g, report, c);
-            var parts = await rest.ReportDefinitionAsync(g, rid, c);
-            if (!string.IsNullOrWhiteSpace(part))
+            var dir = string.IsNullOrWhiteSpace(output_dir)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".daxter", "exports")
+                : output_dir;
+            var safe = string.Concat(report.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
+            var log = new StringBuilder();
+            string? inline = null;
+
+            if (definition || !string.IsNullOrWhiteSpace(part))
             {
-                var p = parts.FirstOrDefault(x => string.Equals(x.Path, part, StringComparison.OrdinalIgnoreCase));
-                return p is null
-                    ? $"Part not found: {part}. Available: {string.Join(", ", parts.Select(x => x.Path))}"
-                    : p.Content;
+                var parts = await rest.ReportDefinitionAsync(g, rid, c);
+                if (!string.IsNullOrWhiteSpace(part))
+                {
+                    var p = parts.FirstOrDefault(x => string.Equals(x.Path, part, StringComparison.OrdinalIgnoreCase));
+                    inline = p?.Content ?? $"(part not found: {part}; available: {string.Join(", ", parts.Select(x => x.Path))})";
+                }
+                if (definition)
+                {
+                    var baseDir = Path.Combine(dir, safe);
+                    foreach (var p in parts)
+                    {
+                        var dest = Path.Combine(baseDir, p.Path.Replace('/', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                        await File.WriteAllTextAsync(dest, p.Content, c);
+                    }
+                    log.AppendLine($"definition: {parts.Count} part(s) → {baseDir}");
+                }
             }
-            return string.Join("\n", parts.Select(p => $"{p.Content.Length,8}  {p.Path}"));
+            if (pbix)
+            {
+                try
+                {
+                    var bytes = await rest.ExportReportPbixAsync(g, rid, c);
+                    Directory.CreateDirectory(dir);
+                    var pbixPath = Path.Combine(dir, safe + ".pbix");
+                    await File.WriteAllBytesAsync(pbixPath, bytes, c);
+                    log.AppendLine($"pbix: {bytes.Length:N0} bytes → {pbixPath}");
+                }
+                catch (Exception ex)
+                {
+                    log.AppendLine($"pbix: NOT downloaded — {ex.Message} (service-authored or XMLA-edited reports can't be exported as .pbix).");
+                }
+            }
+            if (inline is not null) { log.AppendLine().AppendLine($"--- {part} ---").AppendLine(inline); }
+            return log.Length == 0 ? "Nothing requested — set definition=true and/or pbix=true." : log.ToString();
         }, ct);
 
     [McpServerTool(Name = "daxter_item_connections", ReadOnly = true, Title = "List a model's connections"), Description("A model's current connections via the Fabric API: display name + connectivity type (cloud / on-prem / VNet gateway) + connection details. Works with model read/write (no gateway-admin), so it names bindings to gateways you can't manage.")]
