@@ -62,6 +62,11 @@ public sealed class RefreshJob
     public int? PartitionTotal { get; set; }
     public int? PartitionDone { get; set; }
 
+    /// <summary>The ordered partition list the worker is processing (captured at start). Lets a
+    /// resume re-run only the not-yet-done partitions (<see cref="PartitionDone"/> onward) instead of
+    /// the whole table. Null for non-partition refreshes.</summary>
+    public List<string>? OrderedPartitions { get; set; }
+
     /// <summary>Cross-process cooperative cancel: a surface sets this; the worker polls and aborts.</summary>
     public bool CancelRequested { get; set; }
 

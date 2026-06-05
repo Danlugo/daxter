@@ -103,10 +103,20 @@ public sealed class JobService
         RaiseChanged();
     }
 
-    /// <summary>Re-runs a finished/interrupted job by enqueuing the same spec (re-validates gates).</summary>
-    public RefreshJob? Resume(int id)
+    /// <summary>Re-runs a finished/interrupted job (re-validates gates). When <paramref name="remainingOnly"/>
+    /// (default) and it's a partition refresh that stopped partway, enqueues only the not-yet-done
+    /// partitions; otherwise the full original spec.</summary>
+    public RefreshJob? Resume(int id, bool remainingOnly = true)
     {
-        var spec = _store.Get(id)?.Spec;
-        return spec is null ? null : Enqueue(spec);
+        var resume = _store.ResumeSpec(id, remainingOnly);
+        return resume is null ? null : Enqueue(resume.Value.Spec);
+    }
+
+    /// <summary>How many partitions a remaining-only resume of this job would re-run, and whether it
+    /// would be partial (true) or a full re-run (false). Null if the job is gone. For the Jobs UI.</summary>
+    public (int Count, bool Partial)? ResumePreview(int id)
+    {
+        var r = _store.ResumeSpec(id, remainingOnly: true);
+        return r is null ? null : (r.Value.Count, r.Value.Partial);
     }
 }

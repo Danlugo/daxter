@@ -24,6 +24,7 @@ public class SerialPartitionRefreshTests
         public bool Cancel { get; set; }
         public void Event(string message) => Events.Add(message);
         public void Partitions(int done, int total) { Done = done; Total = total; }
+        public void Plan(IReadOnlyList<string> orderedPartitions) => Total = orderedPartitions.Count;
         public bool CancelRequested => Cancel;
     }
 

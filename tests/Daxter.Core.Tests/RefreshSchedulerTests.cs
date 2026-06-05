@@ -33,6 +33,46 @@ public sealed class RefreshSchedulerTests : IDisposable
 
     // ---- store ----------------------------------------------------------
 
+    [Fact]
+    public void ResumeSpec_remaining_only_skips_the_done_partitions()
+    {
+        // A partition job that recorded its order and stopped at 2 of 5.
+        var job = _store.Enqueue(Spec("WS - Dev", "M1", RefreshKind.AllPartitions), "all parts", JobOrigin.Mcp);
+        _store.Mutate(job.Id, j =>
+        {
+            j.Spec = j.Spec with { Table = "FACT" };
+            j.OrderedPartitions = new() { "p1", "p2", "p3", "p4", "p5" };
+            j.PartitionDone = 2;
+            j.Status = JobStatus.Interrupted;
+        });
+
+        // remaining-only → SomePartitions for just p3, p4, p5
+        var (spec, count, partial) = _store.ResumeSpec(job.Id, remainingOnly: true)!.Value;
+        Assert.True(partial);
+        Assert.Equal(3, count);
+        Assert.Equal(RefreshKind.SomePartitions, spec.Kind);
+        Assert.Equal(new[] { "p3", "p4", "p5" }, spec.Partitions);
+        Assert.Equal("FACT", spec.Table);
+
+        // full → original AllPartitions spec
+        var full = _store.ResumeSpec(job.Id, remainingOnly: false)!.Value;
+        Assert.False(full.Partial);
+        Assert.Equal(RefreshKind.AllPartitions, full.Spec.Kind);
+    }
+
+    [Fact]
+    public void ResumeSpec_falls_back_to_full_when_nothing_recorded()
+    {
+        // Done=0 (failed before any partition) → full re-run even when remaining-only is asked.
+        var job = _store.Enqueue(Spec("WS - Dev", "M2", RefreshKind.AllPartitions), "all parts", JobOrigin.Mcp);
+        _store.Mutate(job.Id, j => { j.Status = JobStatus.Failed; });
+
+        var (spec, _, partial) = _store.ResumeSpec(job.Id, remainingOnly: true)!.Value;
+        Assert.False(partial);
+        Assert.Equal(RefreshKind.AllPartitions, spec.Kind);
+        Assert.Null(_store.ResumeSpec(999, remainingOnly: true));   // unknown id → null
+    }
+
     [Theory]
     [InlineData(null, 4)]          // unset → default
     [InlineData("", 4)]            // blank → default

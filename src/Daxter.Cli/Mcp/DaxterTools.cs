@@ -389,6 +389,19 @@ public static class DaxterTools
             DaxterToolRuntime.ParseOrder(order), rtype, parts, execute, retries, ct);
     }
 
+    [McpServerTool(Name = "daxter_resume_refresh", Destructive = true, Title = "Resume a refresh job"), Description(
+        "Re-run a finished/interrupted/failed refresh job by id (from daxter_refresh_jobs). By DEFAULT resumes " +
+        "only the NOT-yet-done partitions (a partition job that recorded its order + progress) — so a 68-partition " +
+        "job interrupted at 24 re-runs just the remaining 44 (the failed/in-flight one included). Pass " +
+        "remaining_only=false for a full re-run. DRY-RUN unless execute=true AND writes are enabled; queues onto the " +
+        "shared worker.")]
+    public static Task<string> ResumeRefresh(
+        [Description("Job id to resume (from daxter_refresh_jobs).")] int job_id,
+        [Description("Resume only the not-yet-done partitions (default true). false = full re-run.")] bool remaining_only = true,
+        [Description("Actually queue it (default false = dry run).")] bool execute = false,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ResumeRefreshAsync(job_id, remaining_only, execute, ct);
+
     [McpServerTool(Name = "daxter_refresh_jobs", ReadOnly = true, Title = "List refresh jobs"), Description(
         "List refresh jobs on the shared queue (queued/running/finished) — across ALL interfaces (CLI, MCP, web). " +
         "Pass workspace+dataset to filter to one model. Shows whether a worker is currently running to drain the queue.")]

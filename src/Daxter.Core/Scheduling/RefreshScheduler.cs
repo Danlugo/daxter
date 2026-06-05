@@ -12,6 +12,10 @@ public interface IRefreshProgress
     /// <summary>Report multi-partition progress ("done of total").</summary>
     void Partitions(int done, int total);
 
+    /// <summary>Record the ordered partition list the job will process (captured before refreshing the
+    /// first one) so a later resume can re-run only the not-yet-done partitions.</summary>
+    void Plan(IReadOnlyList<string> orderedPartitions);
+
     /// <summary>True once any interface has requested cancellation of this job.</summary>
     bool CancelRequested { get; }
 }
@@ -200,6 +204,17 @@ public sealed class RefreshScheduler
             {
                 j.PartitionTotal = total;
                 j.PartitionDone = done;
+            });
+            _changed();
+        }
+
+        public void Plan(IReadOnlyList<string> orderedPartitions)
+        {
+            _store.Mutate(_id, j =>
+            {
+                j.OrderedPartitions = orderedPartitions.ToList();
+                j.PartitionTotal = orderedPartitions.Count;
+                j.PartitionDone ??= 0;
             });
             _changed();
         }

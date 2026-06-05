@@ -216,11 +216,34 @@ public sealed class RefreshQueueStore
         });
     }
 
-    /// <summary>Re-enqueue a finished/interrupted job's spec as a new job.</summary>
+    /// <summary>Re-enqueue a finished/interrupted job's spec as a new job (full re-run).</summary>
     public RefreshJob? Resume(int id, string title, JobOrigin origin, double? estimateSeconds = null)
     {
         var spec = Get(id)?.Spec;
         return spec is null ? null : Enqueue(spec, title, origin, estimateSeconds);
+    }
+
+    /// <summary>The spec to re-run a finished/interrupted job. When <paramref name="remainingOnly"/> and
+    /// the job is a partition refresh that recorded its ordered partitions and stopped partway, returns a
+    /// <see cref="RefreshKind.SomePartitions"/> spec for just the not-yet-done partitions (the failed one
+    /// included, since it didn't complete). Otherwise the original spec (a full re-run). Null if the job
+    /// is gone.</summary>
+    public (RefreshSpec Spec, int Count, bool Partial)? ResumeSpec(int id, bool remainingOnly)
+    {
+        var job = Get(id);
+        if (job is null) return null;
+        var spec = job.Spec;
+        var done = job.PartitionDone ?? 0;
+
+        if (remainingOnly
+            && spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions
+            && job.OrderedPartitions is { Count: > 0 } ordered
+            && done > 0 && done < ordered.Count)
+        {
+            var remaining = ordered.Skip(done).ToList();
+            return (spec with { Kind = RefreshKind.SomePartitions, Partitions = remaining }, remaining.Count, true);
+        }
+        return (spec, spec.Partitions?.Count ?? job.OrderedPartitions?.Count ?? 0, false);
     }
 
     /// <summary>Remove all finished jobs (succeeded/failed/canceled/interrupted).</summary>

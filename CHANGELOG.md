@@ -6,7 +6,20 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.18.0] - 2026-06-05
+## [1.19.0] - 2026-06-05
+
+### Added
+- **Resume a refresh from where it stopped.** A partition job now records its ordered partition list at
+  start, so resuming an interrupted/failed job re-runs **only the not-yet-done partitions** (the
+  in-flight/failed one included) instead of the whole table — a 68-partition job stopped at 24 resumes
+  just the remaining 44. Pass full-rerun to re-do everything.
+- Across surfaces (parity): **MCP** `daxter_resume_refresh` (job id; `remaining_only=true` by default),
+  **CLI** `refresh resume <job-id>` (`--full` for a full re-run), **web** (Jobs page Resume button shows
+  *"↻ Resume N left"* for partial jobs, with a *full* option). Same write gate as a normal enqueue.
+
+### Note
+- Resume-remaining requires the job to have recorded its partition order — i.e. jobs run on **this
+  version or later**. Jobs from before always fall back to a full re-run.
 
 ### Added
 - **Refresh concurrency is now configurable** via `DAXTER_REFRESH_MAX_CONCURRENT_MODELS` (default **4**,

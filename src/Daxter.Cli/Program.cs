@@ -1189,10 +1189,61 @@ internal static class Program
         connectionOptions.AddTo(status);
         status.SetAction((pr, ct) => RunRefreshStatusAsync(() => connectionOptions.Resolve(pr), pr.GetValue(topOption)));
 
-        return new Command("refresh", "Queue model / table / partition(s) refreshes; view status & history.")
+        var jobIdArg = new Argument<int>("job-id") { Description = "Job id to resume (from `refresh status`)." };
+        var fullOption = new Option<bool>("--full") { Description = "Full re-run; default re-runs only the not-yet-done partitions." };
+        var resume = new Command("resume", "Re-run a finished/interrupted job — only the not-yet-done partitions by default, or --full.")
+        { jobIdArg, fullOption, dryRun, yes, force };
+        resume.SetAction((pr, ct) => RunResumeAsync(
+            pr.GetValue(jobIdArg), pr.GetValue(fullOption),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        return new Command("refresh", "Queue model / table / partition(s) refreshes; resume; view status & history.")
         {
-            model, table, partition, partitions, trigger, history, status,
+            model, table, partition, partitions, resume, trigger, history, status,
         };
+    }
+
+    /// <summary>Resumes a finished/interrupted job — by default only the not-yet-done partitions
+    /// (a partition job that recorded its order + progress), or a full re-run with <c>--full</c>.</summary>
+    private static Task<int> RunResumeAsync(int jobId, bool full, bool dryRun, bool yes, bool force, CancellationToken ct)
+    {
+        try
+        {
+            var store = new RefreshQueueStore();
+            var resume = store.ResumeSpec(jobId, remainingOnly: !full);
+            if (resume is null)
+            {
+                Console.Error.WriteLine($"daxter: job #{jobId} not found.");
+                return Task.FromResult(1);
+            }
+
+            var (spec, count, partial) = resume.Value;
+            var plan = RefreshTitle.Describe(spec);
+            var what = partial ? $"resume {count} remaining partition(s)" : "full re-run";
+
+            if (dryRun || !yes)
+            {
+                Console.Error.WriteLine($"DRY RUN — would {what}: {plan}.");
+                if (!yes && !dryRun) Console.Error.WriteLine("Re-run with --yes to queue.");
+                return Task.FromResult(0);
+            }
+
+            var config = DaxterConfig.FromEnvironment(workspace: spec.Workspace, dataset: spec.Dataset);
+            if (LooksLikeProd(config) && !force)
+            {
+                Console.Error.WriteLine($"daxter: target looks like PRODUCTION ('{spec.Workspace}'). Re-run with --force to proceed.");
+                return Task.FromResult(1);
+            }
+
+            var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Cli);
+            Console.Out.WriteLine(job.Id);
+            Console.Error.WriteLine($"Queued as job #{job.Id} ({what}) — {plan}. Track with `daxter refresh status`.");
+            return Task.FromResult(0);
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult(Fail(ex));
+        }
     }
 
     private static Command BuildCacheCommand(ConnectionOptions connectionOptions)

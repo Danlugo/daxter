@@ -111,6 +111,7 @@ public sealed class RefreshWorkerHostedService : BackgroundService
                     parts = spec.Partitions ?? Array.Empty<string>();
                 }
 
+                progress.Plan(parts);   // record the ordered list so a resume can skip the done ones
                 await SerialPartitionRefresh.RunAsync(
                     spec.Table!, parts, spec.Dataset,
                     buildRefresh: (m, name) => m.BuildPartitionRefresh(spec.Table!, name, spec.Type),

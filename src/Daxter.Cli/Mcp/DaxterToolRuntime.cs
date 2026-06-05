@@ -285,6 +285,35 @@ internal static class DaxterToolRuntime
             return $"QUEUED as job #{job.Id} — {plan}. The DAXter worker (web container) runs it, serialized one refresh per model.{WorkerWarning(store)} Track with daxter_refresh_jobs.";
         });
 
+    /// <summary>Re-runs a finished/interrupted job. When <paramref name="remainingOnly"/> and the job is a
+    /// partition refresh that stopped partway, queues a SomePartitions job for just the not-yet-done
+    /// partitions; otherwise a full re-run. Same write gate as a normal enqueue.</summary>
+    public static Task<string> ResumeRefreshAsync(int jobId, bool remainingOnly, bool execute, CancellationToken ct)
+        => Guard(() =>
+        {
+            var store = new RefreshQueueStore();
+            var resume = store.ResumeSpec(jobId, remainingOnly);
+            if (resume is null)
+                return Task.FromResult($"Job #{jobId} not found.");
+
+            var (spec, count, partial) = resume.Value;
+            var plan = RefreshTitle.Describe(spec);
+            var what = partial ? $"resume {count} remaining partition(s)" : "full re-run";
+
+            if (!execute)
+                return Task.FromResult($"DRY RUN — not queued. Would {what}: {plan}. Set execute=true (with writes enabled) to queue it.");
+            if (!WritesAllowed())
+                return Task.FromResult("REFUSED — writes are disabled. Enable them in the web console " +
+                    "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.");
+
+            var config = Config(spec.Workspace, spec.Dataset);
+            if (LooksLikeProd(config) && ProdWritesBlocked())
+                return Task.FromResult($"REFUSED — '{spec.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.");
+
+            var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Mcp);
+            return Task.FromResult($"QUEUED as job #{job.Id} ({what}) — {plan}.{WorkerWarning(store)} Track with daxter_refresh_jobs.");
+        });
+
     /// <summary>A warning suffix when no live worker is draining the queue, else empty.</summary>
     internal static string WorkerWarning(RefreshQueueStore store)
     {

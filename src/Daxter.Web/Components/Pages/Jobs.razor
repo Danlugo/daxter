@@ -74,7 +74,17 @@ else
                             }
                             else
                             {
-                                <button class="btn-sm" @onclick="() => Resume(j.Id)" title="Re-run this refresh">↻ Resume</button>
+                                @if (Svc.ResumePreview(j.Id) is { Partial: true } rp)
+                                {
+                                    <button class="btn-sm" @onclick="() => Resume(j.Id, true)"
+                                            title="Re-run only the @rp.Count not-yet-done partition(s)">↻ Resume @rp.Count left</button>
+                                    <button class="btn-sm" @onclick="() => Resume(j.Id, false)"
+                                            title="Re-run the whole table from scratch">full</button>
+                                }
+                                else
+                                {
+                                    <button class="btn-sm" @onclick="() => Resume(j.Id, false)" title="Re-run this refresh">↻ Resume</button>
+                                }
                                 <button class="btn-sm" @onclick="() => Dismiss(j.Id)" title="Remove from the list">×</button>
                             }
                         </td>
@@ -127,10 +137,14 @@ else
     private string? msg;
     private void Cancel(int id) { Svc.Cancel(id); Refresh(); }
     private void Dismiss(int id) { Svc.Remove(id); Refresh(); }
-    private void Resume(int id)
+    private void Resume(int id, bool remainingOnly)
     {
         msg = null;
-        try { Svc.Resume(id); }
+        try
+        {
+            var job = Svc.Resume(id, remainingOnly);
+            if (job is not null) msg = $"Queued job #{job.Id}: {job.Title}";
+        }
         catch (Exception ex) { msg = ex.Message; }
         Refresh();
     }
