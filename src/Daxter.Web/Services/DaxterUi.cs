@@ -299,6 +299,26 @@ public sealed class DaxterUi
         }
     }
 
+    /// <summary>All connections the account can access (cloud + gateway) from the Fabric API — used to
+    /// list the shareable <em>cloud</em> connections. Returns null on failure so the page can hide the
+    /// section gracefully.</summary>
+    public async Task<QueryResult?> ConnectionsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await Track("connections", null, async () =>
+            {
+                using var rest = new PowerBiRestClient(Provider(Config()));
+                return await rest.ConnectionsAsync(ct);
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "connections list unavailable (Fabric API)");
+            return null;
+        }
+    }
+
     // ---- take ownership + gateway binding (service config — XMLA can't do these; gated like writes) ----
 
     /// <summary>Gateways the model can be bound to (those with matching data sources).</summary>

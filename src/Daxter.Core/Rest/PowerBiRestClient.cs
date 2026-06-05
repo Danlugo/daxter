@@ -129,6 +129,41 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
         => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
 
+    /// <summary>All connections the calling identity can access from the Fabric API — display name +
+    /// connectivity type (cloud / on-prem / VNet gateway) + details. Paginated via continuationToken.
+    /// Use to list the shareable <em>cloud</em> connections (the cloud half of the Service's "Gateway and
+    /// cloud connections" screen), independent of any one model.</summary>
+    public async Task<QueryResult> ConnectionsAsync(CancellationToken ct = default)
+    {
+        string[] columns = ["id", "displayName", "connectivityType", "type", "path", "gatewayId"];
+        var rows = new List<object?[]>();
+        string? token = null;
+        do
+        {
+            var url = "https://api.fabric.microsoft.com/v1/connections";
+            if (!string.IsNullOrEmpty(token)) url += "?continuationToken=" + Uri.EscapeDataString(token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            var root = await SendJsonAsync(request, ct);
+            foreach (var item in Value(root).EnumerateArray())
+            {
+                JsonElement cd = item.TryGetProperty("connectionDetails", out var c) && c.ValueKind == JsonValueKind.Object
+                    ? c : default;
+                rows.Add(
+                [
+                    Str(item, "id"),
+                    Str(item, "displayName"),
+                    Str(item, "connectivityType"),
+                    Str(cd, "type"),
+                    Str(cd, "path"),
+                    Str(item, "gatewayId"),
+                ]);
+            }
+            token = root.TryGetProperty("continuationToken", out var t) && t.ValueKind == JsonValueKind.String
+                ? t.GetString() : null;
+        } while (!string.IsNullOrEmpty(token));
+        return new QueryResult(columns, rows);
+    }
+
     /// <summary>A model's current connections from the Fabric API — display name + connectivity type
     /// (cloud / on-prem / VNet gateway) + the underlying connection details — using only model
     /// read/write (no gateway-admin), so it can name bindings to gateways the caller can't manage.

@@ -6,6 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-06-05
+
+### Added
+- **Connections page now lists your shareable cloud connections** — the cloud half of the Service's
+  *Gateway and cloud connections* screen, independent of any model. A read-only, searchable, exportable
+  grid (Connection · Type · Detail) from the Fabric *List Connections* API (paginated). Read-only because
+  a source's "Maps to" a cloud connection has no public write API.
+- New readable capability across all three surfaces (parity): **CLI** `ws connections`, **MCP**
+  `daxter_connections`, **web** (the Cloud connections card). Lists every connection you can access
+  (cloud + gateway); the web card filters to shareable cloud.
+
 ## [1.13.1] - 2026-06-04
 
 ### Fixed

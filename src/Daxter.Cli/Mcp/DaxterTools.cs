@@ -110,6 +110,10 @@ public static class DaxterTools
 
     // ---- take ownership + gateway binding (service config; XMLA can't do these) ----
 
+    [McpServerTool(Name = "daxter_connections", ReadOnly = true, Title = "List all connections"), Description("List every connection you can access (shareable cloud + on-prem/VNet gateway) via the Fabric API: id, display name, connectivity type, and details. Use to find shareable cloud connections independent of any model.")]
+    public static Task<string> Connections(CancellationToken ct = default)
+        => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.ConnectionsAsync(c), ct);
+
     [McpServerTool(Name = "daxter_item_connections", ReadOnly = true, Title = "List a model's connections"), Description("A model's current connections via the Fabric API: display name + connectivity type (cloud / on-prem / VNet gateway) + connection details. Works with model read/write (no gateway-admin), so it names bindings to gateways you can't manage.")]
     public static Task<string> ItemConnections(string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>

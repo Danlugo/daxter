@@ -177,6 +177,31 @@
     <pre class="code @(resultOk ? "" : "bad-text")">@result</pre>
 }
 
+<div class="card">
+    <div class="cmd-group conn-owner">
+        <h2 style="margin:0">Cloud connections</h2>
+        <button class="btn-sm" @onclick="LoadCloud" disabled="@cloudBusy" title="Reload">↻</button>
+    </div>
+    <p class="muted">
+        Shareable <strong>cloud connections</strong> you can access (the cloud half of the Service's
+        <em>Gateway and cloud connections</em> screen) — independent of any model. Read-only: a source's
+        "Maps to" a cloud connection is set in the Power BI Service (no public write API).
+    </p>
+    @if (cloudConns is null && !cloudLoaded)
+    {
+        <p class="muted">Loading cloud connections…</p>
+    }
+    else
+    {
+        <div class="cmd-group">
+            <label>Search
+                <input type="search" @bind="cloudSearch" @bind:event="oninput" placeholder="name, type, or detail…" />
+            </label>
+        </div>
+        <ResultGrid Result="CloudGrid()" Empty="No shareable cloud connections found." PageSize="25" />
+    }
+</div>
+
 @if (pendingAction is not null)
 {
     <div class="modal-overlay" @onclick="CancelConfirm">
@@ -217,6 +242,12 @@
     private record BindSource(string Label, string Name, string Type, string Server, string Db);
     private List<BindSource> bindSources = new();
 
+    // Tenant-wide shareable cloud connections (independent of the selected model).
+    private QueryResult? cloudConns;
+    private bool cloudLoaded;
+    private bool cloudBusy;
+    private string cloudSearch = "";
+
     private string? result;
     private bool resultOk;
     private bool busy;
@@ -225,7 +256,60 @@
     private string? pendingText;
 
     protected override async Task OnInitializedAsync()
-        => workspaces = Names(await Ui.WorkspacesAsync());
+    {
+        workspaces = Names(await Ui.WorkspacesAsync());
+        await LoadCloud();
+    }
+
+    private async Task LoadCloud()
+    {
+        cloudBusy = true;
+        try { cloudConns = await Ui.ConnectionsAsync(); }
+        finally { cloudBusy = false; cloudLoaded = true; }
+    }
+
+    /// <summary>Shareable cloud connections only, projected to a friendly grid and filtered by the search box.</summary>
+    private QueryResult CloudGrid()
+    {
+        string[] columns = ["Connection", "Type", "Detail"];
+        var rows = new List<object?[]>();
+        if (cloudConns is not null)
+        {
+            var q = cloudSearch.Trim();
+            foreach (var r in cloudConns.Rows)
+            {
+                if (!string.Equals(Cell(cloudConns, r, "connectivityType"), "ShareableCloud", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var name = Cell(cloudConns, r, "displayName");
+                var type = Cell(cloudConns, r, "type");
+                var detail = CleanPath(Cell(cloudConns, r, "path"));
+                if (q.Length > 0 &&
+                    !(name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                      || type.Contains(q, StringComparison.OrdinalIgnoreCase)
+                      || detail.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                rows.Add([name, type, detail]);
+            }
+            rows.Sort((a, b) => string.Compare(a[0]?.ToString(), b[0]?.ToString(), StringComparison.OrdinalIgnoreCase));
+        }
+        return new QueryResult(columns, rows);
+    }
+
+    /// <summary>Make a connection path readable — pull the host out of JSON paths (e.g. Databricks).</summary>
+    private static string CleanPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        if (!path.TrimStart().StartsWith('{')) return path;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(path);
+            foreach (var key in new[] { "host", "server", "account", "url", "path" })
+                if (doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return v.GetString() ?? path;
+        }
+        catch { /* not JSON we recognize — fall through */ }
+        return path;
+    }
 
     protected override async Task OnParametersSetAsync()
     {

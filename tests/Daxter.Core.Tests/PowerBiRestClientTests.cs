@@ -166,6 +166,34 @@ public class PowerBiRestClientTests
     }
 
     [Fact]
+    public async Task ConnectionsAsync_maps_rows_and_follows_pagination()
+    {
+        // First page returns a continuationToken; second page closes it out.
+        var client = Client(url => url.Contains("continuationToken", StringComparison.Ordinal)
+            ? """{"value":[{"id":"c2","displayName":"On-prem SQL","connectivityType":"OnPremisesGateway","gatewayId":"gw-1","connectionDetails":{"type":"SQL","path":"host;DB"}}]}"""
+            : """{"value":[{"id":"c1","displayName":"DEV Databricks","connectivityType":"ShareableCloud","connectionDetails":{"type":"Databricks","path":"{}"}}],"continuationToken":"NEXT"}""");
+        var result = await client.ConnectionsAsync();
+
+        Assert.Equal(["id", "displayName", "connectivityType", "type", "path", "gatewayId"], result.Columns);
+        Assert.Equal(2, result.RowCount);                 // both pages merged
+        Assert.Equal("DEV Databricks", result.Rows[0][1]);
+        Assert.Equal("ShareableCloud", result.Rows[0][2]);
+        Assert.Equal("On-prem SQL", result.Rows[1][1]);
+        Assert.Equal("gw-1", result.Rows[1][5]);
+    }
+
+    [Fact]
+    public async Task ConnectionsAsync_calls_the_fabric_connections_endpoint()
+    {
+        string? seen = null;
+        var client = Client(url => { seen = url; return """{"value":[]}"""; });
+        await client.ConnectionsAsync();
+
+        Assert.NotNull(seen);
+        Assert.Contains("api.fabric.microsoft.com/v1/connections", seen);
+    }
+
+    [Fact]
     public async Task ItemConnectionsAsync_calls_the_fabric_item_endpoint()
     {
         string? seen = null;

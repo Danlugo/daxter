@@ -870,6 +870,8 @@ internal static class Program
             await rest.LineageAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, ct), ct));
         var gateways = Sub("gateways", "List gateways (needs gateway admin).", (rest, _, ct) => rest.GatewaysAsync(ct),
             requiresWorkspace: false);
+        var connections = Sub("connections", "List all connections you can access (cloud + gateway), via the Fabric API.",
+            (rest, _, ct) => rest.ConnectionsAsync(ct), requiresWorkspace: false);
         var permissions = Sub("permissions", "Who has access (workspace, or a model via --dataset).",
             async (rest, cfg, ct) =>
             {
@@ -958,7 +960,7 @@ internal static class Program
 
         return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
         {
-            ls, datasets, reports, lineage, gateways, permissions, datasources,
+            ls, datasets, reports, lineage, gateways, connections, permissions, datasources,
             itemConnections, discoverGateways, gatewayDatasources, takeover, bindGateway,
         };
     }
