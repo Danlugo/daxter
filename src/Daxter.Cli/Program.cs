@@ -969,12 +969,70 @@ internal static class Program
                 return $"Bound '{cfg.Dataset}' to gateway {gw}" + (ids is { Length: > 0 } ? $" — {ids.Length} data source(s) mapped." : ".");
             }, ct));
 
+        var reportOpt = new Option<string?>("--report") { Description = "Report name or id (for export-report)." };
+        var outDirOpt = new Option<string?>("--out") { Description = "Directory to write the report definition / .pbix into (prints a manifest if omitted)." };
+        var pbixOpt = new Option<bool>("--pbix") { Description = "Also download the .pbix (Export Report In Group)." };
+        var exportReport = new Command("export-report",
+            "Export a report's definition (PBIR / legacy JSON — the field references for analysis) and optionally its .pbix.")
+            { reportOpt, outDirOpt, pbixOpt };
+        connectionOptions.AddTo(exportReport);
+        exportReport.SetAction((pr, ct) => RunExportReportAsync(
+            () => connectionOptions.Resolve(pr, requireWorkspace: true),
+            pr.GetValue(reportOpt), pr.GetValue(outDirOpt), pr.GetValue(pbixOpt), ct));
+
         return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
         {
             ls, datasets, reports, lineage, reportInventory, gateways, connections, permissions, datasources,
-            itemConnections, discoverGateways, gatewayDatasources, takeover, bindGateway,
+            itemConnections, discoverGateways, gatewayDatasources, exportReport, takeover, bindGateway,
         };
     }
+
+    private static async Task<int> RunExportReportAsync(
+        Func<DaxterConfig> configFactory, string? report, string? outDir, bool pbix, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(report)) throw new DaxterException("--report is required.");
+            var config = configFactory();
+            var tokens = BuildTokenProvider(config);
+            using var rest = new PowerBiRestClient(tokens);
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var reportId = await rest.ResolveReportIdAsync(groupId, report, ct);
+
+            var parts = await rest.ReportDefinitionAsync(groupId, reportId, ct);
+            Console.Error.WriteLine($"Definition: {parts.Count} part(s).");
+
+            if (string.IsNullOrWhiteSpace(outDir))
+            {
+                foreach (var p in parts)
+                    Console.Out.WriteLine($"{p.Content.Length,8}  {p.Path}");
+            }
+            else
+            {
+                var baseDir = Path.Combine(outDir, SanitizeFileName(report));
+                foreach (var p in parts)
+                {
+                    var dest = Path.Combine(baseDir, p.Path.Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    await File.WriteAllTextAsync(dest, p.Content, ct);
+                }
+                Console.Error.WriteLine($"Wrote {parts.Count} part(s) to {baseDir}");
+            }
+
+            if (pbix)
+            {
+                var bytes = await rest.ExportReportPbixAsync(groupId, reportId, ct);
+                var pbixPath = Path.Combine(string.IsNullOrWhiteSpace(outDir) ? "." : outDir, SanitizeFileName(report) + ".pbix");
+                await File.WriteAllBytesAsync(pbixPath, bytes, ct);
+                Console.Error.WriteLine($"Wrote {bytes.Length:N0} bytes to {pbixPath}");
+            }
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static string SanitizeFileName(string name)
+        => string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 
     /// <summary>Runs a REST write that returns a status line. Dry-run unless <paramref name="yes"/>.</summary>
     private static async Task<int> RunRestActionAsync(

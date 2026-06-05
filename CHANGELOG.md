@@ -6,7 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.16.0] - 2026-06-05
+## [1.17.0] - 2026-06-05
+
+### Added
+- **Export a report's definition** (PBIR / PBIR-Legacy) via the Fabric *Get Report Definition* API —
+  the per-visual JSON that carries every field reference (`Table[Column]`, measures), the substrate for
+  column-usage analysis. Handles the long-running-operation path; base64 parts are decoded to text.
+  Optional **`.pbix`** download too (Power BI *Export Report In Group*), which surfaces a clear error for
+  service-authored / XMLA-edited reports that can't be exported.
+- Across surfaces (parity): **CLI** `ws export-report --report <name> [--out <dir>] [--pbix]` (writes the
+  definition files / `.pbix`, or prints a manifest), **MCP** `daxter_export_report` (manifest, or a named
+  part's content for inline analysis), **web** (Explore → workspace → **Report types** → *Download JSON*).
 
 ### Added
 - **Report classifier — thin vs thick + downloadable.** Classifies every report in a workspace as

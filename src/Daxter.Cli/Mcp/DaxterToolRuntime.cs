@@ -72,6 +72,18 @@ internal static class DaxterToolRuntime
             return Format(await op(rest, config, ct));
         });
 
+    /// <summary>Like <see cref="RestAsync"/> but the op returns ready text (not a table) — e.g. a report
+    /// definition file. Workspace-scoped; no dataset required.</summary>
+    public static Task<string> RestTextAsync(
+        string? workspace,
+        Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<string>> op, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = Config(workspace, null);
+            using var rest = new PowerBiRestClient(Provider(config));
+            return await op(rest, config, ct);
+        });
+
     /// <summary>Takes over ownership of a model. DRY-RUN unless execute=true AND writes enabled.</summary>
     public static Task<string> TakeOverAsync(string? workspace, string? dataset, bool execute, CancellationToken ct)
         => Guard(async () =>

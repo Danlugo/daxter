@@ -96,6 +96,18 @@ else if (string.IsNullOrEmpty(dataset))
     {
         @if (busy) { <p class="muted">Running…</p> }
         <ResultGrid Result="result" Error="@error" />
+        @if (wsView == WsView.ReportTypes)
+        {
+            <div class="cmd-group" style="margin-top:.8rem">
+                <label>Export definition
+                    <input @bind="exportReportName" placeholder="report name (thin + downloadable)" style="min-width:320px" />
+                </label>
+                <button class="btn-sm" @onclick="DownloadReportDefinition" disabled="@(busy || string.IsNullOrWhiteSpace(exportReportName))"
+                        title="Download the report's PBIR/legacy definition (field references) as JSON">Download JSON</button>
+            </div>
+            <p class="muted">Downloads the report's definition (the field references for column-usage analysis).
+                The <code>.pbix</code> binary is available from the CLI: <code>ws export-report --pbix</code>.</p>
+        }
     }
 }
 else if (!string.IsNullOrEmpty(selMeasure))
@@ -294,6 +306,22 @@ else
     private void ToggleMeasure(string name) { if (!expandedMeasures.Remove(name)) expandedMeasures.Add(name); }
 
     // Export the currently listed measures (respects the search filter) as CSV.
+    private string exportReportName = "";
+
+    private async Task DownloadReportDefinition()
+    {
+        if (string.IsNullOrWhiteSpace(exportReportName)) return;
+        busy = true; BusyState.Begin(); error = null; StateHasChanged();
+        try
+        {
+            var json = await Ui.ReportDefinitionBundleAsync(workspace, exportReportName.Trim());
+            var safe = string.Concat(exportReportName.Trim().Select(c => char.IsLetterOrDigit(c) ? c : '-'));
+            await JS.InvokeVoidAsync("daxterDownload", $"report-def-{safe}.json", json);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
     private async Task ExportMeasures()
     {
         var rows = MeasureRows()

@@ -166,6 +166,21 @@ public class PowerBiRestClientTests
     }
 
     [Fact]
+    public async Task ReportDefinitionAsync_decodes_base64_parts()
+    {
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"hi\":\"there\"}"));
+        var json = "{\"definition\":{\"parts\":["
+            + "{\"path\":\"report.json\",\"payload\":\"" + b64 + "\",\"payloadType\":\"InlineBase64\"},"
+            + "{\"path\":\".platform\",\"payload\":\"" + b64 + "\",\"payloadType\":\"InlineBase64\"}]}}";
+        var client = Client(_ => json);
+        var parts = await client.ReportDefinitionAsync("ws1", "r1");
+
+        Assert.Equal(2, parts.Count);
+        Assert.Equal("report.json", parts[0].Path);
+        Assert.Equal("{\"hi\":\"there\"}", parts[0].Content);   // base64 decoded back to text
+    }
+
+    [Fact]
     public async Task ReportInventoryAsync_classifies_thin_thick_and_downloadable()
     {
         var client = Client(url => url.Contains("/datasets", StringComparison.Ordinal)

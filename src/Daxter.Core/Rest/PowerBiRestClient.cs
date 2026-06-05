@@ -6,6 +6,11 @@ using Daxter.Core.Query;
 
 namespace Daxter.Core.Rest;
 
+/// <summary>One file of a report's definition: its relative <paramref name="Path"/> (e.g.
+/// <c>report.json</c> or <c>definition/pages/&lt;id&gt;/visuals/&lt;id&gt;/visual.json</c>) and decoded text
+/// <paramref name="Content"/> (empty for binary parts).</summary>
+public sealed record ReportPart(string Path, string Content);
+
 /// <summary>
 /// Thin client over the Power BI REST API (<c>https://api.powerbi.com/v1.0/myorg/</c>).
 /// Uses the same Entra ID token as XMLA. Responses are mapped to <see cref="QueryResult"/>
@@ -148,6 +153,107 @@ public sealed class PowerBiRestClient : IDisposable
         }
         rows.Sort((a, b) => string.Compare(a[0]?.ToString(), b[0]?.ToString(), StringComparison.OrdinalIgnoreCase));
         return new QueryResult(["report", "dataset", "type", "fromPbix", "downloadable", "reason"], rows);
+    }
+
+    /// <summary>Resolves a report NAME (or GUID) to its id within a workspace.</summary>
+    public async Task<string> ResolveReportIdAsync(string groupId, string reportNameOrId, CancellationToken ct = default)
+    {
+        if (Guid.TryParse(reportNameOrId.Trim(), out _)) return reportNameOrId.Trim();
+        var root = await GetAsync($"groups/{groupId}/reports", ct);
+        foreach (var r in Value(root).EnumerateArray())
+            if (string.Equals(Str(r, "name"), reportNameOrId, StringComparison.OrdinalIgnoreCase)
+                && Str(r, "id") is { } id)
+                return id;
+        throw new DaxterException($"Report not found in workspace: {reportNameOrId}");
+    }
+
+    /// <summary>Fetches a report's <b>definition</b> from the Fabric API (PBIR or PBIR-Legacy) — the
+    /// per-visual JSON that carries every field reference, the substrate for column-usage analysis.
+    /// Needs only report read/write. Handles the long-running-operation (202 + poll) path. Base64 parts
+    /// are decoded to text; binary parts come back with empty content.</summary>
+    public async Task<IReadOnlyList<ReportPart>> ReportDefinitionAsync(string workspaceId, string reportId, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/reports/{reportId}/getDefinition";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+
+        JsonElement root;
+        if (response.StatusCode == System.Net.HttpStatusCode.Accepted)
+        {
+            root = await PollOperationResultAsync(response, ct);
+        }
+        else
+        {
+            await EnsureSuccessAsync(response, ct);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            root = doc.RootElement.Clone();
+        }
+
+        var parts = new List<ReportPart>();
+        if (root.TryGetProperty("definition", out var def) && def.TryGetProperty("parts", out var partsEl)
+            && partsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var p in partsEl.EnumerateArray())
+            {
+                var path = Str(p, "path") ?? "";
+                var payload = Str(p, "payload") ?? "";
+                var type = Str(p, "payloadType") ?? "";
+                var content = "";
+                if (string.Equals(type, "InlineBase64", StringComparison.OrdinalIgnoreCase) && payload.Length > 0)
+                {
+                    try { content = Encoding.UTF8.GetString(Convert.FromBase64String(payload)); }
+                    catch { content = ""; }   // binary part (e.g. an image) — leave empty
+                }
+                parts.Add(new ReportPart(path, content));
+            }
+        }
+        return parts;
+    }
+
+    /// <summary>Downloads a report as a <c>.pbix</c> via the Power BI <i>Export Report In Group</i> API.
+    /// Fails (surfaced as an error) for service-authored reports or models edited over XMLA — that's the
+    /// engine refusing, not a bug. Returns the raw <c>.pbix</c> bytes.</summary>
+    public async Task<byte[]> ExportReportPbixAsync(string groupId, string reportId, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + $"groups/{groupId}/reports/{reportId}/Export");
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>Polls a Fabric long-running operation (from a 202 response) to completion, then returns
+    /// the operation result body.</summary>
+    private async Task<JsonElement> PollOperationResultAsync(HttpResponseMessage accepted, CancellationToken ct)
+    {
+        var opUrl = accepted.Headers.Location?.ToString()
+            ?? (accepted.Headers.TryGetValues("Operation-Location", out var v) ? v.FirstOrDefault() : null)
+            ?? throw new DaxterException("Long-running operation returned no Location header.");
+        var retry = accepted.Headers.RetryAfter?.Delta is { } d && d > TimeSpan.Zero ? d : TimeSpan.FromSeconds(2);
+
+        for (var i = 0; i < 90; i++)
+        {
+            await Task.Delay(retry, ct);
+            using var poll = new HttpRequestMessage(HttpMethod.Get, opUrl);
+            await Authorize(poll, ct);
+            using var pr = await _http.SendAsync(poll, ct);
+            await EnsureSuccessAsync(pr, ct);
+            using var doc = JsonDocument.Parse(await pr.Content.ReadAsStringAsync(ct));
+            var status = Str(doc.RootElement, "status") ?? "";
+            if (string.Equals(status, "Succeeded", StringComparison.OrdinalIgnoreCase))
+            {
+                using var resReq = new HttpRequestMessage(HttpMethod.Get, opUrl.TrimEnd('/') + "/result");
+                await Authorize(resReq, ct);
+                using var res = await _http.SendAsync(resReq, ct);
+                await EnsureSuccessAsync(res, ct);
+                using var resDoc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
+                return resDoc.RootElement.Clone();
+            }
+            if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase))
+                throw new DaxterException("getDefinition operation failed on the service.");
+        }
+        throw new DaxterException("getDefinition timed out waiting for the operation to complete.");
     }
 
     /// <summary>Report → dataset lineage (dataset ids resolved to names).</summary>

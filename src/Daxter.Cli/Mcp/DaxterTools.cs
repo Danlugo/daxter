@@ -119,6 +119,26 @@ public static class DaxterTools
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
 
+    [McpServerTool(Name = "daxter_export_report", ReadOnly = true, Title = "Export a report's definition"), Description("Export a report's definition (PBIR / PBIR-Legacy) via the Fabric API — the JSON that carries every field reference (Table[Column], measures), the substrate for column-usage analysis. Without 'part', returns a manifest of the definition files + sizes; pass 'part' (e.g. report.json) to return that file's content. Needs only report read/write. (.pbix binary download is CLI-only: `ws export-report --pbix`.)")]
+    public static Task<string> ExportReport(
+        [Description("Report name or id.")] string report,
+        [Description("Definition file to return (e.g. report.json). Omit for a manifest of all parts.")] string? part = null,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestTextAsync(workspace, async (rest, cfg, c) =>
+        {
+            var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var rid = await rest.ResolveReportIdAsync(g, report, c);
+            var parts = await rest.ReportDefinitionAsync(g, rid, c);
+            if (!string.IsNullOrWhiteSpace(part))
+            {
+                var p = parts.FirstOrDefault(x => string.Equals(x.Path, part, StringComparison.OrdinalIgnoreCase));
+                return p is null
+                    ? $"Part not found: {part}. Available: {string.Join(", ", parts.Select(x => x.Path))}"
+                    : p.Content;
+            }
+            return string.Join("\n", parts.Select(p => $"{p.Content.Length,8}  {p.Path}"));
+        }, ct);
+
     [McpServerTool(Name = "daxter_item_connections", ReadOnly = true, Title = "List a model's connections"), Description("A model's current connections via the Fabric API: display name + connectivity type (cloud / on-prem / VNet gateway) + connection details. Works with model read/write (no gateway-admin), so it names bindings to gateways you can't manage.")]
     public static Task<string> ItemConnections(string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>

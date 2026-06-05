@@ -259,6 +259,20 @@ public sealed class DaxterUi
             return await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(ws, ct), ct);
         });
 
+    /// <summary>Fetches a report's definition (PBIR / legacy) and bundles every part into one JSON object
+    /// (<c>{ path: content }</c>) for the browser to download. The field references inside (e.g.
+    /// <c>report.json</c>) are the substrate for column-usage analysis. REST yields, so no offload needed.</summary>
+    public async Task<string> ReportDefinitionBundleAsync(string ws, string report, CancellationToken ct = default)
+    {
+        _log.LogInformation("export-report definition: {Ws}/{Report}", ws, report);
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var g = await rest.ResolveGroupIdAsync(ws, ct);
+        var rid = await rest.ResolveReportIdAsync(g, report, ct);
+        var parts = await rest.ReportDefinitionAsync(g, rid, ct);
+        var map = parts.ToDictionary(p => p.Path, p => p.Content);
+        return System.Text.Json.JsonSerializer.Serialize(map);
+    }
+
     public Task<QueryResult> DatasourcesAsync(string ws, string ds, CancellationToken ct = default)
         => Track("datasources", $"{ws}/{ds}", async () =>
         {
