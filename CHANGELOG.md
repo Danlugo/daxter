@@ -6,6 +6,18 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.24.1] - 2026-06-06
+
+### Added
+- **`SearchableSelect` — label/value `Options` mode for id-valued pickers.** The component now accepts
+  `Options` as `IReadOnlyList<(string Value, string Label)>`: the box shows the **label**, binds the
+  **value** (e.g. an id). String-list mode (`Items`) is unchanged. Applied to **every remaining
+  id-valued picker** that wasn't already searchable:
+  - **Audit** — Pipeline (was a plain `<select>` of pipeline id/name).
+  - **Connections** — Gateway (admin gateway picker) **and** the per-row "Maps to" dropdowns in the
+    Gateway-connections and Cloud-connections sections.
+  Type to filter instead of scrolling.
+
 ## [1.24.0] - 2026-06-06
 
 ### Added

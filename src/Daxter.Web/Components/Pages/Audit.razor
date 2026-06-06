@@ -37,13 +37,9 @@
     <div class="row">
         <div>
             <label>Pipeline <span class="muted">(@pipelines.Count@(indexBusy ? " — discovering…" : ""))</span></label>
-            <select @bind="selectedPipelineId" @bind:after="OnPipelinePicked" disabled="@(indexBusy || pipelines.Count == 0)">
-                <option value="">— pick a pipeline —</option>
-                @foreach (var p in pipelines)
-                {
-                    <option value="@p.PipelineId">@p.PipelineName</option>
-                }
-            </select>
+            <SearchableSelect Options="pipelineOptions" @bind-Value="selectedPipelineId" OnChange="OnPipelinePicked"
+                              Placeholder="type to search a pipeline…"
+                              Disabled="@(indexBusy || pipelines.Count == 0)" />
         </div>
     </div>
 
@@ -76,6 +72,10 @@ else
     private bool indexBusy;
     private string? error;
     private string selectedPipelineId = "";
+
+    // (id, name) pairs for the SearchableSelect — the box shows the name, binds the id.
+    private IReadOnlyList<(string Value, string Label)> pipelineOptions =>
+        pipelines.Select(p => (p.PipelineId, p.PipelineName)).ToList();
 
     // Deep-link: /audit?pipeline=<id>  (used by the Frequent sidebar shortcut).
     [Parameter, SupplyParameterFromQuery(Name = "pipeline")] public string? Qpipeline { get; set; }

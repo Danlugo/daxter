@@ -4,25 +4,35 @@
    datalist there would allow invalid free-text. Value == the picked item (string lists). *@
 
 <div class="combo-wrap">
-    <input class="combo" list="@_listId" value="@Value" @onchange="OnInput" @attributes="Extra"
+    <input class="combo" list="@_listId" value="@DisplayText" @onchange="OnInput" @attributes="Extra"
            placeholder="@Placeholder" disabled="@Disabled" autocomplete="off" />
-    @if (!Disabled && !string.IsNullOrEmpty(Value))
+    @if (!Disabled && !string.IsNullOrEmpty(DisplayText))
     {
         <button type="button" class="combo-clear" @onclick="Clear" title="Clear">×</button>
     }
     <datalist id="@_listId">
-        @foreach (var item in Items)
+        @if (Options is not null)
         {
-            <option value="@item"></option>
+            @foreach (var o in Options) { <option value="@o.Label"></option> }
+        }
+        else
+        {
+            @foreach (var item in Items) { <option value="@item"></option> }
         }
     </datalist>
 </div>
 
 @code {
-    /// <summary>The options to search/pick from (each is both the value and the label).</summary>
+    /// <summary>String options where the value IS the label (workspaces, tables, columns…). Use this OR
+    /// <see cref="Options"/>.</summary>
     [Parameter] public IEnumerable<string> Items { get; set; } = Array.Empty<string>();
 
-    /// <summary>The selected value (two-way: <c>@bind-Value</c>).</summary>
+    /// <summary>(Value, Label) options for id-valued pickers — the box shows the Label, binds the Value
+    /// (pipelines, gateways, connections). Takes precedence over <see cref="Items"/> when set.</summary>
+    [Parameter] public IReadOnlyList<(string Value, string Label)>? Options { get; set; }
+
+    /// <summary>The selected value (two-way: <c>@bind-Value</c>). For <see cref="Options"/> mode this is
+    /// the Value (e.g. an id), not the displayed label.</summary>
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
 
@@ -38,12 +48,22 @@
     // Unique per instance so multiple pickers on a page don't share a datalist.
     private readonly string _listId = "ss-" + Guid.NewGuid().ToString("N")[..8];
 
+    // What the box shows: the label of the current Value in Options mode, else the Value itself.
+    private string DisplayText => Options is null
+        ? (Value ?? "")
+        : (Options.FirstOrDefault(o => string.Equals(o.Value, Value, StringComparison.OrdinalIgnoreCase)).Label ?? "");
+
     private async Task OnInput(ChangeEventArgs e)
     {
-        var v = e.Value?.ToString() ?? "";
-        if (v == Value) return;
-        Value = v;
-        await ValueChanged.InvokeAsync(v);
+        var typed = e.Value?.ToString() ?? "";
+        // String mode: the value is the typed text. Options mode: map the typed label back to its value
+        // (empty if it doesn't match a known option — an id-valued picker can't take a free-text value).
+        var newVal = Options is null
+            ? typed
+            : (Options.FirstOrDefault(o => string.Equals(o.Label, typed, StringComparison.OrdinalIgnoreCase)).Value ?? "");
+        if (newVal == Value) return;
+        Value = newVal;
+        await ValueChanged.InvokeAsync(newVal);
         await OnChange.InvokeAsync();
     }
 

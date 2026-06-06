@@ -61,16 +61,10 @@
             <h3 class="conn-section">Gateway connections</h3>
             <div class="cmd-group">
                 <label>Gateway
-                    <select @bind="bindGateway" @bind:after="OnBindGatewayChanged" disabled="@busy">
-                        <option value="">— pick a gateway you administer —</option>
-                        @if (gateways is not null)
-                        {
-                            @foreach (var gw in gateways.Rows)
-                            {
-                                <option value="@Cell(gateways, gw, "id")">@Cell(gateways, gw, "name") (@Cell(gateways, gw, "type"))</option>
-                            }
-                        }
-                    </select>
+                    <SearchableSelect Options="GatewayOptions()" @bind-Value="bindGateway"
+                                      OnChange="OnBindGatewayChanged"
+                                      Placeholder="type to search a gateway you administer…"
+                                      Disabled="@busy" />
                 </label>
             </div>
 
@@ -99,14 +93,11 @@
                             <div class="conn-mapsto">
                                 <span class="conn-lbl">maps to:</span>
                                 <label class="conn-fld">
-                                    <select value="@rowConn.GetValueOrDefault(ix, "")" @onchange="e => SetRowConn(ix, e)"
-                                            disabled="@(busy || matches.Count == 0)">
-                                        <option value="">— none —</option>
-                                        @foreach (var g in matches)
-                                        {
-                                            <option value="@Cell(gwConns!, g, "id")">@GwConnLabel(gwConns!, g)</option>
-                                        }
-                                    </select>
+                                    <SearchableSelect Options="GwConnOptions(matches)"
+                                                      Value="@rowConn.GetValueOrDefault(ix, "")"
+                                                      ValueChanged="@(v => SetRowConnVal(ix, v))"
+                                                      Placeholder="type to search a connection…"
+                                                      Disabled="@(busy || matches.Count == 0)" />
                                 </label>
                                 @if (matches.Count == 0)
                                 {
@@ -143,14 +134,11 @@
                         <div class="conn-mapsto">
                             <span class="conn-lbl">maps to:</span>
                             <label class="conn-fld">
-                                <select value="@cloudPick.GetValueOrDefault(ix, "")" @onchange="e => SetCloudPick(ix, e)"
-                                        disabled="@(busy || cmatches.Count == 0)">
-                                    <option value="">— default (SSO / Automatic) —</option>
-                                    @foreach (var c in cmatches)
-                                    {
-                                        <option value="@Cell(cloudConns!, c, "id")">@CloudConnLabel(cloudConns!, c)</option>
-                                    }
-                                </select>
+                                <SearchableSelect Options="CloudConnOptions(cmatches)"
+                                                  Value="@cloudPick.GetValueOrDefault(ix, "")"
+                                                  ValueChanged="@(v => SetCloudPickVal(ix, v))"
+                                                  Placeholder="type to search a cloud connection…"
+                                                  Disabled="@(busy || cmatches.Count == 0)" />
                             </label>
                             <button class="btn-sm" @onclick="() => AskBindCloud(ix)"
                                     disabled="@(!Ui.WritesEnabled || busy || cmatches.Count == 0)" title="Set this source's cloud connection">Set</button>
@@ -329,6 +317,13 @@
         if (string.IsNullOrEmpty(v)) rowConn.Remove(i); else rowConn[i] = v;
     }
 
+    // SearchableSelect's ValueChanged hands us the bound value directly (already mapped from label→id by
+    // the component's Options mode), so we just update the per-row dictionary.
+    private void SetRowConnVal(int i, string? v)
+    {
+        if (string.IsNullOrEmpty(v)) rowConn.Remove(i); else rowConn[i] = v;
+    }
+
     private void AskTakeOver()
     {
         pendingText = $"Take over ownership of '{dataset}' in '{workspace}'? You become the model owner.";
@@ -355,6 +350,28 @@
         var v = e.Value?.ToString() ?? "";
         if (string.IsNullOrEmpty(v)) cloudPick.Remove(i); else cloudPick[i] = v;
     }
+
+    private void SetCloudPickVal(int i, string? v)
+    {
+        if (string.IsNullOrEmpty(v)) cloudPick.Remove(i); else cloudPick[i] = v;
+    }
+
+    // (id, label) projections feeding the SearchableSelect for the three id-valued pickers.
+    private IReadOnlyList<(string Value, string Label)> GatewayOptions()
+        => gateways is null
+            ? Array.Empty<(string, string)>()
+            : gateways.Rows.Select(gw => (Cell(gateways, gw, "id"),
+                                          $"{Cell(gateways, gw, "name")} ({Cell(gateways, gw, "type")})")).ToList();
+
+    private IReadOnlyList<(string Value, string Label)> GwConnOptions(List<object?[]> matches)
+        => gwConns is null
+            ? Array.Empty<(string, string)>()
+            : matches.Select(g => (Cell(gwConns!, g, "id"), GwConnLabel(gwConns!, g))).ToList();
+
+    private IReadOnlyList<(string Value, string Label)> CloudConnOptions(List<object?[]> cmatches)
+        => cloudConns is null
+            ? Array.Empty<(string, string)>()
+            : cmatches.Select(c => (Cell(cloudConns!, c, "id"), CloudConnLabel(cloudConns!, c))).ToList();
 
     /// <summary>Set one source's cloud "Maps to" via the Fabric bindConnection API (ShareableCloud, or
     /// Automatic/SSO when no connection is picked).</summary>
