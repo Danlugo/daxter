@@ -124,7 +124,10 @@ write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** 
 `execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
 `DAXTER_MCP_ALLOW_WRITES=true`. `daxter_refresh` **queues** the job (returns a job id) for the shared
 worker to run — track it with `daxter_refresh_jobs`, **resume** an interrupted/failed one with
-`daxter_resume_refresh` (re-runs only the **not-yet-done partitions** by default). The single worker
+`daxter_resume_refresh` (re-runs only the **not-yet-done partitions** by default). Refreshes execute via
+the **server-managed Enhanced Refresh API** (no long-lived client connection → can't hang/drop;
+`maxParallelism` via `DAXTER_REFRESH_MAX_PARALLELISM`, default 4; `DAXTER_REFRESH_ENGINE=xmla` forces the
+legacy client path for non-Premium models). The single worker
 drains the queue **up to 4 models concurrently** (per-model serialized; queue depth is unbounded) —
 raise/lower it with `DAXTER_REFRESH_MAX_CONCURRENT_MODELS` (clamped to 1–16; higher consumes more
 capacity + XMLA sessions).

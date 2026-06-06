@@ -61,6 +61,27 @@ public sealed class RefreshSchedulerTests : IDisposable
     }
 
     [Fact]
+    public void ResumeSpec_uses_exact_done_set_for_out_of_order_completion()
+    {
+        // Enhanced/parallel refresh: partitions complete out of order, recorded in DonePartitions.
+        var job = _store.Enqueue(Spec("WS - Dev", "M3", RefreshKind.AllPartitions), "all parts", JobOrigin.Mcp);
+        _store.Mutate(job.Id, j =>
+        {
+            j.Spec = j.Spec with { Table = "FACT" };
+            j.OrderedPartitions = new() { "p1", "p2", "p3", "p4", "p5" };
+            j.DonePartitions = new() { "p1", "p3", "p5" };   // completed out of order
+            j.PartitionDone = 3;
+            j.Status = JobStatus.Failed;
+        });
+
+        var (spec, count, partial) = _store.ResumeSpec(job.Id, remainingOnly: true)!.Value;
+        Assert.True(partial);
+        Assert.Equal(2, count);
+        Assert.Equal(RefreshKind.SomePartitions, spec.Kind);
+        Assert.Equal(new[] { "p2", "p4" }, spec.Partitions);   // exactly the NOT-completed ones, not "skip first 3"
+    }
+
+    [Fact]
     public void ResumeSpec_falls_back_to_full_when_nothing_recorded()
     {
         // Done=0 (failed before any partition) → full re-run even when remaining-only is asked.

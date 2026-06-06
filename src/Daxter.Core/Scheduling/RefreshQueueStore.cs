@@ -237,11 +237,16 @@ public sealed class RefreshQueueStore
 
         if (remainingOnly
             && spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions
-            && job.OrderedPartitions is { Count: > 0 } ordered
-            && done > 0 && done < ordered.Count)
+            && job.OrderedPartitions is { Count: > 0 } ordered)
         {
-            var remaining = ordered.Skip(done).ToList();
-            return (spec with { Kind = RefreshKind.SomePartitions, Partitions = remaining }, remaining.Count, true);
+            // Exact completed set (enhanced/parallel) → remaining is everything not completed.
+            // Otherwise (serial, in-order) → skip the first PartitionDone.
+            var remaining = job.DonePartitions is { Count: > 0 } completed
+                ? ordered.Where(p => !completed.Contains(p, StringComparer.OrdinalIgnoreCase)).ToList()
+                : (done > 0 && done < ordered.Count ? ordered.Skip(done).ToList() : null);
+
+            if (remaining is { Count: > 0 } && remaining.Count < ordered.Count)
+                return (spec with { Kind = RefreshKind.SomePartitions, Partitions = remaining }, remaining.Count, true);
         }
         return (spec, spec.Partitions?.Count ?? job.OrderedPartitions?.Count ?? 0, false);
     }

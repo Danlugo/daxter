@@ -2,6 +2,7 @@ using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Connection;
 using Daxter.Core.Maintenance;
+using Daxter.Core.Rest;
 using Daxter.Core.Scheduling;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -93,6 +94,18 @@ public sealed class RefreshWorkerHostedService : BackgroundService
 
         try
         {
+            // DEFAULT engine: the server-managed Enhanced Refresh REST API — no long-lived client
+            // connection, so it can't hang/drop like XMLA. Set DAXTER_REFRESH_ENGINE=xmla to force the
+            // legacy client-driven serial path (e.g. non-Premium models, which the enhanced API needs).
+            if (!string.Equals(Environment.GetEnvironmentVariable("DAXTER_REFRESH_ENGINE"), "xmla", StringComparison.OrdinalIgnoreCase))
+            {
+                using var rest = new PowerBiRestClient(provider);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, linked.Token);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, linked.Token);
+                await EnhancedRefresh.RunAsync(rest, g, d, spec, EnhancedRefresh.MaxParallelism(), progress, linked.Token);
+                return;
+            }
+
             if (spec.Kind is RefreshKind.AllPartitions or RefreshKind.SomePartitions)
             {
                 // Refresh each partition on its OWN fresh session so a long serial refresh re-acquires

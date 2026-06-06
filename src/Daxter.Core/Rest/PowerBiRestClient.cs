@@ -6,6 +6,14 @@ using Daxter.Core.Query;
 
 namespace Daxter.Core.Rest;
 
+/// <summary>One object's status within an enhanced refresh (a table or a specific partition).</summary>
+public sealed record RefreshObjectStatus(string Table, string Partition, string Status);
+
+/// <summary>The status of an enhanced-refresh operation: overall <paramref name="Status"/>
+/// (NotStarted | InProgress | Completed | Failed | Cancelled | Unknown), the per-object/per-partition
+/// statuses, and an error message when failed.</summary>
+public sealed record EnhancedRefreshStatus(string Status, IReadOnlyList<RefreshObjectStatus> Objects, string? Error);
+
 /// <summary>One file of a report's definition: its relative <paramref name="Path"/> (e.g.
 /// <c>report.json</c> or <c>definition/pages/&lt;id&gt;/visuals/&lt;id&gt;/visual.json</c>) and decoded text
 /// <paramref name="Content"/> (empty for binary parts).</summary>
@@ -491,6 +499,58 @@ public sealed class PowerBiRestClient : IDisposable
         => await PostAsync(
             $"groups/{groupId}/datasets/{datasetId}/refreshes",
             "{\"notifyOption\":\"NoNotification\"}", ct);
+
+    // ---- enhanced (asynchronous, server-managed) refresh ----
+
+    /// <summary>Starts an <b>enhanced refresh</b> (Power BI async refresh API) with the given JSON body
+    /// (type, commitMode, maxParallelism, retryCount, timeout, objects). The refresh runs ON THE SERVER —
+    /// no long-lived client connection — so it can't hang/drop like a client XMLA refresh. Returns the
+    /// <c>requestId</c> (from the <c>Location</c> header) to poll/cancel.</summary>
+    public async Task<string> StartEnhancedRefreshAsync(string groupId, string datasetId, string bodyJson, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + $"groups/{groupId}/datasets/{datasetId}/refreshes")
+        {
+            Content = new StringContent(bodyJson, Encoding.UTF8, "application/json"),
+        };
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);   // 202 Accepted
+
+        var loc = response.Headers.Location?.ToString();
+        if (!string.IsNullOrEmpty(loc))
+            return loc.TrimEnd('/').Split('/').Last();
+        if (response.Headers.TryGetValues("x-ms-request-id", out var ids) && ids.FirstOrDefault() is { } id)
+            return id;
+        throw new DaxterException("Enhanced refresh accepted but no requestId was returned.");
+    }
+
+    /// <summary>Polls an enhanced refresh's status — overall + per-object (per-partition) — by requestId.</summary>
+    public async Task<EnhancedRefreshStatus> GetEnhancedRefreshAsync(string groupId, string datasetId, string requestId, CancellationToken ct = default)
+    {
+        var root = await GetAsync($"groups/{groupId}/datasets/{datasetId}/refreshes/{requestId}", ct);
+        var status = Str(root, "status") ?? "Unknown";
+
+        var objects = new List<RefreshObjectStatus>();
+        if (root.TryGetProperty("objects", out var objs) && objs.ValueKind == JsonValueKind.Array)
+            foreach (var o in objs.EnumerateArray())
+                objects.Add(new RefreshObjectStatus(Str(o, "table") ?? "", Str(o, "partition") ?? "", Str(o, "status") ?? ""));
+
+        string? error = null;
+        if (root.TryGetProperty("messages", out var msgs) && msgs.ValueKind == JsonValueKind.Array)
+            error = string.Join("; ", msgs.EnumerateArray().Select(m => Str(m, "message")).Where(s => !string.IsNullOrEmpty(s)));
+        if (string.IsNullOrEmpty(error)) error = Str(root, "extendedStatus");
+
+        return new EnhancedRefreshStatus(status, objects, string.IsNullOrEmpty(error) ? null : error);
+    }
+
+    /// <summary>Cancels an in-progress enhanced refresh by requestId (best-effort).</summary>
+    public async Task CancelEnhancedRefreshAsync(string groupId, string datasetId, string requestId, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, BaseUrl + $"groups/{groupId}/datasets/{datasetId}/refreshes/{requestId}");
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        _ = response.IsSuccessStatusCode;   // best-effort: ignore cancel failures
+    }
 
     // ---- HTTP plumbing ----
 

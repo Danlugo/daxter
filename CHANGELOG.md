@@ -6,7 +6,22 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.22.0] - 2026-06-06
+## [1.23.0] - 2026-06-06
+
+### Changed
+- **Refresh now runs via the server-managed Enhanced Refresh REST API by default** — the worker submits
+  the refresh (with `objects` for table/partition targeting, `maxParallelism`, `retryCount`, and
+  `commitMode: partialBatch` for partition jobs) and **polls** per-partition status, instead of driving
+  XMLA partition-by-partition over a long-lived client connection. Because **no client connection is
+  held**, refreshes can't hang or drop the way the XMLA path did (the *"connection is not open"* / stuck
+  failures). Per-partition progress is unchanged; cancellation maps to the API's `DELETE`.
+  - `commitMode: partialBatch` commits each partition as it finishes, so a mid-run failure keeps the
+    completed work — and **resume re-runs exactly the not-completed partitions** (tracked precisely, so
+    it's correct even when partitions finish out of order under parallelism).
+  - Tunables: `DAXTER_REFRESH_MAX_PARALLELISM` (default 4, clamped 1–10). Set `DAXTER_REFRESH_ENGINE=xmla`
+    to force the legacy client-driven serial path (e.g. for non-Premium models, which the enhanced API
+    requires Premium/PPU/Fabric + `Dataset.ReadWrite.All` to use).
+  - The XMLA serial path (with its token-keepalive + re-open-on-retry) remains as the fallback engine.
 
 ### Added
 - **Per-source connection binding — including cloud "Maps to" — via the Fabric `bindConnection` API.**

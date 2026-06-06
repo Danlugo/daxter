@@ -67,6 +67,11 @@ public sealed class RefreshJob
     /// the whole table. Null for non-partition refreshes.</summary>
     public List<string>? OrderedPartitions { get; set; }
 
+    /// <summary>The EXACT partitions completed (by name). Set by the enhanced-refresh engine, where
+    /// partitions can finish out of order — so a resume re-runs <c>OrderedPartitions \ DonePartitions</c>,
+    /// not just "skip the first N". Null for the serial path (which completes strictly in order).</summary>
+    public List<string>? DonePartitions { get; set; }
+
     /// <summary>Cross-process cooperative cancel: a surface sets this; the worker polls and aborts.</summary>
     public bool CancelRequested { get; set; }
 

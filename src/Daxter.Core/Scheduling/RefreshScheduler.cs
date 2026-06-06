@@ -16,6 +16,10 @@ public interface IRefreshProgress
     /// first one) so a later resume can re-run only the not-yet-done partitions.</summary>
     void Plan(IReadOnlyList<string> orderedPartitions);
 
+    /// <summary>Record the EXACT set of partitions completed so far (names). Needed when partitions
+    /// complete out of order (parallel/enhanced refresh) so a resume re-runs only the not-completed ones.</summary>
+    void Completed(IReadOnlyList<string> completedPartitions);
+
     /// <summary>True once any interface has requested cancellation of this job.</summary>
     bool CancelRequested { get; }
 }
@@ -216,6 +220,12 @@ public sealed class RefreshScheduler
                 j.PartitionTotal = orderedPartitions.Count;
                 j.PartitionDone ??= 0;
             });
+            _changed();
+        }
+
+        public void Completed(IReadOnlyList<string> completedPartitions)
+        {
+            _store.Mutate(_id, j => j.DonePartitions = completedPartitions.ToList());
             _changed();
         }
 
