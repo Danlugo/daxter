@@ -11,9 +11,9 @@
 <h1>Connections &amp; ownership</h1>
 <p class="muted">
     Take over a model and map its data sources to connections — like the Power BI <em>Gateway and cloud
-    connections</em> screen. <strong>Gateway connections</strong> are writable here (pick a gateway, map each
-    source, Apply — the public <em>BindToGateway</em> API). <strong>Cloud connections</strong> are read-only:
-    a source's cloud "Maps to" has no public write API, so use the Service link to change it.
+    connections</em> screen. Both sections are <strong>writable</strong>: bind a whole model to a gateway,
+    or set any source's cloud "Maps to" per-source via the Fabric <em>bindConnection</em> API (incl.
+    shareable cloud connections). Requires taking over the model + writes enabled.
 </p>
 
 @if (!Ui.WritesEnabled)
@@ -130,13 +130,14 @@
                 connections section below.
             </p>
 
-            @* ============ Cloud connections (read-only — Service-only write) ============ *@
+            @* ============ Cloud connections (writable via the Fabric bindConnection API) ============ *@
             <h3 class="conn-section">Cloud connections</h3>
             <p class="muted conn-subhead">Data sources included in this semantic model:</p>
             <div class="conn-list">
                 @for (var i = 0; i < bindSources.Count; i++)
                 {
                     var src = bindSources[i];
+                    var ix = i;
                     var cmatches = MatchCloudConns(src);
                     <div class="conn-row">
                         <div class="conn-src">
@@ -146,15 +147,17 @@
                         <div class="conn-mapsto">
                             <span class="conn-lbl">maps to:</span>
                             <label class="conn-fld">
-                                <select value="@cloudPick.GetValueOrDefault(i, "")" disabled="@busy"
-                                        title="Read-only — change in the Power BI Service (no public write API)">
-                                    <option value="">— none —</option>
+                                <select value="@cloudPick.GetValueOrDefault(ix, "")" @onchange="e => SetCloudPick(ix, e)"
+                                        disabled="@(busy || cmatches.Count == 0)">
+                                    <option value="">— default (SSO / Automatic) —</option>
                                     @foreach (var c in cmatches)
                                     {
                                         <option value="@Cell(cloudConns!, c, "id")">@CloudConnLabel(cloudConns!, c)</option>
                                     }
                                 </select>
                             </label>
+                            <button class="btn-sm" @onclick="() => AskBindCloud(ix)"
+                                    disabled="@(!Ui.WritesEnabled || busy || cmatches.Count == 0)" title="Set this source's cloud connection">Set</button>
                             @if (cmatches.Count == 0)
                             {
                                 <span class="muted conn-filtered">no matching cloud connection</span>
@@ -164,14 +167,12 @@
                 }
             </div>
             <p class="muted">
-                Cloud "Maps to" is <strong>read-only</strong> — there is no public API to set it.
+                Cloud "Maps to" is now writable here via the Fabric <em>bindConnection</em> API — pick a shareable
+                cloud connection and <strong>Set</strong> (default = SSO/Automatic). Requires model ownership (Take over
+                above) and writes enabled.
                 @if (!string.IsNullOrEmpty(settingsUrl))
                 {
-                    <a href="@settingsUrl" target="_blank" rel="noopener">Manage in Power BI Service ↗</a>
-                }
-                else
-                {
-                    <text>Set it in the Service: <em>Settings → Gateway and cloud connections</em>.</text>
+                    <a href="@settingsUrl" target="_blank" rel="noopener">Open in Power BI Service ↗</a>
                 }
             </p>
         }
@@ -225,7 +226,7 @@
     private readonly Dictionary<int, string> cloudPick = new();
 
     // The model's sources unified for matching (named when the Fabric read is available).
-    private record BindSource(string Label, string Name, string Type, string Server, string Db, string Connectivity);
+    private record BindSource(string Label, string Name, string Type, string Server, string Db, string Connectivity, string Path);
     private List<BindSource> bindSources = new();
 
     private string? result;
@@ -353,6 +354,25 @@
         pendingAction = () => Run(() => Ui.BindToGatewayAsync(workspace, dataset, bindGateway, ids));
     }
 
+    private void SetCloudPick(int i, ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString() ?? "";
+        if (string.IsNullOrEmpty(v)) cloudPick.Remove(i); else cloudPick[i] = v;
+    }
+
+    /// <summary>Set one source's cloud "Maps to" via the Fabric bindConnection API (ShareableCloud, or
+    /// Automatic/SSO when no connection is picked).</summary>
+    private void AskBindCloud(int i)
+    {
+        var src = bindSources[i];
+        var connId = cloudPick.GetValueOrDefault(i, "");
+        var connType = string.IsNullOrEmpty(connId) ? "Automatic" : "ShareableCloud";
+        var label = string.IsNullOrEmpty(connId) ? "default (SSO / Automatic)" : "the selected cloud connection";
+        pendingText = $"Set the cloud connection for {src.Type} source '{src.Path}' in '{dataset}' to {label}?";
+        pendingAction = () => Run(() => Ui.BindConnectionAsync(workspace, dataset,
+            string.IsNullOrEmpty(connId) ? null : connId, connType, src.Type, src.Path));
+    }
+
     private async Task DoConfirm()
     {
         var act = pendingAction!;
@@ -443,17 +463,23 @@
             {
                 var name = Cell(itemConns, r, "displayName");
                 var type = Cell(itemConns, r, "type");
-                var (srv, db) = SplitPath(Cell(itemConns, r, "path"));
+                var path = Cell(itemConns, r, "path");
+                var (srv, db) = SplitPath(path);
                 var conn = Cell(itemConns, r, "connectivityType");
                 var label = string.IsNullOrEmpty(srv) ? type : $"{type} — {srv}{(string.IsNullOrEmpty(db) ? "" : $" / {db}")}";
-                list.Add(new BindSource(label, name, type, srv, db, conn));
+                list.Add(new BindSource(label, name, type, srv, db, conn, path));
             }
         }
         else if (datasources is not null)
         {
             foreach (var r in datasources.Rows)
-                list.Add(new BindSource(SourceLabel(r), "", Cell(datasources, r, "datasourceType"),
-                    Cell(datasources, r, "server"), Cell(datasources, r, "database"), ""));
+            {
+                var srv = Cell(datasources, r, "server");
+                var db = Cell(datasources, r, "database");
+                var raw = Cell(datasources, r, "path");
+                var path = !string.IsNullOrEmpty(raw) ? raw : (string.IsNullOrEmpty(db) ? srv : $"{srv};{db}");
+                list.Add(new BindSource(SourceLabel(r), "", Cell(datasources, r, "datasourceType"), srv, db, "", path));
+            }
         }
         return list;
     }

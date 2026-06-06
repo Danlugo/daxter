@@ -980,10 +980,33 @@ internal static class Program
             () => connectionOptions.Resolve(pr, requireWorkspace: true),
             pr.GetValue(reportOpt), pr.GetValue(outDirOpt), pr.GetValue(pbixOpt), ct));
 
-        return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway.")
+        var bcSourceType = new Option<string?>("--source-type") { Description = "Data source type (SQL | Snowflake | … — from `ws item-connections`)." };
+        var bcSourcePath = new Option<string?>("--source-path") { Description = "Data source path identifying the source, e.g. 'server;database'." };
+        var bcConnType = new Option<string?>("--connectivity") { Description = "ShareableCloud | OnPremisesGateway | VirtualNetworkGateway | PersonalCloud | Automatic | None." };
+        var bcConnId = new Option<string?>("--connection") { Description = "Target connection id (from `ws connections`); omit for Automatic/None." };
+        var bindConnection = new Command("bind-connection",
+            "Bind ONE data source to a connection (cloud / gateway / SSO) — per source, via the Fabric bindConnection API.")
+            { bcSourceType, bcSourcePath, bcConnType, bcConnId, yesOpt };
+        connectionOptions.AddTo(bindConnection);
+        bindConnection.SetAction((pr, ct) => RunRestActionAsync(
+            () => connectionOptions.Resolve(pr), pr.GetValue(yesOpt),
+            cfg => $"bind {pr.GetValue(bcSourceType)} source '{pr.GetValue(bcSourcePath)}' of '{cfg.Dataset}' to {pr.GetValue(bcConnType)}",
+            async (rest, cfg, c) =>
+            {
+                RequireDataset(cfg);
+                var g = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+                var d = await rest.ResolveDatasetIdAsync(g, cfg.Dataset!, c);
+                await rest.BindConnectionAsync(g, d, pr.GetValue(bcConnId),
+                    RequireOption(pr, bcConnType, "--connectivity"),
+                    RequireOption(pr, bcSourceType, "--source-type"),
+                    RequireOption(pr, bcSourcePath, "--source-path"), c);
+                return $"Bound {pr.GetValue(bcSourceType)} source to {pr.GetValue(bcConnType)}.";
+            }, ct));
+
+        return new Command("ws", "Workspace inventory (REST) + ownership/gateway binding: datasets, reports, lineage, permissions, gateways, takeover, bind-gateway, bind-connection.")
         {
             ls, datasets, reports, lineage, reportInventory, gateways, connections, permissions, datasources,
-            itemConnections, discoverGateways, gatewayDatasources, exportReport, takeover, bindGateway,
+            itemConnections, discoverGateways, gatewayDatasources, exportReport, takeover, bindGateway, bindConnection,
         };
     }
 

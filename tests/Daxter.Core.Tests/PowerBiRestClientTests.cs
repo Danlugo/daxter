@@ -165,6 +165,45 @@ public class PowerBiRestClientTests
         Assert.Equal("gw-9", result.Rows[1][4]);
     }
 
+    private sealed class CapturingHandler(Func<HttpRequestMessage, Task> capture) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await capture(request);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("", Encoding.UTF8, "application/json") };
+        }
+    }
+
+    [Fact]
+    public async Task BindConnectionAsync_posts_binding_to_the_fabric_bindConnection_endpoint()
+    {
+        HttpRequestMessage? req = null;
+        string? body = null;
+        var handler = new CapturingHandler(async r => { req = r; body = r.Content is null ? null : await r.Content.ReadAsStringAsync(); });
+        var client = new PowerBiRestClient(new FakeToken(), new HttpClient(handler));
+
+        await client.BindConnectionAsync("ws1", "sm1", "conn-9", "ShareableCloud", "SQL", "host;DB");
+
+        Assert.Equal(HttpMethod.Post, req!.Method);
+        Assert.Contains("api.fabric.microsoft.com/v1/workspaces/ws1/semanticModels/sm1/bindConnection", req.RequestUri!.ToString());
+        Assert.Contains("\"connectivityType\":\"ShareableCloud\"", body);
+        Assert.Contains("\"id\":\"conn-9\"", body);          // the target connection
+        Assert.Contains("host;DB", body);                     // identifies the data source
+    }
+
+    [Fact]
+    public async Task BindConnectionAsync_omits_id_when_unbinding()
+    {
+        string? body = null;
+        var handler = new CapturingHandler(async r => { body = await r.Content!.ReadAsStringAsync(); });
+        var client = new PowerBiRestClient(new FakeToken(), new HttpClient(handler));
+
+        await client.BindConnectionAsync("ws1", "sm1", null, "None", "SQL", "host;DB");
+
+        Assert.Contains("\"connectivityType\":\"None\"", body);
+        Assert.DoesNotContain("\"id\"", body!);               // no connection id on an unbind
+    }
+
     [Fact]
     public async Task ReportDefinitionAsync_decodes_base64_parts()
     {

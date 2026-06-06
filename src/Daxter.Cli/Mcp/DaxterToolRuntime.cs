@@ -110,6 +110,36 @@ internal static class DaxterToolRuntime
     /// <summary>Binds a model to a gateway (optionally mapping specific connection ids). DRY-RUN unless
     /// execute=true AND writes enabled. Public REST covers on-prem/VNet gateways; shareable-cloud-connection
     /// "Maps to" is UI-only.</summary>
+    /// <summary>Binds one data source of a model to a connection via the Fabric bindConnection API
+    /// (any connectivity type incl. ShareableCloud). Must own the model. Gated like other writes.</summary>
+    public static Task<string> BindConnectionAsync(string? workspace, string? dataset,
+        string? connectionId, string connectivityType, string sourceType, string sourcePath, bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
+            if (string.IsNullOrWhiteSpace(config.Dataset))
+                throw new DaxterException("A dataset is required to bind a connection.");
+            if (string.IsNullOrWhiteSpace(connectivityType))
+                throw new DaxterException("connectivityType is required (ShareableCloud | OnPremisesGateway | VirtualNetworkGateway | PersonalCloud | Automatic | None).");
+            if (string.IsNullOrWhiteSpace(sourceType) || string.IsNullOrWhiteSpace(sourcePath))
+                throw new DaxterException("sourceType + sourcePath are required (identify the data source — see daxter_item_connections).");
+
+            var plan = $"bind {sourceType} source '{sourcePath}' of '{config.Dataset}' to {connectivityType}"
+                       + (string.IsNullOrWhiteSpace(connectionId) ? "" : $" connection {connectionId}");
+            if (!execute)
+                return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
+            if (!WritesAllowed())
+                return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
+            if (LooksLikeProd(config) && ProdWritesBlocked())
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            await rest.BindConnectionAsync(groupId, datasetId, connectionId, connectivityType, sourceType, sourcePath, ct);
+            return $"Bound — {plan}. (Requires model ownership; run daxter_take_over first if it fails with a permission error.)";
+        });
+
     public static Task<string> BindToGatewayAsync(string? workspace, string? dataset, string gatewayObjectId,
         IReadOnlyList<string>? datasourceObjectIds, bool execute, CancellationToken ct)
         => Guard(async () =>

@@ -218,11 +218,27 @@ public static class DaxterTools
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.TakeOverAsync(workspace, dataset, execute, ct);
 
+    [McpServerTool(Name = "daxter_bind_connection", Destructive = true, Title = "Bind a data source to a connection"), Description(
+        "Bind a SINGLE semantic-model data source to a connection (Fabric Bind Semantic Model Connection API). Supports ALL " +
+        "connectivity types: ShareableCloud (the cloud 'Maps to'), OnPremisesGateway, VirtualNetworkGateway, PersonalCloud, " +
+        "Automatic (default SSO), or None (unbind). This SUPERSEDES daxter_bind_to_gateway — it's per-source and can set cloud " +
+        "mappings the gateway API can't. Identify the source by its type + path (from daxter_item_connections); pass the target " +
+        "connection's id (from daxter_connections) for ShareableCloud/gateway types, or omit it for Automatic/None. You must OWN " +
+        "the model (daxter_take_over first). DRY-RUN unless execute=true AND writes enabled. PROD-blockable.")]
+    public static Task<string> BindConnection(
+        [Description("Data source type, e.g. SQL | Snowflake | Web (the 'type' from daxter_item_connections).")] string sourceType,
+        [Description("Data source path identifying WHICH source, e.g. 'server;database' (the 'path' from daxter_item_connections).")] string sourcePath,
+        [Description("Connectivity type: ShareableCloud | OnPremisesGateway | VirtualNetworkGateway | PersonalCloud | Automatic | None.")] string connectivityType,
+        [Description("Target connection id (GUID) — from daxter_connections. Required for ShareableCloud/gateway; omit for Automatic/None.")] string? connectionId = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.BindConnectionAsync(workspace, dataset, connectionId, connectivityType, sourceType, sourcePath, execute, ct);
+
     [McpServerTool(Name = "daxter_bind_to_gateway", Destructive = true, Title = "Bind a model to a gateway"), Description(
-        "Bind a semantic model to a gateway, optionally mapping its sources to specific gateway connection ids " +
-        "(comma-separated 'datasourceIds'; omit to bind the first matching data source per source). Supports on-premises and " +
-        "VNet gateways. DRY-RUN by default; set execute=true AND enable writes to apply. PROD-blockable. " +
-        "(Shareable-cloud-connection 'Maps to' is UI-only and can't be set here.)")]
+        "Bind a whole semantic model to ONE gateway (legacy Power BI BindToGateway), optionally mapping its sources to specific " +
+        "gateway connection ids (comma-separated 'datasourceIds'; omit to bind the first matching data source per source). " +
+        "Supports on-premises and VNet gateways. PREFER daxter_bind_connection — it's per-source and also does cloud 'Maps to'. " +
+        "DRY-RUN by default; set execute=true AND enable writes to apply. PROD-blockable.")]
     public static Task<string> BindToGateway(
         [Description("Gateway id (GUID) to bind to — from daxter_discover_gateways.")] string gatewayId,
         [Description("Comma-separated gateway data-source/connection ids to map (optional; from daxter_gateway_datasources).")] string? datasourceIds = null,

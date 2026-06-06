@@ -293,6 +293,34 @@ public sealed class PowerBiRestClient : IDisposable
     public async Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
         => ToTable(await GetAsync("gateways", ct), "id", "name", "type");
 
+    /// <summary>Binds (or unbinds) a SINGLE semantic-model data source to a connection via the Fabric
+    /// <i>Bind Semantic Model Connection</i> API. Supports ALL connectivity types — including
+    /// <c>ShareableCloud</c> (the cloud "Maps to") and per-source gateway binding — superseding the
+    /// model-level <see cref="BindToGatewayAsync"/>. The caller must OWN the model. One source per call;
+    /// the source is identified by <paramref name="sourceType"/> + <paramref name="sourcePath"/>
+    /// (e.g. <c>SQL</c> + <c>server;database</c>). Pass <c>connectivityType="None"</c> with no
+    /// <paramref name="connectionId"/> to unbind (revert to default SSO).</summary>
+    public async Task BindConnectionAsync(string workspaceId, string semanticModelId,
+        string? connectionId, string connectivityType, string sourceType, string sourcePath, CancellationToken ct = default)
+    {
+        var binding = new Dictionary<string, object?>
+        {
+            ["connectivityType"] = connectivityType,
+            ["connectionDetails"] = new { type = sourceType, path = sourcePath },
+        };
+        if (!string.IsNullOrWhiteSpace(connectionId)) binding["id"] = connectionId;
+        var body = JsonSerializer.Serialize(new { connectionBinding = binding });
+
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/semanticModels/{semanticModelId}/bindConnection";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);   // 200/202 both succeed
+    }
+
     /// <summary>All connections the calling identity can access from the Fabric API — display name +
     /// connectivity type (cloud / on-prem / VNet gateway) + details. Paginated via continuationToken.
     /// Use to list the shareable <em>cloud</em> connections (the cloud half of the Service's "Gateway and

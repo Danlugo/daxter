@@ -6,7 +6,22 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.21.0] - 2026-06-05
+## [1.22.0] - 2026-06-06
+
+### Added
+- **Per-source connection binding — including cloud "Maps to" — via the Fabric `bindConnection` API.**
+  Binds a single data source of a semantic model to a connection of **any** connectivity type:
+  `ShareableCloud` (the cloud "Maps to"), `OnPremisesGateway`, `VirtualNetworkGateway`, `PersonalCloud`,
+  `Automatic` (default SSO), or `None` (unbind). This **supersedes** the model-level `BindToGateway` —
+  it's per-source and does the cloud mappings the gateway API can't.
+- Across surfaces (parity): **CLI** `ws bind-connection`, **MCP** `daxter_bind_connection`, **web**
+  (the Connections page **Cloud connections** section is now writable — pick a shareable cloud connection
+  per source and *Set*). Gated like other writes; requires model ownership (take over first).
+
+### Fixed / corrected
+- **Cloud "Maps to" is NOT Service-only after all.** An earlier release described it as having no public
+  write API (based on older UI docs). Microsoft's GA `bindConnection` API does it — now adopted.
+  (`daxter_bind_to_gateway` remains for whole-model gateway binds but points to `daxter_bind_connection`.)
 
 ### Fixed
 - **Long partition refreshes now survive a dropped connection** (`"The connection is not open"`). This is

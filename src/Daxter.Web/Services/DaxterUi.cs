@@ -394,6 +394,22 @@ public sealed class DaxterUi
 
     /// <summary>Binds the model to a gateway, optionally mapping its sources to specific gateway
     /// connection ids (none = first matching per source). Gated; refused on production.</summary>
+    /// <summary>Binds ONE data source of a model to a connection (any connectivity type incl.
+    /// ShareableCloud) via the Fabric bindConnection API — the per-source / cloud-"Maps to" path.
+    /// Gated like other writes; requires model ownership (take over first).</summary>
+    public async Task<string> BindConnectionAsync(string ws, string ds, string? connectionId,
+        string connectivityType, string sourceType, string sourcePath, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, ds), "bind a data source to a connection");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+        await rest.BindConnectionAsync(groupId, datasetId, connectionId, connectivityType, sourceType, sourcePath, ct);
+        _log.LogInformation("bind-connection [{Ws}/{Ds}] {Type} '{Path}' → {Conn} ({Id})",
+            ws, ds, sourceType, sourcePath, connectivityType, connectionId ?? "—");
+        return $"Bound {sourceType} source to {connectivityType}.";
+    }
+
     public async Task<string> BindToGatewayAsync(string ws, string ds, string gatewayObjectId,
         IReadOnlyList<string>? datasourceObjectIds, CancellationToken ct = default)
     {
