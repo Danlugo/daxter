@@ -6,7 +6,17 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.20.0] - 2026-06-05
+## [1.21.0] - 2026-06-05
+
+### Fixed
+- **Long partition refreshes now survive a dropped connection** (`"The connection is not open"`). This is
+  distinct from token expiry — the connection drops mid-command, typically under concurrent-refresh
+  capacity/XMLA pressure. The per-partition retry previously re-ran on the **same dead session**, so it
+  couldn't recover; it now **re-opens a fresh session** (fresh connection + token) on each attempt. And
+  partition refreshes **retry by default** (`SerialPartitionRefresh.MinRetries` = 2, each a cheap
+  re-open) so a single transient drop no longer fails the whole job — even when the caller passed
+  `retries=0`. The token-keepalive (fresh session per partition) was already working for expiry; this
+  closes the connection-drop gap.
 
 ### Added
 - **`daxter_capabilities` — agents discover every feature in one call.** Lists every registered MCP tool

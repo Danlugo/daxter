@@ -50,6 +50,47 @@ public class SerialPartitionRefreshTests
         Assert.Equal(parts.Length, progress.Done);                                 // progress reached total
     }
 
+    // A session whose refresh command fails once (a dropped connection) then works.
+    private sealed class FlakySession : IXmlaSession
+    {
+        private readonly bool _fail;
+        public FlakySession(bool failFirst) => _fail = failFirst;
+        public bool Disposed { get; private set; }
+        public QueryResult Execute(string query) => QueryResult.Empty;
+        public void ExecuteCommand(string command) { if (_fail) throw new DaxterException("The connection is not open."); }
+        public void Dispose() => Disposed = true;
+    }
+
+    // Regression for "The connection is not open": a dropped connection mid-refresh must be retried on a
+    // FRESH session (re-opened), not the dead one — otherwise the retry can't recover.
+    [Fact]
+    public async Task Retries_a_dropped_connection_by_reopening_a_fresh_session()
+    {
+        var savedBackoff = RetryPolicy.MaxBackoff;
+        RetryPolicy.MaxBackoff = TimeSpan.FromMilliseconds(1);   // keep the test fast
+        try
+        {
+            var opened = new List<FlakySession>();
+            var progress = new FakeProgress();
+
+            await SerialPartitionRefresh.RunAsync(
+                "Sales", ["2026Q1"], "DB",
+                buildRefresh: (_, n) => n,
+                openSession: _ =>
+                {
+                    var s = new FlakySession(failFirst: opened.Count == 0);   // first drops, re-open succeeds
+                    opened.Add(s);
+                    return Task.FromResult<IXmlaSession>(s);
+                },
+                retries: 0, progress, CancellationToken.None);                  // retries=0 → MinRetries floor kicks in
+
+            Assert.Equal(2, opened.Count);          // re-opened a fresh session on the retry
+            Assert.True(opened[0].Disposed);        // the dropped session was disposed
+            Assert.Equal(1, progress.Done);         // partition completed after the retry
+        }
+        finally { RetryPolicy.MaxBackoff = savedBackoff; }
+    }
+
     [Fact]
     public async Task Stops_and_throws_when_cancel_requested()
     {
