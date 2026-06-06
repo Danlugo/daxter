@@ -1,0 +1,57 @@
+@* Type-to-search single picker, backed by a native <datalist>. Use for LONG / dynamic-list pickers
+   (workspaces, models, tables, columns, gateways…) so the user can filter instead of scrolling.
+   Short fixed-enum selects (refresh type, data type, granularity…) should stay a plain <select> — a
+   datalist there would allow invalid free-text. Value == the picked item (string lists). *@
+
+<div class="combo-wrap">
+    <input class="combo" list="@_listId" value="@Value" @onchange="OnInput" @attributes="Extra"
+           placeholder="@Placeholder" disabled="@Disabled" autocomplete="off" />
+    @if (!Disabled && !string.IsNullOrEmpty(Value))
+    {
+        <button type="button" class="combo-clear" @onclick="Clear" title="Clear">×</button>
+    }
+    <datalist id="@_listId">
+        @foreach (var item in Items)
+        {
+            <option value="@item"></option>
+        }
+    </datalist>
+</div>
+
+@code {
+    /// <summary>The options to search/pick from (each is both the value and the label).</summary>
+    [Parameter] public IEnumerable<string> Items { get; set; } = Array.Empty<string>();
+
+    /// <summary>The selected value (two-way: <c>@bind-Value</c>).</summary>
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Fired after the value changes (the "@bind:after" equivalent — wire load/refresh here).</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    [Parameter] public string? Placeholder { get; set; } = "type to search…";
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Any extra attributes (e.g. title, style) passed through to the input.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? Extra { get; set; }
+
+    // Unique per instance so multiple pickers on a page don't share a datalist.
+    private readonly string _listId = "ss-" + Guid.NewGuid().ToString("N")[..8];
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString() ?? "";
+        if (v == Value) return;
+        Value = v;
+        await ValueChanged.InvokeAsync(v);
+        await OnChange.InvokeAsync();
+    }
+
+    private async Task Clear()
+    {
+        if (string.IsNullOrEmpty(Value)) return;
+        Value = "";
+        await ValueChanged.InvokeAsync("");
+        await OnChange.InvokeAsync();
+    }
+}

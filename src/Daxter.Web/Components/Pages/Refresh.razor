@@ -108,10 +108,8 @@ else
     {
         <div class="form" style="max-width:420px;">
             <label>Table
-                <select @bind="selTable" @bind:after="OnTableChanged">
-                    <option value="">— select a table —</option>
-                    @foreach (var t in tables) { <option value="@t">@t</option> }
-                </select>
+                <SearchableSelect Items="tables" @bind-Value="selTable" OnChange="OnTableChanged"
+                                  Placeholder="type to search a table…" />
             </label>
         </div>
 

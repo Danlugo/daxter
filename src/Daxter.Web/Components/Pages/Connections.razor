@@ -27,16 +27,12 @@
 
 <div class="cmd-group">
     <label>Workspace
-        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
-            <option value="">— pick a workspace —</option>
-            @foreach (var w in workspaces) { <option value="@w">@w</option> }
-        </select>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" />
     </label>
     <label>Dataset
-        <select @bind="dataset" @bind:after="OnDatasetChanged" disabled="@(string.IsNullOrEmpty(workspace))">
-            <option value="">— pick a model —</option>
-            @foreach (var d in datasets) { <option value="@d">@d</option> }
-        </select>
+        <SearchableSelect Items="datasets" @bind-Value="dataset" OnChange="OnDatasetChanged"
+                          Placeholder="type to search a model…" Disabled="@(string.IsNullOrEmpty(workspace))" />
     </label>
 </div>
 

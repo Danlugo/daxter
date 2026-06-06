@@ -6,7 +6,16 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.23.0] - 2026-06-06
+## [1.24.0] - 2026-06-06
+
+### Added
+- **Searchable pickers everywhere.** A new shared **`SearchableSelect`** component (native
+  `<datalist>`-backed type-to-filter combo) replaces the plain `<select>` on every **long / dynamic-list**
+  picker — workspace, dataset/model, table, and column dropdowns on **Model Edit, Connections, and
+  Refresh** (Explore already had it). Type to filter instead of scrolling a long list (the model dropdown
+  was hundreds of entries). Short **fixed-enum** selects (refresh type, data type, granularity,
+  summarize-by, cross-filter, log level, status filters…) stay plain `<select>`. The UI contract now
+  mandates `SearchableSelect` for long/dynamic pickers so new pages inherit it.
 
 ### Changed
 - **Refresh now runs via the server-managed Enhanced Refresh REST API by default** — the worker submits

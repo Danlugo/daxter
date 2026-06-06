@@ -26,16 +26,12 @@
 
 <div class="cmd-group">
     <label>Workspace
-        <select @bind="workspace" @bind:after="OnWorkspaceChanged">
-            <option value="">— pick a workspace —</option>
-            @foreach (var w in workspaces) { <option value="@w">@w</option> }
-        </select>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" />
     </label>
     <label>Dataset
-        <select @bind="dataset" @bind:after="OnDatasetChanged" disabled="@(string.IsNullOrEmpty(workspace))">
-            <option value="">— pick a model —</option>
-            @foreach (var d in datasets) { <option value="@d">@d</option> }
-        </select>
+        <SearchableSelect Items="datasets" @bind-Value="dataset" OnChange="OnDatasetChanged"
+                          Placeholder="type to search a model…" Disabled="@(string.IsNullOrEmpty(workspace))" />
     </label>
 </div>
 
@@ -191,28 +187,20 @@
             <h3>@(relEditing ? $"Edit relationship '{relName}'" : "New relationship")</h3>
             <div class="form me-form">
                 <label>From table
-                    <select @bind="relFromTable" @bind:after="OnRelFromTableChanged">
-                        <option value="">— pick a table —</option>
-                        @foreach (var t in relTables) { <option value="@t">@t</option> }
-                    </select>
+                    <SearchableSelect Items="relTables" @bind-Value="relFromTable" OnChange="OnRelFromTableChanged"
+                                      Placeholder="type to search a table…" />
                 </label>
                 <label>From column
-                    <select @bind="relFromCol" disabled="@(string.IsNullOrEmpty(relFromTable))">
-                        <option value="">— pick a column —</option>
-                        @foreach (var c in relFromCols) { <option value="@c">@c</option> }
-                    </select>
+                    <SearchableSelect Items="relFromCols" @bind-Value="relFromCol"
+                                      Placeholder="type to search a column…" Disabled="@(string.IsNullOrEmpty(relFromTable))" />
                 </label>
                 <label>To table
-                    <select @bind="relToTable" @bind:after="OnRelToTableChanged">
-                        <option value="">— pick a table —</option>
-                        @foreach (var t in relTables) { <option value="@t">@t</option> }
-                    </select>
+                    <SearchableSelect Items="relTables" @bind-Value="relToTable" OnChange="OnRelToTableChanged"
+                                      Placeholder="type to search a table…" />
                 </label>
                 <label>To column
-                    <select @bind="relToCol" disabled="@(string.IsNullOrEmpty(relToTable))">
-                        <option value="">— pick a column —</option>
-                        @foreach (var c in relToCols) { <option value="@c">@c</option> }
-                    </select>
+                    <SearchableSelect Items="relToCols" @bind-Value="relToCol"
+                                      Placeholder="type to search a column…" Disabled="@(string.IsNullOrEmpty(relToTable))" />
                 </label>
                 <label>Name (optional) <input @bind="relName" placeholder="auto-derived if blank" /></label>
                 <label>Cross-filter
@@ -343,10 +331,8 @@
         <div class="card">
             <h3>Columns</h3>
             <label>Table
-                <select @bind="colTable" @bind:after="LoadColumnsForTable">
-                    <option value="">— pick a table —</option>
-                    @foreach (var tn in tables) { <option value="@tn">@tn</option> }
-                </select>
+                <SearchableSelect Items="tables" @bind-Value="colTable" OnChange="LoadColumnsForTable"
+                                  Placeholder="type to search a table…" />
             </label>
             @if (!string.IsNullOrEmpty(colTable))
             {
@@ -395,10 +381,7 @@
                         </select>
                     </label>
                     <label>Sort by column
-                        <select @bind="colSortBy">
-                            <option value="">(none)</option>
-                            @foreach (var sn in siblingCols) { <option value="@sn">@sn</option> }
-                        </select>
+                        <SearchableSelect Items="siblingCols" @bind-Value="colSortBy" Placeholder="(none) — type to search…" />
                     </label>
                     <label>Summarize by
                         <select @bind="colSummarize">
