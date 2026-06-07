@@ -1,0 +1,219 @@
+@page "/sql"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+@inject NavigationManager Nav
+
+<PageTitle>DAXter — SQL</PageTitle>
+
+<h1>SQL</h1>
+<p class="muted">Run T-SQL against a Fabric Warehouse or Lakehouse SQL endpoint. Reads anytime; writes need the <strong>Allow writes</strong> gate.</p>
+
+<div class="dax-tools">
+    <button class="btn-sm back-btn" @onclick="GoBack" title="Back to the previous page">← Back</button>
+</div>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" Disabled="@busy" />
+        <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
+    </div>
+    <div>
+        <label>SQL endpoint <span class="muted">(@endpoints.Count)</span></label>
+        <SearchableSelect Options="endpointOptions" @bind-Value="endpoint" OnChange="OnEndpointPicked"
+                          Placeholder="type to search a warehouse or lakehouse…"
+                          Disabled="@(busy || string.IsNullOrEmpty(workspace))" />
+        @if (!string.IsNullOrEmpty(endpoint) && SelectedEndpoint() is { } ep)
+        {
+            <small class="muted">@ep.Kind · server: <code>@ep.Server</code> · database: <code>@ep.Database</code></small>
+        }
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+<div class="dax-tools">
+    <button class="btn" @onclick="AskRunOrRun" disabled="@(!HasEndpoint || string.IsNullOrWhiteSpace(sql) || busy)">▶ Run SQL</button>
+    <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
+    <span class="muted dax-hint">
+        Tip: Ctrl+Enter runs · read-only by default — INSERT/UPDATE/DELETE/MERGE/DDL need the gate on the Configure page.
+        @if (!Ui.WritesEnabled) { <span> · <strong>Writes off</strong> — read queries only.</span> }
+    </span>
+</div>
+
+<div class="dax-edit">
+    <textarea class="dax-editor" @bind="sql" @bind:event="oninput" rows="14"
+              placeholder="SELECT TOP 10 * FROM information_schema.tables ORDER BY table_name"
+              spellcheck="false" @onkeydown="OnEditorKey"></textarea>
+</div>
+
+@if (pendingWrite is not null)
+{
+    <div class="modal-overlay" @onclick="() => pendingWrite = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Confirm SQL write</h3>
+            <p>This statement looks like a write. It will execute on:</p>
+            <p><strong>@SelectedEndpoint()?.Name</strong> <span class="muted">(@SelectedEndpoint()?.Kind)</span>
+               <br /><small class="muted">server: <code>@SelectedEndpoint()?.Server</code> · database: <code>@SelectedEndpoint()?.Database</code></small></p>
+            <pre class="code">@pendingWrite</pre>
+            <p class="muted">This writes to the Fabric SQL endpoint above.</p>
+            <div class="cmd-group">
+                <button class="btn-sm" @onclick="() => pendingWrite = null">Cancel</button>
+                <button class="btn" @onclick="ConfirmRunWrite">✓ Confirm — run</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (busy) { <p class="muted">Running…</p> }
+<ResultGrid Result="result" Error="@error" Empty="Pick a SQL endpoint, type a SELECT and Run." />
+
+@code {
+    private List<string> workspaces = new();
+    private List<FabricSqlClientEndpoint> endpoints = new();
+    private string workspace = "", endpoint = "", sql = "";
+    private QueryResult? result;
+    private string? error;
+    private bool busy;
+    private string? pendingWrite;
+
+    // Deep-link: /sql?ws=&ep=
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ep")] public string? Qep { get; set; }
+    private string? appliedDeepLink;
+
+    private bool HasEndpoint => !string.IsNullOrEmpty(endpoint) && !busy;
+
+    /// <summary>Endpoint shape on the page — kept here (not in Core) so the bridge can keep returning
+    /// a generic <see cref="QueryResult"/> like every other DAXter list. <c>Value</c> = endpoint name (the
+    /// display label), which is also the deep-link parameter and the dictionary key into <see cref="endpoints"/>.</summary>
+    private sealed record FabricSqlClientEndpoint(string Name, string Server, string Database, string Kind);
+
+    // (value, label) pairs for SearchableSelect's Options mode — box shows the label, binds the name.
+    private IReadOnlyList<(string Value, string Label)> endpointOptions =>
+        endpoints.Select(e => (e.Name, $"{e.Name} ({e.Kind})")).ToList();
+
+    private FabricSqlClientEndpoint? SelectedEndpoint() =>
+        endpoints.FirstOrDefault(e => string.Equals(e.Name, endpoint, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    /// <summary>Apply a deep-link (sql?ws=&ep=) — fires on initial nav AND on same-component navigation
+    /// from the Frequent sidebar (clicking another SQL endpoint while already on /sql).</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}|{Qep}";
+        if (key == appliedDeepLink) return;
+        appliedDeepLink = key;
+
+        BusyState.Begin();
+        try
+        {
+            if (workspaces.Count == 0) await LoadWorkspaces();
+            workspace = Qws!;
+            await OnWorkspaceChanged();
+            if (!string.IsNullOrEmpty(Qep))
+            {
+                endpoint = Qep!;
+                Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+            }
+        }
+        finally { BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private async Task LoadWorkspaces()
+    {
+        busy = true; BusyState.Begin(); error = null;
+        try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        endpoints = new(); endpoint = ""; result = null;
+        if (string.IsNullOrEmpty(workspace)) return;
+        busy = true; BusyState.Begin(); error = null;
+        try
+        {
+            var r = await Ui.SqlEndpointsAsync(workspace);
+            endpoints = r is null ? new() : r.Rows.Select(row => new FabricSqlClientEndpoint(
+                row[0]?.ToString() ?? "",
+                row[1]?.ToString() ?? "",
+                row[2]?.ToString() ?? "",
+                row[3]?.ToString() ?? "")).Where(e => !string.IsNullOrEmpty(e.Server)).ToList();
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.SqlContext);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private void OnEndpointPicked()
+    {
+        result = null;
+        if (!string.IsNullOrEmpty(endpoint))
+            Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+    }
+
+    /// <summary>If the SQL looks like a write and the gate is on, show the confirm-modal first;
+    /// otherwise run directly. (Read-only goes straight through; writes with the gate off are blocked
+    /// further down by Core's <see cref="Daxter.Core.Sql.SqlWriteGate"/> with a clear error.)</summary>
+    private async Task AskRunOrRun()
+    {
+        if (string.IsNullOrWhiteSpace(sql) || !HasEndpoint) return;
+        if (Ui.WritesEnabled && !Daxter.Core.Sql.SqlWriteGate.IsReadOnly(sql))
+        {
+            pendingWrite = sql;
+            return;
+        }
+        await RunQuery();
+    }
+
+    private async Task ConfirmRunWrite()
+    {
+        pendingWrite = null;
+        await RunQuery();
+    }
+
+    private async Task RunQuery()
+    {
+        var ep = SelectedEndpoint();
+        if (ep is null) { error = "Pick a SQL endpoint first."; return; }
+        busy = true; BusyState.Begin(); error = null; result = null; StateHasChanged();
+        try
+        {
+            result = await Ui.SqlQueryAsync(ep.Server, ep.Database, sql);
+            Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    /// <summary>Ctrl+Enter (or Cmd+Enter on macOS) runs the query — matches the DAX editor convention.</summary>
+    private async Task OnEditorKey(KeyboardEventArgs e)
+    {
+        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "Enter", StringComparison.OrdinalIgnoreCase))
+        {
+            await AskRunOrRun();
+        }
+    }
+
+    private static List<string> ColumnValues(QueryResult r, string column)
+    {
+        var idx = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        if (idx < 0) return new();
+        return r.Rows.Select(row => row[idx]?.ToString() ?? "")
+                     .Where(s => s.Length > 0).OrderBy(s => s).ToList();
+    }
+}

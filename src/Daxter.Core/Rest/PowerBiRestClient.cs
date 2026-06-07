@@ -391,6 +391,60 @@ public sealed class PowerBiRestClient : IDisposable
         return new QueryResult(columns, rows);
     }
 
+    /// <summary>All Fabric SQL endpoints in a workspace — every Warehouse and every Lakehouse's SQL
+    /// analytics endpoint — flattened into one table the picker can show as
+    /// "&lt;name&gt; (Warehouse | Lakehouse)". Read-only; the caller needs only workspace read.
+    /// Columns: <c>name, server, database, kind</c>. The server is the fully-qualified TDS hostname
+    /// (e.g. <c>&lt;ws&gt;.datawarehouse.fabric.microsoft.com</c>); the database is what
+    /// <c>SqlConnection.InitialCatalog</c> targets — the warehouse display name for warehouses, the
+    /// lakehouse name for lakehouse SQL endpoints.</summary>
+    public async Task<QueryResult> SqlEndpointsAsync(string workspaceId, CancellationToken ct = default)
+    {
+        string[] columns = ["name", "server", "database", "kind"];
+        var rows = new List<object?[]>();
+
+        // Warehouses: properties.connectionInfo carries the TDS hostname.
+        var whUrl = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/warehouses";
+        using (var req = new HttpRequestMessage(HttpMethod.Get, whUrl))
+        {
+            var root = await SendJsonAsync(req, ct);
+            foreach (var item in Value(root).EnumerateArray())
+            {
+                var props = item.TryGetProperty("properties", out var p) && p.ValueKind == JsonValueKind.Object ? p : default;
+                var name = Str(item, "displayName") ?? "";
+                var server = Str(props, "connectionInfo") ?? "";
+                if (string.IsNullOrEmpty(server)) continue;   // not provisioned yet
+                rows.Add([name, server, name, "Warehouse"]);
+            }
+        }
+
+        // Lakehouses: each lakehouse exposes a SQL analytics endpoint under
+        // properties.sqlEndpointProperties.{connectionString, id, provisioningStatus}. The database
+        // name on that endpoint is the lakehouse name itself.
+        var lhUrl = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/lakehouses";
+        using (var req = new HttpRequestMessage(HttpMethod.Get, lhUrl))
+        {
+            var root = await SendJsonAsync(req, ct);
+            foreach (var item in Value(root).EnumerateArray())
+            {
+                var props = item.TryGetProperty("properties", out var p) && p.ValueKind == JsonValueKind.Object ? p : default;
+                var sep = props.ValueKind == JsonValueKind.Object && props.TryGetProperty("sqlEndpointProperties", out var s)
+                    && s.ValueKind == JsonValueKind.Object ? s : default;
+                var name = Str(item, "displayName") ?? "";
+                var server = Str(sep, "connectionString") ?? "";
+                var status = Str(sep, "provisioningStatus") ?? "";
+                if (string.IsNullOrEmpty(server)) continue;
+                if (!string.IsNullOrEmpty(status) && !string.Equals(status, "Success", StringComparison.OrdinalIgnoreCase))
+                    continue;   // not yet usable — skip rather than fail the whole list
+                rows.Add([name, server, name, "Lakehouse"]);
+            }
+        }
+
+        // Sort alphabetically — same convention every DAXter picker uses (see UI contract).
+        rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a[0]?.ToString(), b[0]?.ToString()));
+        return new QueryResult(columns, rows);
+    }
+
     // ---- take ownership + gateway binding (service-level config; XMLA can't do these) ----
 
     /// <summary>Takes over ownership of a dataset in a workspace (the "owner left" flow) — required

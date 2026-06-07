@@ -11,6 +11,7 @@ using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
 using Daxter.Core.Scheduling;
+using Daxter.Core.Sql;
 
 namespace Daxter.Cli;
 
@@ -93,6 +94,7 @@ internal static class Program
         var wsCommand = BuildWorkspaceCommand(connectionOptions, outputOption);
         var testRlsCommand = BuildTestRlsCommand(connectionOptions, outputOption);
         var pipelineCommand = BuildPipelineCommand(connectionOptions, outputOption);
+        var sqlCommand = BuildSqlCommand(connectionOptions, outputOption, fileOption);
 
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
@@ -105,7 +107,8 @@ internal static class Program
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, mcpCommand, webCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand,
+            mcpCommand, webCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -1136,6 +1139,110 @@ internal static class Program
 
     private static ITokenProvider BuildTokenProvider(DaxterConfig config)
         => new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
+
+    private static MsalTokenProvider BuildMsalProvider(DaxterConfig config)
+        => new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
+
+    // ---- SQL: Fabric Warehouse / Lakehouse SQL endpoint ----
+
+    private static Command BuildSqlCommand(
+        ConnectionOptions connectionOptions, Option<string> outputOption, Option<string?> fileOption)
+    {
+        // daxter sql endpoints --workspace W
+        // Lists Warehouses + Lakehouse SQL endpoints in a workspace (so users see real options, not
+        // GUID hostnames). Read-only Fabric REST — no SQL token needed for discovery.
+        var endpoints = new Command("endpoints", "List Fabric SQL endpoints in a workspace (Warehouses + Lakehouse SQL).")
+            { outputOption };
+        connectionOptions.AddTo(endpoints);
+        endpoints.SetAction((pr, ct) => RunRestQueryAsync(
+            () => connectionOptions.Resolve(pr, requireWorkspace: true),
+            () => pr.GetValue(outputOption),
+            async (rest, cfg, c) => await rest.SqlEndpointsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c),
+            ct));
+
+        // daxter sql query --workspace W --endpoint NAME --query "SELECT TOP 10 …" [--file path]
+        // Runs T-SQL on the SQL endpoint named NAME (matched against the discovery list, so the user
+        // types the warehouse/lakehouse name, not its GUID hostname). Reuses the user's signed-in
+        // MSAL account for a silent database.windows.net token. Read-only by default; --allow-writes
+        // (matching the Web 'Allow writes' gate) lets non-SELECT statements through.
+        var endpointOpt = new Option<string?>("--endpoint")
+            { Description = "Warehouse or Lakehouse name (from `sql endpoints`)." };
+        var serverOpt = new Option<string?>("--server")
+            { Description = "Override server hostname (skips discovery — e.g. <ws>.datawarehouse.fabric.microsoft.com)." };
+        var databaseOpt = new Option<string?>("--database")
+            { Description = "Override database name (warehouse / lakehouse) — used with --server." };
+        var queryArg = new Argument<string?>("query")
+            { Description = "T-SQL to execute. Optional when --file is used.", Arity = ArgumentArity.ZeroOrOne };
+        var allowWritesOpt = new Option<bool>("--allow-writes")
+            { Description = "Allow non-SELECT statements (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC/…)." };
+
+        var query = new Command("query", "Run T-SQL on a Fabric SQL endpoint.")
+            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt };
+        connectionOptions.AddTo(query);
+        query.SetAction((pr, ct) => RunSqlQueryAsync(
+            () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(serverOpt) is null),
+            () => QueryTextFrom(pr, queryArg, fileOption),
+            pr.GetValue(endpointOpt),
+            pr.GetValue(serverOpt),
+            pr.GetValue(databaseOpt),
+            () => pr.GetValue(outputOption),
+            pr.GetValue(allowWritesOpt),
+            ct));
+
+        return new Command("sql",
+            "Fabric Warehouse / Lakehouse SQL endpoint — list endpoints, run T-SQL.")
+        {
+            endpoints, query,
+        };
+    }
+
+    /// <summary>Runs a T-SQL query against a Fabric SQL endpoint. Resolves the (server, database)
+    /// either from <paramref name="server"/>/<paramref name="database"/> (explicit override) or by
+    /// looking up <paramref name="endpointName"/> in the workspace's endpoint discovery list — so the
+    /// user can pass a friendly name instead of the GUID hostname.</summary>
+    private static async Task<int> RunSqlQueryAsync(
+        Func<DaxterConfig> configFactory, Func<string> sqlFactory,
+        string? endpointName, string? server, string? database,
+        Func<string?> outputFactory, bool allowWrites, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            var sql = sqlFactory();
+            var msal = BuildMsalProvider(config);
+
+            // Resolve endpoint -> (server, database).
+            if (string.IsNullOrWhiteSpace(server))
+            {
+                if (string.IsNullOrWhiteSpace(endpointName))
+                    throw new DaxterException("Pass --endpoint <name> (from `daxter sql endpoints`) or --server + --database.");
+                using var rest = new PowerBiRestClient(msal);
+                var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+                var list = await rest.SqlEndpointsAsync(groupId, ct);
+                var match = list.Rows.FirstOrDefault(r =>
+                    string.Equals(r[0]?.ToString(), endpointName, StringComparison.OrdinalIgnoreCase));
+                if (match is null)
+                    throw new DaxterException(
+                        $"Endpoint '{endpointName}' not found in '{config.Workspace}'. Run `daxter sql endpoints` to see what's available.");
+                server = match[1]?.ToString();
+                database ??= match[2]?.ToString();
+            }
+            if (string.IsNullOrWhiteSpace(database))
+                throw new DaxterException("--database is required when --server is passed without --endpoint.");
+
+            var client = new FabricSqlClient(msal);
+            var result = await client.ExecuteAsync(server!, database!, sql, allowWrites, ct);
+
+            var format = ResultFormatterFactory.Parse(outputFactory());
+            Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
+            Console.Error.WriteLine($"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
 
     private static IXmlaSessionFactory BuildSessionFactory(DaxterConfig config)
         => new AdomdXmlaSessionFactory(config, BuildTokenProvider(config));

@@ -20,11 +20,17 @@ public sealed record DeviceLogin(
 /// client-credentials flow (service principal). This is the Mac-supported path:
 /// ADOMD.NET's built-in interactive login only works on Windows.
 /// </summary>
-public sealed class MsalTokenProvider : ITokenProvider
+public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
 {
     /// <summary>The resource scope for Power BI / Azure Analysis Services.</summary>
     public static readonly string[] Scopes =
         ["https://analysis.windows.net/powerbi/api/.default"];
+
+    /// <summary>The resource scope for Fabric Warehouse / Lakehouse SQL endpoints (TDS over AAD).
+    /// Same MSAL account as <see cref="Scopes"/>; the token is acquired silently from the cache,
+    /// so the user signs in once for everything DAXter does.</summary>
+    public static readonly string[] FabricSqlScopes =
+        ["https://database.windows.net/.default"];
 
     private static readonly TimeSpan ExpirySkew = TimeSpan.FromMinutes(5);
 
@@ -34,6 +40,8 @@ public sealed class MsalTokenProvider : ITokenProvider
     private readonly bool _allowInteractive;
 
     private XmlaAccessToken? _cached;
+    // Second-scope cache (Fabric SQL endpoint). Same account, different audience.
+    private XmlaAccessToken? _cachedSql;
 
     public MsalTokenProvider(
         DaxterConfig config,
@@ -63,8 +71,8 @@ public sealed class MsalTokenProvider : ITokenProvider
         try
         {
             var result = _config.AuthMode == AuthMode.ServicePrincipal
-                ? await AcquireForServicePrincipalAsync(cancellationToken)
-                : await AcquireForUserAsync(cancellationToken);
+                ? await AcquireForServicePrincipalAsync(Scopes, cancellationToken)
+                : await AcquireForUserAsync(Scopes, cancellationToken);
 
             var acquired = new XmlaAccessToken(result.AccessToken, result.ExpiresOn);
             _cached = acquired;
@@ -77,7 +85,39 @@ public sealed class MsalTokenProvider : ITokenProvider
         }
     }
 
-    private async Task<AuthenticationResult> AcquireForServicePrincipalAsync(CancellationToken ct)
+    /// <summary>Returns a valid token for the <b>Fabric SQL endpoint</b> scope
+    /// (<c>https://database.windows.net/.default</c>) — used by <c>SqlConnection.AccessToken</c>
+    /// to query a Warehouse or Lakehouse SQL endpoint over TDS. Reuses the same MSAL account that
+    /// the XMLA/REST surface already signed in (silent from the cache); if the cache is empty the
+    /// device-code prompt runs the same way the XMLA path does. Service-principal mode goes through
+    /// AcquireTokenForClient with the SQL scope.</summary>
+    public async Task<XmlaAccessToken> GetFabricSqlTokenAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cachedSql is { } token && !token.IsExpired(ExpirySkew))
+        {
+            return token;
+        }
+
+        _config.Validate();
+
+        try
+        {
+            var result = _config.AuthMode == AuthMode.ServicePrincipal
+                ? await AcquireForServicePrincipalAsync(FabricSqlScopes, cancellationToken)
+                : await AcquireForUserAsync(FabricSqlScopes, cancellationToken);
+
+            var acquired = new XmlaAccessToken(result.AccessToken, result.ExpiresOn);
+            _cachedSql = acquired;
+            return acquired;
+        }
+        catch (MsalException ex)
+        {
+            throw new DaxterException(
+                $"Fabric SQL authentication failed ({ex.ErrorCode}): {ex.Message}", ex);
+        }
+    }
+
+    private async Task<AuthenticationResult> AcquireForServicePrincipalAsync(string[] scopes, CancellationToken ct)
     {
         var app = ConfidentialClientApplicationBuilder
             .Create(_config.ClientId)
@@ -85,20 +125,21 @@ public sealed class MsalTokenProvider : ITokenProvider
             .WithAuthority(AuthorityFor(_config.TenantId))
             .Build();
 
-        return await app.AcquireTokenForClient(Scopes).ExecuteAsync(ct);
+        return await app.AcquireTokenForClient(scopes).ExecuteAsync(ct);
     }
 
-    private async Task<AuthenticationResult> AcquireForUserAsync(CancellationToken ct)
+    private async Task<AuthenticationResult> AcquireForUserAsync(string[] scopes, CancellationToken ct)
     {
         var app = await BuildUserAppAsync();
 
-        // Try the cache first so a previously signed-in user isn't re-prompted.
+        // Try the cache first so a previously signed-in user isn't re-prompted. Same MSAL account
+        // serves every DAXter scope — XMLA/REST first, Fabric SQL silently from the same account.
         var account = (await app.GetAccountsAsync()).FirstOrDefault();
         if (account is not null)
         {
             try
             {
-                return await app.AcquireTokenSilent(Scopes, account).ExecuteAsync(ct);
+                return await app.AcquireTokenSilent(scopes, account).ExecuteAsync(ct);
             }
             catch (MsalUiRequiredException)
             {
@@ -114,7 +155,7 @@ public sealed class MsalTokenProvider : ITokenProvider
         }
 
         return await app
-            .AcquireTokenWithDeviceCode(Scopes, _deviceCodeCallback)
+            .AcquireTokenWithDeviceCode(scopes, _deviceCodeCallback)
             .ExecuteAsync(ct);
     }
 

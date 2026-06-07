@@ -10,6 +10,7 @@ using Daxter.Core.Connection;
 using Daxter.Core.Editing;
 using Daxter.Core.Export;
 using Daxter.Core.Formatting;
+using Daxter.Core.Sql;
 using Daxter.Core.Maintenance;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
@@ -549,6 +550,67 @@ internal static class DaxterToolRuntime
         // Headless: never block on an interactive device-code prompt the user can't see —
         // normal tools require a token cached by `daxter_login`. Device-code prompt → stderr.
         => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
+
+    // Same MsalTokenProvider instance type — it implements both ITokenProvider (XMLA/REST scope) and
+    // IFabricSqlTokenProvider (database.windows.net scope). One MSAL account underneath; the user
+    // signs in once via daxter_login and the SQL tools silently get a SQL-scope token.
+    private static MsalTokenProvider MsalProvider(DaxterConfig config)
+        => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: false);
+
+    // ---- Fabric SQL endpoints ----
+
+    /// <summary>Lists Fabric SQL endpoints (Warehouses + Lakehouse SQL endpoints) in a workspace via
+    /// Fabric REST. Read-only; no SQL token needed for discovery.</summary>
+    public static Task<string> SqlEndpointsAsync(string? workspace, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = Config(workspace, null);
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            return Format(await rest.SqlEndpointsAsync(groupId, ct));
+        });
+
+    /// <summary>Runs T-SQL on a Fabric SQL endpoint. Resolves (server, database) from the workspace
+    /// + endpoint name via <see cref="PowerBiRestClient.SqlEndpointsAsync"/> (so the caller passes the
+    /// friendly name, not the GUID hostname). Read-only T-SQL runs unconditionally; non-read T-SQL is
+    /// gated by <see cref="WritesAllowed"/> the same way the model-mutating tools are — there's no
+    /// "set this for SQL only" mode. Production-target block applies too.</summary>
+    public static Task<string> SqlQueryAsync(
+        string? workspace, string endpointName, string sql, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(endpointName))
+                throw new DaxterException("endpoint is required (the Warehouse or Lakehouse name — see daxter_sql_endpoints).");
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new DaxterException("sql is required.");
+
+            var config = Config(workspace, null);
+            var isRead = SqlWriteGate.IsReadOnly(sql);
+            if (!isRead && !WritesAllowed())
+                return "REFUSED — this statement is not read-only and writes are disabled. " +
+                       "Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
+            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked())
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+
+            var msal = MsalProvider(config);
+
+            // Resolve endpoint -> (server, database) via Fabric REST so the agent didn't have to
+            // know the GUID hostname.
+            using var rest = new PowerBiRestClient(msal);
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            var list = await rest.SqlEndpointsAsync(groupId, ct);
+            var match = list.Rows.FirstOrDefault(r =>
+                string.Equals(r[0]?.ToString(), endpointName, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+                throw new DaxterException(
+                    $"Endpoint '{endpointName}' not found in '{config.Workspace}'. Call daxter_sql_endpoints to list available endpoints.");
+
+            var server = match[1]?.ToString() ?? "";
+            var database = match[2]?.ToString() ?? "";
+            var client = new FabricSqlClient(msal);
+            var result = await client.ExecuteAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), ct);
+            return Format(result);
+        });
 
     /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
     private static DaxterConfig TenantConfig() => DaxterConfig.FromEnvironment(requireWorkspace: false);

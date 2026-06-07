@@ -643,4 +643,29 @@ public static class DaxterTools
         [Description("Actually apply (default false = dry run).")] bool execute = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.ModelEditAsync(workspace, dataset, svc => svc.Raw(tmsl), execute, ct);
+
+    // ---- Fabric SQL endpoints (Warehouse + Lakehouse SQL analytics endpoint) ----
+
+    [McpServerTool(Name = "daxter_sql_endpoints", ReadOnly = true, Title = "List Fabric SQL endpoints"),
+     Description("List every Fabric SQL endpoint in a workspace — each Warehouse and each Lakehouse's SQL analytics endpoint — " +
+                 "with name, server (TDS hostname), database, and kind (Warehouse | Lakehouse). " +
+                 "Call this FIRST to discover targets for daxter_sql_query; you pass the friendly name back, no GUID hostname required.")]
+    public static Task<string> SqlEndpoints(
+        [Description("Workspace name or id (optional; defaults to server config).")] string? workspace = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.SqlEndpointsAsync(workspace, ct);
+
+    [McpServerTool(Name = "daxter_sql_query", ReadOnly = true, Title = "Run T-SQL on a Fabric SQL endpoint"),
+     Description("Run T-SQL on a Fabric Warehouse or Lakehouse SQL endpoint. Pass the workspace and the endpoint NAME " +
+                 "(from daxter_sql_endpoints) — the tool resolves the server + database for you. " +
+                 "Authenticates with the same MSAL account daxter_login signs in (no separate sign-in for SQL). " +
+                 "READ-ONLY by default — SELECT/EXPLAIN/SHOW/CTE-feeding-SELECT runs unconditionally. " +
+                 "INSERT/UPDATE/DELETE/MERGE/DDL/EXEC is REFUSED unless the writes gate is on " +
+                 "(Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) AND the workspace doesn't look like PROD.")]
+    public static Task<string> SqlQuery(
+        [Description("Workspace name or id.")] string workspace,
+        [Description("Warehouse or Lakehouse name (from daxter_sql_endpoints).")] string endpoint,
+        [Description("T-SQL statement(s).")] string sql,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.SqlQueryAsync(workspace, endpoint, sql, ct);
 }

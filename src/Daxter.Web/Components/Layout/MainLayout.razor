@@ -28,6 +28,7 @@
         <NavLink href="audit">Audit</NavLink>
         <NavLink href="model-edit">Model Edit</NavLink>
         <NavLink href="connections">Connections</NavLink>
+        <NavLink href="sql">SQL</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -44,6 +45,7 @@
             UsageStore.ExploreContext => " · Explore",
             UsageStore.ModelEditContext => " · Model Edit",
             UsageStore.ConnectionsContext => " · Connections",
+            UsageStore.SqlContext => " · SQL",
             _ => "" })</div>
 
         @if (context is null)
@@ -74,6 +76,7 @@
                 <div class="side-h">@(context switch {
                     UsageStore.PipelineContext => "Models",
                     UsageStore.AuditContext => "Pipelines",
+                    UsageStore.SqlContext => "SQL endpoints",
                     _ => "Datasets" })</div>
                 @foreach (var d in dsTop)
                 {
@@ -88,6 +91,13 @@
                     {
                         <a class="side-item" href="@($"audit?pipeline={Uri.EscapeDataString(d.Parent ?? "")}")" title="@d.Name">
                             <span class="side-name"><span class="nm">@d.Name</span></span>
+                            <span class="side-count">@d.Count</span>
+                        </a>
+                    }
+                    else if (context == UsageStore.SqlContext)
+                    {
+                        <a class="side-item" href="@($"sql?ws={Uri.EscapeDataString(d.Parent ?? "")}&ep={Uri.EscapeDataString(d.Name)}")" title="@($"{d.Name} — in workspace “{d.Parent}”")">
+                            <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@d.Parent</small></span>
                             <span class="side-count">@d.Count</span>
                         </a>
                     }
@@ -247,6 +257,7 @@
             "audit" => UsageStore.AuditContext,
             "model-edit" => UsageStore.ModelEditContext,
             "connections" => UsageStore.ConnectionsContext,
+            "sql" => UsageStore.SqlContext,
             _ => null,
         };
     }

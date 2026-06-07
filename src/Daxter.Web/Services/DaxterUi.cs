@@ -7,6 +7,7 @@ using Daxter.Core.Editing;
 using Daxter.Core.Metadata;
 using Daxter.Core.Query;
 using Daxter.Core.Rest;
+using Daxter.Core.Sql;
 using Microsoft.Extensions.Logging;
 
 namespace Daxter.Web.Services;
@@ -49,6 +50,13 @@ public sealed class DaxterUi
     public bool IsProductionTarget(string ws, string ds) => _state.ToConfig(ws, ds).IsProductionTarget();
 
     private static ITokenProvider Provider(DaxterConfig config, bool interactive = false)
+        => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: interactive);
+
+    // MsalTokenProvider implements BOTH ITokenProvider (XMLA/REST) and IFabricSqlTokenProvider
+    // (database.windows.net scope for Fabric SQL endpoints). The SQL surface needs the second face.
+    // Same MSAL account underneath, so signing in once for the XMLA/REST surface silently entitles
+    // every SQL call too — no second device-code prompt.
+    private static IFabricSqlTokenProvider SqlProvider(DaxterConfig config, bool interactive = false)
         => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: interactive);
 
     /// <summary>Status-page checks: config, token/sign-in, REST reachability, and an XMLA round-trip.</summary>
@@ -430,6 +438,42 @@ public sealed class DaxterUi
         if (cfg.IsProductionTarget())
             throw new DaxterException($"Refusing to {what} on a production target ('{cfg.Workspace}').");
     }
+
+    // ---- Fabric SQL endpoints (Warehouse + Lakehouse SQL analytics endpoint) ----
+
+    /// <summary>Every SQL endpoint in a workspace — every Warehouse and every Lakehouse SQL endpoint
+    /// — for the Sql page's endpoint picker. Returns null on failure so the page can show an empty
+    /// dropdown instead of an error banner.</summary>
+    public async Task<QueryResult?> SqlEndpointsAsync(string ws, CancellationToken ct = default)
+    {
+        try
+        {
+            return await Track("sql-endpoints", ws, async () =>
+            {
+                using var rest = new PowerBiRestClient(Provider(Config()));
+                var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+                return await rest.SqlEndpointsAsync(groupId, ct);
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "SQL endpoints list unavailable for workspace '{Ws}'", ws);
+            return null;
+        }
+    }
+
+    /// <summary>Runs <paramref name="sql"/> on the Fabric SQL endpoint at <paramref name="server"/> /
+    /// <paramref name="database"/> and returns the first result set. Read-only T-SQL runs unconditionally;
+    /// any non-read statement requires the Allow-writes gate (same toggle that gates model edits) — the
+    /// SQL page wraps the call with the standard confirm modal when that gate is on. Offloaded to a
+    /// pool thread so the busy overlay paints (Microsoft.Data.SqlClient's open/execute are sync at the
+    /// TDS layer and would otherwise block the Blazor circuit).</summary>
+    public Task<QueryResult> SqlQueryAsync(string server, string database, string sql, CancellationToken ct = default)
+        => Track("sql-query", $"{server}/{database}", () => Task.Run(async () =>
+        {
+            var client = new FabricSqlClient(SqlProvider(Config()));
+            return await client.ExecuteAsync(server, database, sql, allowWrite: _state.AllowWrites, ct);
+        }, ct));
 
     public Task<QueryResult> PipelinesAsync(CancellationToken ct = default)
         => Track("pipelines", null, async () =>

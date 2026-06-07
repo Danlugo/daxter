@@ -26,6 +26,7 @@ public sealed class UsageStore
     public const string AuditContext = "audit";
     public const string ModelEditContext = "model-edit";
     public const string ConnectionsContext = "connections";
+    public const string SqlContext = "sql";
 
     private const int MaxItems = 500;
 

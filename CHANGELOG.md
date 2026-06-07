@@ -6,6 +6,38 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-06-07
+
+### Added
+- **T-SQL against Fabric SQL endpoints (Warehouses + Lakehouse SQL analytics endpoints).** New
+  capability across all three surfaces — same MSAL account as the rest of DAXter, so signing in once
+  via `daxter_login` silently entitles SQL too (no second device-code prompt, no service principal).
+  Authenticates via `SqlConnection.AccessToken` with a token acquired for the
+  `https://database.windows.net/.default` scope.
+  - **Web** — new **/sql** page: workspace picker → SQL-endpoint picker (`SearchableSelect` Options
+    mode showing `name (Warehouse|Lakehouse)`, binding the endpoint) → SQL editor (Ctrl/Cmd-Enter
+    runs) → `ResultGrid` with Export CSV. Own `SqlContext` Frequent sidebar group (page-scoped
+    history per UI contract), deep-link `?ws=&ep=`, busy overlay, confirm-modal on writes.
+  - **CLI** — `daxter sql endpoints --workspace W` lists Warehouses + Lakehouse SQL endpoints in a
+    workspace; `daxter sql query --workspace W --endpoint NAME --query "…"` (or `--file`) runs the
+    statement. `--allow-writes` lets non-SELECT through; otherwise read-only. `--server` /
+    `--database` override the discovery lookup.
+  - **MCP** — `daxter_sql_endpoints` (read-only, list endpoints) and `daxter_sql_query` (run T-SQL).
+    Read-only T-SQL runs unconditionally; non-read T-SQL is REFUSED unless the writes gate is on AND
+    the workspace doesn't look like PROD — same rule as every other writing tool. Surfaced in
+    `daxter_capabilities` automatically.
+- **`Daxter.Core.Sql.FabricSqlClient`** — thin T-SQL client (Microsoft.Data.SqlClient) that takes a
+  `(server, database, sql)` and materializes the first result set as the same `QueryResult` every
+  DAXter surface already renders. `MsalTokenProvider.GetFabricSqlTokenAsync` shares the cached MSAL
+  account so the token comes silently.
+- **`Daxter.Core.Sql.SqlWriteGate`** — light classifier deciding read-only vs write so the same gate
+  applies on the Web, the CLI, and the MCP tool (catches CTE-feeding-INSERT and mixed batches).
+
+### Changed
+- `MsalTokenProvider` now implements `IFabricSqlTokenProvider` and exposes `FabricSqlScopes`. The
+  existing XMLA/REST token flow is unchanged — the SQL scope is a separate cache entry on the same
+  MSAL account.
+
 ## [1.24.1] - 2026-06-06
 
 ### Added
