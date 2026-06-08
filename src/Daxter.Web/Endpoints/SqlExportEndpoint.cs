@@ -2,6 +2,7 @@ using System.Text;
 using Daxter.Core;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
+using Daxter.Core.Formatting;
 using Daxter.Core.Rest;
 using Daxter.Core.Sql;
 using Daxter.Web.Services;
@@ -26,6 +27,8 @@ public static class SqlExportEndpoint
         [FromForm] string workspace,
         [FromForm] string endpoint,
         [FromForm] string sql,
+        [FromForm] string? quoteAll,                          // "on" when the checkbox is checked
+        [FromForm] string? crlf,                              // "on" when the checkbox is checked
         ConfigState state,
         HttpResponse response,
         HttpContext ctx,
@@ -38,6 +41,12 @@ public static class SqlExportEndpoint
             await response.WriteAsync("workspace, endpoint, and sql are required.", ct);
             return;
         }
+
+        // HTML checkboxes submit as "on" when checked, omitted otherwise. Treat any non-empty
+        // truthy-looking value as on so a programmatic caller can also send quoteAll=true / =1.
+        var style = new CsvStyle(
+            QuoteAll: IsTruthy(quoteAll),
+            Crlf: IsTruthy(crlf));
 
         // Same gate as the live-query path — read-only by default, only Allow-writes lets non-SELECT
         // through. Exporting a DELETE/MERGE result set makes no sense anyway, but consistency matters.
@@ -94,9 +103,9 @@ public static class SqlExportEndpoint
         try
         {
             var client = new FabricSqlClient(msal);
-            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite, writer, ct);
-            log.LogInformation("SQL export complete: {Rows} rows → {Filename} ({Workspace}/{Endpoint})",
-                rows, filename, workspace, endpoint);
+            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite, writer, ct, style: style);
+            log.LogInformation("SQL export complete: {Rows} rows → {Filename} ({Workspace}/{Endpoint}) style=QuoteAll:{QuoteAll}/Crlf:{Crlf}",
+                rows, filename, workspace, endpoint, style.QuoteAll, style.Crlf);
         }
         catch (OperationCanceledException)
         {
@@ -115,6 +124,14 @@ public static class SqlExportEndpoint
             catch { /* connection might already be dead */ }
         }
     }
+
+    /// <summary>HTML checkboxes submit as <c>"on"</c>; programmatic callers might pass
+    /// <c>"true"</c> / <c>"1"</c>. Accept any of them as "yes".</summary>
+    private static bool IsTruthy(string? v) => !string.IsNullOrEmpty(v) && v switch
+    {
+        "on" or "true" or "True" or "TRUE" or "1" or "yes" or "Yes" or "YES" => true,
+        _ => false,
+    };
 
     /// <summary>Strip filesystem-hostile chars from the suggested download filename. Same rules a
     /// Windows save dialog would silently apply, done explicitly so Mac/Linux clients get a sane

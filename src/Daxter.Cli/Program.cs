@@ -1191,9 +1191,13 @@ internal static class Program
             { Description = "Allow non-SELECT statements (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC/…)." };
         var outFileOpt = new Option<string?>("--out")
             { Description = "Stream the full result set as CSV to this file path (no in-memory materialization — safe for SELECT * on huge tables). When set, --output is ignored." };
+        var quoteAllOpt = new Option<bool>("--quote-all")
+            { Description = "Wrap every CSV field in quotes (matches Power BI / Excel \"Export data\" style). Default off = RFC 4180 (quote-when-needed). Only meaningful with --out." };
+        var crlfOpt = new Option<bool>("--crlf")
+            { Description = "End each CSV line with CRLF (\\r\\n) instead of LF (\\n). Excel-on-Windows convention. Only meaningful with --out." };
 
         var query = new Command("query", "Run T-SQL on a Fabric SQL endpoint.")
-            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt };
+            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt, quoteAllOpt, crlfOpt };
         connectionOptions.AddTo(query);
         query.SetAction((pr, ct) => RunSqlQueryAsync(
             () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(serverOpt) is null),
@@ -1204,6 +1208,8 @@ internal static class Program
             () => pr.GetValue(outputOption),
             pr.GetValue(allowWritesOpt),
             pr.GetValue(outFileOpt),
+            pr.GetValue(quoteAllOpt),
+            pr.GetValue(crlfOpt),
             ct));
 
         // daxter sql objects --workspace W --endpoint NAME
@@ -1287,7 +1293,8 @@ internal static class Program
     private static async Task<int> RunSqlQueryAsync(
         Func<DaxterConfig> configFactory, Func<string> sqlFactory,
         string? endpointName, string? server, string? database,
-        Func<string?> outputFactory, bool allowWrites, string? outFile, CancellationToken ct)
+        Func<string?> outputFactory, bool allowWrites, string? outFile,
+        bool quoteAll, bool crlf, CancellationToken ct)
     {
         try
         {
@@ -1320,10 +1327,12 @@ internal static class Program
             // of row count; the grid in --output table mode would OOM on millions of rows.
             if (!string.IsNullOrWhiteSpace(outFile))
             {
+                var style = new Daxter.Core.Formatting.CsvStyle(QuoteAll: quoteAll, Crlf: crlf);
                 await using var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read);
                 await using var sw = new StreamWriter(fs);
-                var rows = await client.StreamCsvAsync(server!, database!, sql, allowWrites, sw, ct);
-                Console.Error.WriteLine($"Wrote {rows} row{(rows == 1 ? "" : "s")} to {outFile}.");
+                var rows = await client.StreamCsvAsync(server!, database!, sql, allowWrites, sw, ct, style: style);
+                Console.Error.WriteLine($"Wrote {rows} row{(rows == 1 ? "" : "s")} to {outFile}" +
+                    (quoteAll || crlf ? $" (QuoteAll:{quoteAll}, CRLF:{crlf})." : "."));
                 return 0;
             }
 

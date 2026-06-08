@@ -143,6 +143,12 @@
                     title="Stream the FULL result set straight to a .csv download — bypasses the in-browser grid, so SELECT * on a huge table is OK.">
                 ⬇ Export All CSV
             </button>
+            <label class="muted" style="display:inline-flex; align-items:center; gap:.25rem; font-size:.85rem;" title="Wrap every field in quotes (matches Power BI / Excel “Export data” style).">
+                <input type="checkbox" @bind="exportQuoteAll" /> Quote-all
+            </label>
+            <label class="muted" style="display:inline-flex; align-items:center; gap:.25rem; font-size:.85rem;" title="End lines with CRLF (Windows / Excel) instead of LF.">
+                <input type="checkbox" @bind="exportCrlf" /> CRLF
+            </label>
             <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
             <span class="muted dax-hint">
                 Tip: click an object on the left to insert it · Ctrl+Enter runs · read-only by default.
@@ -156,6 +162,9 @@
             <input type="hidden" name="workspace" value="@workspace" />
             <input type="hidden" name="endpoint" value="@endpoint" />
             <input type="hidden" name="sql" value="@sql" />
+            @* Endpoint reads "on" as the truthy value (HTML-form convention) — only render when on. *@
+            @if (exportQuoteAll) { <input type="hidden" name="quoteAll" value="on" /> }
+            @if (exportCrlf) { <input type="hidden" name="crlf" value="on" /> }
         </form>
 
         <div class="sql-edit">
@@ -195,6 +204,11 @@
     private string? error;
     private bool busy;
     private string? pendingWrite;
+
+    // ---- Export All format toggles (Web only — CLI/MCP have flags) ----
+    // Defaults match the Run-SQL grid's CSV: RFC 4180 / LF.
+    private bool exportQuoteAll;
+    private bool exportCrlf;
 
     // ---- SQL-scope device-code sign-in (separate from Power BI's) ----
     private DeviceLogin? sqlDevice;

@@ -603,7 +603,8 @@ internal static class DaxterToolRuntime
     /// off the container (or it's already on the host if the volume is host-mounted). Read-only by
     /// default; non-SELECT requires the writes gate same as the live-query path.</summary>
     public static Task<string> SqlExportAsync(
-        string? workspace, string endpointName, string sql, CancellationToken ct)
+        string? workspace, string endpointName, string sql, CancellationToken ct,
+        bool quoteAll = false, bool crlf = false)
         => Guard(async () =>
         {
             if (string.IsNullOrWhiteSpace(endpointName))
@@ -640,12 +641,14 @@ internal static class DaxterToolRuntime
             var safeEndpoint = string.Join("-", endpointName.Split(Path.GetInvalidFileNameChars()));
             var path = Path.Combine(dir, $"{ts}-{safeEndpoint}.csv");
 
+            var style = new CsvStyle(QuoteAll: quoteAll, Crlf: crlf);
             var client = new FabricSqlClient(msal);
             await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var sw = new StreamWriter(fs);
-            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), sw, ct);
+            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), sw, ct, style: style);
             return $"Wrote {rows} row{(rows == 1 ? "" : "s")} to {path} on the container's persistent volume " +
-                   $"(use `docker cp daxter-mcp-…:{path} ./` to pull it onto your host, or mount the volume to a host path).";
+                   (quoteAll || crlf ? $" (style: QuoteAll={quoteAll}, CRLF={crlf})" : "") +
+                   $" (use `docker cp daxter-mcp-…:{path} ./` to pull it onto your host, or mount the volume to a host path).";
         });
 
     /// <summary>Runs T-SQL on a Fabric SQL endpoint. Resolves (server, database) from the workspace

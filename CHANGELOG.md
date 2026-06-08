@@ -6,6 +6,22 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-06-08
+
+### Added
+- **CSV style options for streaming SQL export** — `quoteAll` and `crlf`, exposed across all surfaces
+  so a DAXter export can match the exact byte format of Power BI / Excel "Export data" output.
+  Notably distinguishes NULL (bare empty, `,,`) from empty-string (`""`) under `quoteAll`, matching
+  Power BI's convention — verified live: a 14,272-row export hand-pulled from Power BI and a DAXter
+  `--quote-all --crlf` export of the same table have identical sorted MD5 hashes.
+  - **Web `/sql`** — two checkboxes next to **⬇ Export All CSV**: *Quote-all* (wraps every field) and
+    *CRLF* (Windows line endings).
+  - **`POST /api/sql/export`** — reads `quoteAll` and `crlf` form fields (`on`/`true`/`1` = yes).
+  - **CLI** — `daxter sql query --out file.csv --quote-all --crlf`.
+  - **MCP** — `daxter_sql_export(workspace, endpoint, sql, quoteAll=false, crlf=false)`.
+  Defaults stay RFC 4180 + LF (clean, what Pandas / DuckDB / sqlmgr emit). New `CsvStyle` record in
+  `Daxter.Core.Formatting` is the single source of truth — surfaces just plumb the flags through.
+
 ## [1.27.1] - 2026-06-08
 
 ### Fixed

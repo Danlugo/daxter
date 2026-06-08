@@ -101,14 +101,17 @@ public sealed class FabricSqlClient
         """;
 
     /// <summary>Runs <paramref name="sql"/> and writes the FIRST result set to <paramref name="output"/>
-    /// as RFC-4180 CSV, row-by-row, NEVER materializing in memory — so a <c>SELECT *</c> against a
+    /// as CSV, row-by-row, NEVER materializing in memory — so a <c>SELECT *</c> against a
     /// multi-million-row table streams straight to disk / the HTTP response without OOM'ing the
     /// container or the Blazor circuit. Returns the row count written (header excluded).
     /// Same write-gate as <see cref="ExecuteAsync"/>: blocks non-SELECT unless <paramref name="allowWrite"/>.
-    /// Flushes every <paramref name="flushEveryRows"/> rows so the browser/disk sees progress.</summary>
+    /// Flushes every <paramref name="flushEveryRows"/> rows so the browser/disk sees progress.
+    /// <paramref name="style"/> controls format — defaults to RFC 4180 + LF; pass
+    /// <see cref="CsvStyle.ExcelWindows"/> for quote-every + CRLF (matches Power BI / Excel exports).</summary>
     public async Task<long> StreamCsvAsync(
         string server, string database, string sql, bool allowWrite,
-        TextWriter output, CancellationToken ct = default, int flushEveryRows = 1000)
+        TextWriter output, CancellationToken ct = default, int flushEveryRows = 1000,
+        CsvStyle style = default)
     {
         ArgumentNullException.ThrowIfNull(output);
         if (string.IsNullOrWhiteSpace(server)) throw new ArgumentException("server is required", nameof(server));
@@ -147,13 +150,17 @@ public sealed class FabricSqlClient
 
         if (reader.FieldCount == 0) return 0;
 
-        // Header.
+        var lineEnd = style.LineEnding;
+        var quoteAll = style.QuoteAll;
+
+        // Header. Field names rarely contain quote/comma, but apply the same rule for symmetry — if
+        // QuoteAll is on we'd want a quoted header too so the file reads as one consistent shape.
         for (var i = 0; i < reader.FieldCount; i++)
         {
             if (i > 0) await output.WriteAsync(',');
-            await output.WriteAsync(CsvResultFormatter.Escape(reader.GetName(i)));
+            await output.WriteAsync(WriteField(reader.GetName(i), quoteAll));
         }
-        await output.WriteAsync('\n');
+        await output.WriteAsync(lineEnd);
 
         long rows = 0;
         while (await reader.ReadAsync(ct))
@@ -164,10 +171,14 @@ public sealed class FabricSqlClient
                 if (!await reader.IsDBNullAsync(i, ct))
                 {
                     var v = reader.GetValue(i);
-                    await output.WriteAsync(CsvResultFormatter.Escape(CsvResultFormatter.Render(v)));
+                    await output.WriteAsync(WriteField(CsvResultFormatter.Render(v), quoteAll));
                 }
+                // NULL: emit nothing (a bare comma → ",,") even in QuoteAll mode. This is the
+                // Power BI / Excel "Export data" convention — it deliberately distinguishes NULL
+                // (bare empty) from empty-string ("") so a downstream consumer can tell the two
+                // apart. Quoting NULL as "" would conflate them.
             }
-            await output.WriteAsync('\n');
+            await output.WriteAsync(lineEnd);
             rows++;
 
             // Flush periodically so the browser / disk sees rows trickling in (and so cancellation
@@ -180,6 +191,14 @@ public sealed class FabricSqlClient
         await output.FlushAsync(ct);
         return rows;
     }
+
+    /// <summary>Picks the right escape rule per <see cref="CsvStyle.QuoteAll"/>. RFC 4180 default
+    /// quotes only when needed; QuoteAll wraps every field unconditionally (with inner-quote
+    /// doubling).</summary>
+    private static string WriteField(string field, bool quoteAll)
+        => quoteAll
+            ? "\"" + field.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
+            : CsvResultFormatter.Escape(field);
 
     private static async Task<QueryResult> MaterializeAsync(SqlDataReader reader, CancellationToken ct)
     {
