@@ -37,6 +37,14 @@ WORKDIR /app
 # Version stamped at build time (CI passes the git tag, e.g. v1.6.3); "dev" for local builds.
 ARG DAXTER_VERSION=dev
 
+# ICU + tzdata: Microsoft.Data.SqlClient REQUIRES real globalization data — calling
+# SqlConnection.OpenAsync in Invariant Mode (the .NET 8 Linux runtime default) throws
+# "Globalization Invariant Mode is not supported." The XMLA/REST stack didn't need this, but
+# the Fabric SQL surface (FabricSqlClient) does. Adding ~30 MB to ship a working SQL endpoint.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libicu72 tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root user with a home directory for the MSAL token cache (~/.daxter).
 RUN groupadd --system daxter \
     && useradd --system --gid daxter --create-home --home-dir /home/daxter daxter \
@@ -47,6 +55,7 @@ COPY --from=build /app .
 
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
     HOME=/home/daxter \
     DAXTER_VERSION=$DAXTER_VERSION
 

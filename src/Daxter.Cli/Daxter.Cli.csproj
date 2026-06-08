@@ -23,7 +23,10 @@
     <RollForward>Major</RollForward>
     <AssemblyName>daxter</AssemblyName>
     <RootNamespace>Daxter.Cli</RootNamespace>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Globalization data IS needed: Microsoft.Data.SqlClient calls into ICU during connection
+         setup (and culture-comparing collations). Leaving InvariantGlobalization on throws
+         "Globalization Invariant Mode is not supported." the moment any SQL endpoint query opens. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
 </Project>

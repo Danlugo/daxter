@@ -6,6 +6,20 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-06-08
+
+### Fixed
+- **`Globalization Invariant Mode is not supported` on every SQL query.** Caught by live-testing
+  v1.27.0's Export All against an 802k-row Fabric lakehouse table. Two compounding causes:
+  1. `Daxter.Cli.csproj` had `<InvariantGlobalization>true</InvariantGlobalization>` (image-size
+     tweak from the XMLA/REST era). Microsoft.Data.SqlClient calls into ICU during
+     `SqlConnection.OpenAsync` and throws under invariant mode. Flipped to `false`.
+  2. Even with the csproj fix, the `dotnet/aspnet:8.0` runtime base image ships without ICU data,
+     and the runtime still forces invariant mode when ICU isn't present. Added `libicu72` +
+     `tzdata` via `apt-get` and set `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false` in the runtime
+     stage. ~30 MB image growth to ship a SQL endpoint that actually opens connections.
+  Verified live: `SELECT * FROM 802k-row table` streams to a 62 MB CSV in ~9.4s with bounded memory.
+
 ## [1.27.0] - 2026-06-08
 
 ### Added
