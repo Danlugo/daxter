@@ -46,4 +46,9 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
+// SQL streaming export — bypasses the Blazor SignalR circuit so multi-million-row downloads don't
+// buffer in the browser. The /sql page POSTs a hidden form here; the response is a streaming CSV
+// download (Content-Disposition: attachment). See SqlExportEndpoint.cs for the implementation.
+Daxter.Web.Endpoints.SqlExportEndpoint.Map(app);
+
 app.Run();

@@ -139,12 +139,24 @@
         <div class="dax-tools">
             @if (!showObjects) { <button class="btn-sm" @onclick="() => showObjects = true" title="Show objects">▸ Objects</button> }
             <button class="btn" @onclick="AskRunOrRun" disabled="@(!HasEndpoint || string.IsNullOrWhiteSpace(sql) || busy)">▶ Run SQL</button>
+            <button class="btn-sm" @onclick="ExportAllAsync" disabled="@(!HasEndpoint || string.IsNullOrWhiteSpace(sql) || busy)"
+                    title="Stream the FULL result set straight to a .csv download — bypasses the in-browser grid, so SELECT * on a huge table is OK.">
+                ⬇ Export All CSV
+            </button>
             <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
             <span class="muted dax-hint">
                 Tip: click an object on the left to insert it · Ctrl+Enter runs · read-only by default.
                 @if (!Ui.WritesEnabled) { <span> · <strong>Writes off</strong> — read queries only.</span> }
             </span>
         </div>
+
+        @* Hidden form the "Export All CSV" button submits — POST to /api/sql/export triggers a
+           streaming browser download. Outside the @code block so it can be submitted from JS. *@
+        <form id="sql-export-form" method="post" action="/api/sql/export" style="display:none;" target="_blank">
+            <input type="hidden" name="workspace" value="@workspace" />
+            <input type="hidden" name="endpoint" value="@endpoint" />
+            <input type="hidden" name="sql" value="@sql" />
+        </form>
 
         <div class="sql-edit">
             <textarea class="dax-editor" @bind="sql" @bind:event="oninput" rows="14"
@@ -478,8 +490,49 @@
     private async Task ConfirmRunWrite()
     {
         pendingWrite = null;
-        await RunQuery();
+        if (pendingWriteIsExport)
+        {
+            pendingWriteIsExport = false;
+            await DoExportAsync();
+        }
+        else
+        {
+            await RunQuery();
+        }
     }
+
+    /// <summary>Triggers the streaming CSV export by submitting the hidden form on the page. The
+    /// /api/sql/export endpoint resolves the workspace + endpoint name and streams the result-set
+    /// CSV straight to the browser as a download — never going through the Blazor SignalR circuit,
+    /// so SELECT * on a million-row table is OK. The form's values are bound to the same workspace /
+    /// endpoint / sql state the editor uses, so what you Run is what you Export.</summary>
+    private async Task ExportAllAsync()
+    {
+        if (!HasEndpoint || string.IsNullOrWhiteSpace(sql)) return;
+        // Best-effort write-gate echo (the endpoint enforces it too) — show the confirm modal first
+        // so the user doesn't kick off a 10-minute MERGE export by accident.
+        if (Ui.WritesEnabled && !Daxter.Core.Sql.SqlWriteGate.IsReadOnly(sql))
+        {
+            pendingWrite = sql;
+            pendingWriteIsExport = true;
+            return;
+        }
+        await DoExportAsync();
+    }
+
+    private async Task DoExportAsync()
+    {
+        try
+        {
+            // Submit the hidden form. target="_blank" means a transient tab is opened to receive the
+            // download — the tab closes itself when the browser saves the .csv. (We can't use
+            // window.location because that would unload the /sql page mid-edit.)
+            await JS.InvokeVoidAsync("eval", "document.getElementById('sql-export-form').submit();");
+        }
+        catch (Exception ex) { error = ex.Message; }
+    }
+
+    private bool pendingWriteIsExport;
 
     private async Task RunQuery()
     {

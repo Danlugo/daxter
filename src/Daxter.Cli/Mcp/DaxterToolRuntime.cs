@@ -596,6 +596,58 @@ internal static class DaxterToolRuntime
             return Format(await client.ListObjectsAsync(server, database, ct));
         });
 
+    /// <summary>Streams a Fabric SQL endpoint's full result set as CSV to a file on the persistent
+    /// token volume (<c>~/.daxter/exports/sql/</c>). Bypasses the in-memory materialization that
+    /// <c>daxter_sql_query</c> uses — safe for <c>SELECT *</c> on multi-million-row tables. Returns
+    /// a status line with the on-disk path and the row count; the user can <c>docker cp</c> the file
+    /// off the container (or it's already on the host if the volume is host-mounted). Read-only by
+    /// default; non-SELECT requires the writes gate same as the live-query path.</summary>
+    public static Task<string> SqlExportAsync(
+        string? workspace, string endpointName, string sql, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(endpointName))
+                throw new DaxterException("endpoint is required (the Warehouse or Lakehouse name — see daxter_sql_endpoints).");
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new DaxterException("sql is required.");
+
+            var config = Config(workspace, null);
+            var isRead = SqlWriteGate.IsReadOnly(sql);
+            if (!isRead && !WritesAllowed())
+                return "REFUSED — this statement is not read-only and writes are disabled. " +
+                       "Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to export it.";
+            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked())
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+
+            var msal = MsalProvider(config);
+            using var rest = new PowerBiRestClient(msal);
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            var list = await rest.SqlEndpointsAsync(groupId, ct);
+            var match = list.Rows.FirstOrDefault(r =>
+                string.Equals(r[0]?.ToString(), endpointName, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+                throw new DaxterException(
+                    $"Endpoint '{endpointName}' not found in '{config.Workspace}'. Call daxter_sql_endpoints first.");
+
+            var server = match[1]?.ToString() ?? "";
+            var database = match[2]?.ToString() ?? "";
+
+            // Persistent volume — survives container restarts and lets the user docker cp off.
+            var home = Environment.GetEnvironmentVariable("HOME") ?? Path.GetTempPath();
+            var dir = Path.Combine(home, ".daxter", "exports", "sql");
+            Directory.CreateDirectory(dir);
+            var ts = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+            var safeEndpoint = string.Join("-", endpointName.Split(Path.GetInvalidFileNameChars()));
+            var path = Path.Combine(dir, $"{ts}-{safeEndpoint}.csv");
+
+            var client = new FabricSqlClient(msal);
+            await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+            await using var sw = new StreamWriter(fs);
+            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), sw, ct);
+            return $"Wrote {rows} row{(rows == 1 ? "" : "s")} to {path} on the container's persistent volume " +
+                   $"(use `docker cp daxter-mcp-…:{path} ./` to pull it onto your host, or mount the volume to a host path).";
+        });
+
     /// <summary>Runs T-SQL on a Fabric SQL endpoint. Resolves (server, database) from the workspace
     /// + endpoint name via <see cref="PowerBiRestClient.SqlEndpointsAsync"/> (so the caller passes the
     /// friendly name, not the GUID hostname). Read-only T-SQL runs unconditionally; non-read T-SQL is

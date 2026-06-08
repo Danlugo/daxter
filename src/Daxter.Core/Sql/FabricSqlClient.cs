@@ -1,4 +1,5 @@
 using Daxter.Core.Auth;
+using Daxter.Core.Formatting;
 using Daxter.Core.Query;
 using Microsoft.Data.SqlClient;
 
@@ -98,6 +99,87 @@ public sealed class FabricSqlClient
           FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'PROCEDURE'
         ORDER BY [schema], [kind], [name]
         """;
+
+    /// <summary>Runs <paramref name="sql"/> and writes the FIRST result set to <paramref name="output"/>
+    /// as RFC-4180 CSV, row-by-row, NEVER materializing in memory — so a <c>SELECT *</c> against a
+    /// multi-million-row table streams straight to disk / the HTTP response without OOM'ing the
+    /// container or the Blazor circuit. Returns the row count written (header excluded).
+    /// Same write-gate as <see cref="ExecuteAsync"/>: blocks non-SELECT unless <paramref name="allowWrite"/>.
+    /// Flushes every <paramref name="flushEveryRows"/> rows so the browser/disk sees progress.</summary>
+    public async Task<long> StreamCsvAsync(
+        string server, string database, string sql, bool allowWrite,
+        TextWriter output, CancellationToken ct = default, int flushEveryRows = 1000)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        if (string.IsNullOrWhiteSpace(server)) throw new ArgumentException("server is required", nameof(server));
+        if (string.IsNullOrWhiteSpace(database)) throw new ArgumentException("database is required", nameof(database));
+        if (string.IsNullOrWhiteSpace(sql)) throw new ArgumentException("sql is required", nameof(sql));
+
+        if (!allowWrite && !SqlWriteGate.IsReadOnly(sql))
+        {
+            throw new DaxterException(
+                "This statement looks like a write (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC/…). " +
+                "Enable the DAXter 'Allow writes' gate to run it, or rewrite as a SELECT.");
+        }
+
+        var token = await _tokens.GetFabricSqlTokenAsync(ct);
+
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = server,
+            InitialCatalog = database,
+            Encrypt = true,
+            TrustServerCertificate = false,
+            ConnectTimeout = ConnectTimeoutSeconds,
+            ApplicationName = "DAXter",
+        };
+
+        await using var conn = new SqlConnection(builder.ConnectionString) { AccessToken = token.Token };
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = CommandTimeoutSeconds;
+
+        // SequentialAccess lets the driver read column data as it arrives off the wire instead of
+        // buffering the row — important for wide rows in a SELECT *.
+        await using var reader = await cmd.ExecuteReaderAsync(System.Data.CommandBehavior.SequentialAccess, ct);
+
+        if (reader.FieldCount == 0) return 0;
+
+        // Header.
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (i > 0) await output.WriteAsync(',');
+            await output.WriteAsync(CsvResultFormatter.Escape(reader.GetName(i)));
+        }
+        await output.WriteAsync('\n');
+
+        long rows = 0;
+        while (await reader.ReadAsync(ct))
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                if (i > 0) await output.WriteAsync(',');
+                if (!await reader.IsDBNullAsync(i, ct))
+                {
+                    var v = reader.GetValue(i);
+                    await output.WriteAsync(CsvResultFormatter.Escape(CsvResultFormatter.Render(v)));
+                }
+            }
+            await output.WriteAsync('\n');
+            rows++;
+
+            // Flush periodically so the browser / disk sees rows trickling in (and so cancellation
+            // can interrupt mid-stream without losing already-written work).
+            if (flushEveryRows > 0 && rows % flushEveryRows == 0)
+            {
+                await output.FlushAsync(ct);
+            }
+        }
+        await output.FlushAsync(ct);
+        return rows;
+    }
 
     private static async Task<QueryResult> MaterializeAsync(SqlDataReader reader, CancellationToken ct)
     {

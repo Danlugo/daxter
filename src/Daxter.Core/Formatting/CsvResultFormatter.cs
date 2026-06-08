@@ -22,14 +22,19 @@ public sealed class CsvResultFormatter : IResultFormatter
         return builder.ToString();
     }
 
-    private static string Render(object? value) => value switch
+    /// <summary>Stringifies a SQL value for CSV — culture-invariant on <see cref="IFormattable"/>
+    /// (so dates and numbers don't pick up a server locale) and empty for nulls. Public so the
+    /// streaming SQL exporter can use the same conversion the in-memory formatter does.</summary>
+    public static string Render(object? value) => value switch
     {
         null => string.Empty,
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty,
     };
 
-    private static string Escape(string field)
+    /// <summary>RFC 4180 field-escape. Quotes only when needed (contains a quote, comma, or newline)
+    /// and doubles inner quotes. Public so the streaming SQL exporter can share it.</summary>
+    public static string Escape(string field)
     {
         var needsQuoting = field.Contains('"', StringComparison.Ordinal)
             || field.Contains(',', StringComparison.Ordinal)

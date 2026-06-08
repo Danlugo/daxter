@@ -6,6 +6,29 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-06-08
+
+### Added
+- **SQL "Export All CSV" — streaming, no memory cap.** A new button on `/sql` streams the FULL
+  result set straight to a browser download. The Run-SQL path materializes everything into memory
+  for the in-page grid (good for sampling); Export All goes a different route — `POST /api/sql/export`
+  opens a `SqlDataReader`, writes RFC-4180 CSV row-by-row directly into the HTTP response, and
+  flushes every 1000 rows. Bypasses the Blazor SignalR circuit so a `SELECT *` on a multi-million-row
+  warehouse table won't OOM the container OR the browser. Same writes-gate as the live-query path
+  (and a confirm modal if the SQL isn't read-only).
+- **`FabricSqlClient.StreamCsvAsync(server, database, sql, allowWrite, TextWriter, ct)`** — the
+  shared streaming primitive every surface uses (Web endpoint, CLI `--out`, MCP `daxter_sql_export`).
+  `CommandBehavior.SequentialAccess` so wide rows don't buffer; returns the row count written.
+- **CLI: `daxter sql query --out file.csv`** — stream the full result set to a file path. No
+  in-memory materialization regardless of row count.
+- **MCP: `daxter_sql_export(workspace, endpoint, sql)`** — streams to
+  `~/.daxter/exports/sql/<timestamp>-<endpoint>.csv` on the persistent volume; returns the path
+  with a `docker cp …` hint so the user can pull the file off the container.
+
+### Changed
+- `CsvResultFormatter.Escape` / `.Render` are now `public static` so the streaming exporter shares
+  the exact same RFC-4180 escape + culture-invariant value rendering the in-memory CSV uses.
+
 ## [1.26.2] - 2026-06-07
 
 ### Fixed

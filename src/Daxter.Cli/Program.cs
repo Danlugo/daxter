@@ -1189,9 +1189,11 @@ internal static class Program
             { Description = "T-SQL to execute. Optional when --file is used.", Arity = ArgumentArity.ZeroOrOne };
         var allowWritesOpt = new Option<bool>("--allow-writes")
             { Description = "Allow non-SELECT statements (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC/…)." };
+        var outFileOpt = new Option<string?>("--out")
+            { Description = "Stream the full result set as CSV to this file path (no in-memory materialization — safe for SELECT * on huge tables). When set, --output is ignored." };
 
         var query = new Command("query", "Run T-SQL on a Fabric SQL endpoint.")
-            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt };
+            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt };
         connectionOptions.AddTo(query);
         query.SetAction((pr, ct) => RunSqlQueryAsync(
             () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(serverOpt) is null),
@@ -1201,6 +1203,7 @@ internal static class Program
             pr.GetValue(databaseOpt),
             () => pr.GetValue(outputOption),
             pr.GetValue(allowWritesOpt),
+            pr.GetValue(outFileOpt),
             ct));
 
         // daxter sql objects --workspace W --endpoint NAME
@@ -1278,11 +1281,13 @@ internal static class Program
     /// <summary>Runs a T-SQL query against a Fabric SQL endpoint. Resolves the (server, database)
     /// either from <paramref name="server"/>/<paramref name="database"/> (explicit override) or by
     /// looking up <paramref name="endpointName"/> in the workspace's endpoint discovery list — so the
-    /// user can pass a friendly name instead of the GUID hostname.</summary>
+    /// user can pass a friendly name instead of the GUID hostname. When <paramref name="outFile"/> is
+    /// set, the result set is STREAMED as CSV straight to that file path (no in-memory
+    /// materialization) — safe for <c>SELECT *</c> on multi-million-row tables.</summary>
     private static async Task<int> RunSqlQueryAsync(
         Func<DaxterConfig> configFactory, Func<string> sqlFactory,
         string? endpointName, string? server, string? database,
-        Func<string?> outputFactory, bool allowWrites, CancellationToken ct)
+        Func<string?> outputFactory, bool allowWrites, string? outFile, CancellationToken ct)
     {
         try
         {
@@ -1310,6 +1315,18 @@ internal static class Program
                 throw new DaxterException("--database is required when --server is passed without --endpoint.");
 
             var client = new FabricSqlClient(msal);
+
+            // --out triggers the streaming path: no in-memory QueryResult. Stays low-memory regardless
+            // of row count; the grid in --output table mode would OOM on millions of rows.
+            if (!string.IsNullOrWhiteSpace(outFile))
+            {
+                await using var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read);
+                await using var sw = new StreamWriter(fs);
+                var rows = await client.StreamCsvAsync(server!, database!, sql, allowWrites, sw, ct);
+                Console.Error.WriteLine($"Wrote {rows} row{(rows == 1 ? "" : "s")} to {outFile}.");
+                return 0;
+            }
+
             var result = await client.ExecuteAsync(server!, database!, sql, allowWrites, ct);
 
             var format = ResultFormatterFactory.Parse(outputFactory());

@@ -672,6 +672,20 @@ public static class DaxterTools
         CancellationToken ct = default)
         => DaxterToolRuntime.SqlObjectsAsync(workspace, endpoint, ct);
 
+    [McpServerTool(Name = "daxter_sql_export", ReadOnly = true, Title = "Export full T-SQL result set as CSV (streaming)"),
+     Description("Stream a Fabric SQL endpoint query's FULL result set as CSV to a file on DAXter's persistent volume " +
+                 "(~/.daxter/exports/sql/). Use this instead of daxter_sql_query when you want every row — " +
+                 "daxter_sql_query materializes the result set in memory and is meant for sampling; daxter_sql_export " +
+                 "streams row-by-row straight to disk, so SELECT * on a multi-million-row table won't OOM. " +
+                 "Returns the on-disk path and row count; tell the user to docker cp it off the container, or mount " +
+                 "the daxter-tokens volume on a host path to get the file directly. Same writes-gate as daxter_sql_query.")]
+    public static Task<string> SqlExport(
+        [Description("Workspace name or id.")] string workspace,
+        [Description("Warehouse or Lakehouse name (from daxter_sql_endpoints).")] string endpoint,
+        [Description("T-SQL statement (typically a SELECT).")] string sql,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.SqlExportAsync(workspace, endpoint, sql, ct);
+
     [McpServerTool(Name = "daxter_sql_query", ReadOnly = true, Title = "Run T-SQL on a Fabric SQL endpoint"),
      Description("Run T-SQL on a Fabric Warehouse or Lakehouse SQL endpoint. Pass the workspace and the endpoint NAME " +
                  "(from daxter_sql_endpoints) — the tool resolves the server + database for you. " +
