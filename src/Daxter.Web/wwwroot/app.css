@@ -198,6 +198,22 @@ input[type="checkbox"], input[type="radio"] { min-width:0; width:auto; padding:0
 .export-group .btn-sm { background:transparent; }
 .export-opt { color:var(--muted); font-size:.82rem; padding:.2rem .3rem; border-radius:4px; cursor:pointer; user-select:none; white-space:nowrap; }
 .export-opt:hover { background:var(--surface-2); color:var(--text); }
+
+/* ---- /rls — RLS viewer (Roles tree on the left, highlighted DAX viewer on the right) ---- */
+.rls-tree .obj-tname.active, .rls-tree .obj-item.active { background:var(--accent-soft); color:var(--text); }
+.rls-perm { display:inline-block; font-size:.7rem; padding:.05rem .35rem; border-radius:4px; background:var(--surface-2); color:var(--muted); margin-left:.3rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.rls-perm.admin { background:var(--bad-bg); color:var(--bad); }
+.rls-perm.refresh { background:var(--warn-bg); color:var(--warn); }
+/* Read-only DAX viewer block — same colors as the Query overlay (.t-fn / .t-kw / .t-tbl / …). */
+.dax-view { white-space:pre-wrap; overflow-wrap:break-word; word-break:break-word;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.5;
+    padding:.6rem .7rem; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text);
+    max-height:62vh; overflow:auto; margin:0; }
+.dax-view-empty { color:var(--muted); font-style:italic; }
+.rls-section-h { margin:1rem 0 .4rem; font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:700; }
+.rls-members { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem; line-height:1.6; padding:.5rem .7rem; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); }
+.rls-members li { list-style:none; padding:0; margin:0; }
+.rls-members ul { margin:0; padding:0; }
 .grid td.nowrap { white-space:nowrap; }
 .grid td.msg { white-space:normal; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; }
 .grid.logs tr.lvl-Error td, .grid.logs tr.lvl-Critical td { background:var(--bad-bg); }

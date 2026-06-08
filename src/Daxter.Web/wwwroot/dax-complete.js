@@ -293,5 +293,11 @@ window.daxComplete = (function () {
 
     function hide(s) { if (s) s.box.style.display = 'none'; }
 
-    return { attach, setCandidates, rehighlight };
+    // Public helper for READ-ONLY DAX viewers (e.g. the /rls page) — takes raw DAX text and returns
+    // the same colored HTML the editor overlay uses (function calls, keywords, 'table', [column],
+    // "string", number, -- comment). Lets a Razor page render a static DAX block by
+    // setting innerHTML to daxComplete.highlightHtml(dax). No state attached; safe to call repeatedly.
+    function highlightHtml(text) { return highlight(text == null ? '' : String(text)); }
+
+    return { attach, setCandidates, rehighlight, highlightHtml };
 })();

@@ -48,12 +48,13 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 | **Ops** | `refresh model/table/partitions` (queued through the shared worker) · `refresh status` · `refresh trigger` · `refresh history` · `cache clear` (with `--dry-run`/`--yes`/`--force`) |
 | **Workspace** | `ws ls/datasets/reports/lineage/report-inventory/export-report/permissions/gateways/connections/datasources` (REST). `report-inventory` classifies reports **thin/thick + downloadable**; `export-report` pulls a report's **definition** (PBIR/legacy field references) and optionally its `.pbix` |
 | **Connections** ⚠ | See a model's **current "maps to" mapping** (`ws item-connections`), list **shareable cloud connections** (`ws connections`), **take over** + **bind** each source to any connection — cloud or gateway — via the Fabric `bindConnection` API: `ws bind-connection` (per-source, incl. cloud "Maps to") and `ws bind-gateway` (whole-model). **Dry-run by default**, gated, needs ownership. In **CLI · MCP (`daxter_item_connections`/`daxter_connections`/`daxter_take_over`/`daxter_bind_connection`/`daxter_bind_to_gateway`) · web (Connections page — both gateway and cloud sections writable)** |
+| **RLS** | List roles · view a role's table filter expressions (DAX) and members — the same definitions Tabular Editor shows in its role tree. Read-only browser; edits still go through Model Edit. In **CLI (`model rls --role`) · MCP (`daxter_rls`, `daxter_role_filters`, `daxter_role_members`) · web (RLS page)** |
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
 | **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **SQL** | `sql endpoints` (list Warehouses + Lakehouse SQL endpoints in a workspace) · `sql query --endpoint NAME --query "…"` (T-SQL on a Fabric SQL endpoint over TDS, AAD-authenticated with your existing sign-in). Read-only by default; `--allow-writes` for INSERT/UPDATE/DELETE/MERGE/DDL. In **CLI · MCP (`daxter_sql_endpoints` / `daxter_sql_query`) · web (SQL page)** |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-The MCP server exposes these at **full parity** as **51 tools** (`daxter_login` + 33 read + 17 gated
+The MCP server exposes these at **full parity** as **53 tools** (`daxter_login` + 35 read + 17 gated
 write/edit). Refreshes from any interface (CLI, MCP, UI) are **queued through one shared worker** that
 runs them **one per model at a time** — see [Refresh scheduler](#refresh-scheduler). See
 [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,

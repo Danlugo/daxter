@@ -423,8 +423,12 @@ internal static class DaxterToolRuntime
             {
                 name = x.attr!.Name ?? x.m.Name,
                 title = x.attr.Title,
-                kind = x.attr.Destructive == true ? "write (gated, destructive)"
-                     : x.attr.ReadOnly == true ? "read"
+                // Check ReadOnly FIRST: the McpServerToolAttribute's Destructive default is true, so
+                // a tool that's explicitly ReadOnly = true (e.g. daxter_sql_query, daxter_rls,
+                // daxter_role_filters) would otherwise fall into the "destructive write" bucket and
+                // agents would refuse to run it without a confirmation. Read-first matches intent.
+                kind = x.attr.ReadOnly == true ? "read"
+                     : x.attr.Destructive == true ? "write (gated, destructive)"
                      : "write (gated)",
                 description = x.m.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "",
             })

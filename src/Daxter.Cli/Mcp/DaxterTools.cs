@@ -88,9 +88,34 @@ public static class DaxterTools
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Columns(table), ct);
 
-    [McpServerTool(Name = "daxter_rls", ReadOnly = true, Title = "List RLS roles"), Description("List RLS roles in a model.")]
+    [McpServerTool(Name = "daxter_rls", ReadOnly = true, Title = "List RLS roles"),
+     Description("List RLS roles in a model (name + model permission). " +
+                 "Use daxter_role_filters to see the DAX filter expression each role applies per table, " +
+                 "and daxter_role_members to see who's in each role.")]
     public static Task<string> Rls(string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.Roles(), ct);
+
+    [McpServerTool(Name = "daxter_role_filters", ReadOnly = true, Title = "Show a role's table filter expressions (DAX)"),
+     Description("Show every table-level RLS filter expression defined for a role — the DAX a model author wrote " +
+                 "in Tabular Editor / Power BI Desktop under Table Permissions. Returns (Table, FilterExpression) " +
+                 "rows; the FilterExpression is the raw DAX (often a CALCULATETABLE/SUMMARIZE/FILTER chain). " +
+                 "Tables not listed have no row filter for this role (they're either accessible without restriction " +
+                 "for read roles, or implicit by relationship). Pair with daxter_role_members to see who the role " +
+                 "filters apply to, and daxter_test_rls to run a query under the role.")]
+    public static Task<string> RoleFilters(
+        [Description("Role name (from daxter_rls).")] string role,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.RoleFilters(role), ct);
+
+    [McpServerTool(Name = "daxter_role_members", ReadOnly = true, Title = "Show a role's members"),
+     Description("Show every member assigned to an RLS role — name (typically a UPN, security group, or app id), " +
+                 "member type (User / Group), and identity provider. Note: membership is set per environment " +
+                 "(workspace assignment in the Power BI service is also a layer above this); these rows reflect " +
+                 "what the model itself declares.")]
+    public static Task<string> RoleMembers(
+        [Description("Role name (from daxter_rls).")] string role,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.MetaAsync(workspace, dataset, m => m.RoleMembers(role), ct);
 
     [McpServerTool(Name = "daxter_diff_measures", ReadOnly = true, Title = "Compare measures"), Description("Compare measures between the configured model and another model in the same workspace.")]
     public static Task<string> DiffMeasures(

@@ -29,6 +29,7 @@
         <NavLink href="model-edit">Model Edit</NavLink>
         <NavLink href="connections">Connections</NavLink>
         <NavLink href="sql">SQL</NavLink>
+        <NavLink href="rls">RLS</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -46,6 +47,7 @@
             UsageStore.ModelEditContext => " · Model Edit",
             UsageStore.ConnectionsContext => " · Connections",
             UsageStore.SqlContext => " · SQL",
+            UsageStore.RlsContext => " · RLS",
             _ => "" })</div>
 
         @if (context is null)
@@ -77,6 +79,7 @@
                     UsageStore.PipelineContext => "Models",
                     UsageStore.AuditContext => "Pipelines",
                     UsageStore.SqlContext => "SQL endpoints",
+                    UsageStore.RlsContext => "Models",
                     _ => "Datasets" })</div>
                 @foreach (var d in dsTop)
                 {
@@ -258,6 +261,7 @@
             "model-edit" => UsageStore.ModelEditContext,
             "connections" => UsageStore.ConnectionsContext,
             "sql" => UsageStore.SqlContext,
+            "rls" => UsageStore.RlsContext,
             _ => null,
         };
     }

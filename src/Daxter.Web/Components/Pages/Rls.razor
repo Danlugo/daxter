@@ -1,0 +1,454 @@
+@page "/rls"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+
+<PageTitle>DAXter — RLS</PageTitle>
+
+<h1>Role-Level Security (RLS)</h1>
+<p class="muted">Inspect a model's RLS roles, their members, and the DAX filter expression each role applies per table — the same definitions you'd see in Tabular Editor's role tree.</p>
+
+<div class="dax-tools">
+    <button class="btn-sm back-btn" @onclick="GoBack" title="Back to the previous page">← Back</button>
+</div>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" Disabled="@busy" />
+        <button class="btn-sm" @onclick="LoadWorkspaces" disabled="@busy">Load</button>
+    </div>
+    <div>
+        <label>Model <span class="muted">(@datasets.Count)</span></label>
+        <SearchableSelect Items="datasets" @bind-Value="dataset" OnChange="OnDatasetPicked"
+                          Placeholder="type to search a model…"
+                          Disabled="@(busy || string.IsNullOrEmpty(workspace))" />
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+<div class="dax-layout">
+    @* Left: Roles tree — each role expandable to show the tables it filters + a Members leaf. *@
+    <aside class="dax-objects rls-tree">
+        <div class="pane-head"><span class="side-title">Roles</span></div>
+        @if (string.IsNullOrEmpty(dataset))
+        {
+            <p class="side-empty">Pick a model to browse its RLS roles.</p>
+        }
+        else if (rolesError is not null)
+        {
+            <p class="bad-text">@rolesError</p>
+            <button class="btn-sm" @onclick="LoadRoles">Retry</button>
+        }
+        else if (rolesLoading || roles is null)
+        {
+            <p class="muted">Loading roles…</p>
+        }
+        else if (roles.Count == 0)
+        {
+            <p class="side-empty">This model has no RLS roles defined.</p>
+        }
+        else
+        {
+            <input class="obj-search" @bind="roleSearch" @bind:event="oninput" placeholder="filter roles…" autocomplete="off" />
+            <div class="obj-tree">
+                @foreach (var r in FilteredRoles())
+                {
+                    var isExpanded = IsRoleExpanded(r.Name);
+                    <div class="obj-table">
+                        <button class="obj-tname @(selectedRole == r.Name && selectedTable is null ? "active" : "")"
+                                @onclick="() => OnRoleClicked(r.Name)"
+                                title="@($"{r.Name} · {r.Permission}")">
+                            <span class="chev">@(isExpanded ? "▾" : "▸")</span>
+                            <span>@r.Name</span>
+                            <span class="rls-perm @PermClass(r.Permission)">@r.Permission</span>
+                        </button>
+                        @if (isExpanded && roleDetail.TryGetValue(r.Name, out var detail))
+                        {
+                            @if (detail.Filters.Count == 0 && detail.Members.Count == 0)
+                            {
+                                <button class="obj-item" style="padding-left:2.4rem; cursor:default;" disabled>
+                                    <span class="muted">(no filters or members)</span>
+                                </button>
+                            }
+                            @if (detail.Filters.Count > 0)
+                            {
+                                <button class="obj-item" style="padding-left:2rem; font-size:.76rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); cursor:default;" disabled>
+                                    Filters (@detail.Filters.Count)
+                                </button>
+                                @foreach (var f in detail.Filters)
+                                {
+                                    <button class="obj-item @(selectedRole == r.Name && selectedTable == f.Table ? "active" : "")"
+                                            style="padding-left:2.4rem;"
+                                            @onclick="() => OnFilterClicked(r.Name, f.Table)"
+                                            title="@($"Filter on {f.Table}")">
+                                        <span class="obj-icon">▦</span>@f.Table
+                                    </button>
+                                }
+                            }
+                            @if (detail.Members.Count > 0)
+                            {
+                                <button class="obj-item @(selectedRole == r.Name && selectedTable == MembersToken ? "active" : "")"
+                                        style="padding-left:2.4rem;"
+                                        @onclick="() => OnFilterClicked(r.Name, MembersToken)"
+                                        title="@($"{detail.Members.Count} member(s)")">
+                                    <span class="obj-icon">👤</span>Members (@detail.Members.Count)
+                                </button>
+                            }
+                        }
+                        else if (isExpanded)
+                        {
+                            <button class="obj-item" style="padding-left:2.4rem; cursor:default;" disabled>
+                                <span class="muted">Loading…</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </aside>
+
+    @* Right: the viewer. Picks one of three states based on what's selected on the left. *@
+    <div class="dax-main">
+        @if (selectedRole is null)
+        {
+            <p class="muted">Pick a role on the left, then click a table to see its DAX filter expression — or click <strong>Members</strong> to see who the role applies to.</p>
+        }
+        else if (roleDetail.TryGetValue(selectedRole, out var detail))
+        {
+            <h3 style="margin-top:0;">@selectedRole <small class="muted">— @PermLabel(detail.Permission)</small></h3>
+
+            @if (selectedTable == MembersToken)
+            {
+                <div class="rls-section-h">Members (@detail.Members.Count)</div>
+                @if (detail.Members.Count == 0)
+                {
+                    <p class="dax-view-empty">No members assigned to this role inside the model. (Membership may also be applied at the workspace level in the Power BI service.)</p>
+                }
+                else
+                {
+                    <div class="rls-members"><ul>@foreach (var m in detail.Members) { <li>@m</li> }</ul></div>
+                }
+            }
+            else if (!string.IsNullOrEmpty(selectedTable))
+            {
+                var f = detail.Filters.FirstOrDefault(x => x.Table == selectedTable);
+                <div class="rls-section-h">Filter expression on <code>@selectedTable</code></div>
+                @if (f is null || string.IsNullOrWhiteSpace(f.Expression))
+                {
+                    <p class="dax-view-empty">No DAX filter on this table for this role.</p>
+                }
+                else
+                {
+                    @* The <pre> gets its colored HTML painted by daxComplete.highlightHtml after render. *@
+                    <pre class="dax-view" @ref="daxBoxRef"><code class="dax-hl-code"></code></pre>
+                    <p class="muted" style="margin:.4rem 0 0;">
+                        <button class="btn-sm" @onclick="CopySelectedDax">📋 Copy DAX</button>
+                        <span style="margin-left:.6rem;">Read-only · use <em>Model Edit → Roles</em> to change it.</span>
+                    </p>
+                }
+            }
+            else
+            {
+                @* Role node clicked (not a specific table) — show a summary: filters list + members. *@
+                <div class="rls-section-h">Filters (@detail.Filters.Count)</div>
+                @if (detail.Filters.Count == 0)
+                {
+                    <p class="dax-view-empty">No table filters for this role.</p>
+                }
+                else
+                {
+                    <ul class="rls-members">
+                        @foreach (var f in detail.Filters)
+                        {
+                            <li>
+                                <button class="link" @onclick="() => OnFilterClicked(selectedRole, f.Table)">▦ @f.Table</button>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                <div class="rls-section-h">Members (@detail.Members.Count)</div>
+                @if (detail.Members.Count == 0)
+                {
+                    <p class="dax-view-empty">No members. (Often added at the workspace level rather than in the model.)</p>
+                }
+                else
+                {
+                    <div class="rls-members"><ul>@foreach (var m in detail.Members) { <li>@m</li> }</ul></div>
+                }
+            }
+        }
+    </div>
+</div>
+
+@code {
+    // ---- Top-level model picker ----
+    private List<string> workspaces = new();
+    private List<string> datasets = new();
+    private string workspace = "", dataset = "";
+    private bool busy;
+    private string? error;
+
+    // ---- Roles tree state ----
+    private List<RoleRow>? roles;
+    private bool rolesLoading;
+    private string? rolesError;
+    private string roleSearch = "";
+    private readonly HashSet<string> expandedRoles = new();
+    // Per-role detail (filters + members) — loaded lazily on first expand and cached for the session.
+    private readonly Dictionary<string, RoleDetail> roleDetail = new();
+
+    // ---- Right-pane selection ----
+    private string? selectedRole;
+    /// <summary>Sentinel marking the "Members" leaf under a role (vs an empty selection or a table).</summary>
+    private const string MembersToken = "__members__";
+    private string? selectedTable;
+
+    // The <pre> the highlighter paints into. Re-rendered each time the selection changes.
+    private ElementReference daxBoxRef;
+    // Track the last-rendered (role, table) so we don't repaint on every re-render — only when the selection changes.
+    private (string? Role, string? Table) lastPainted;
+
+    private sealed record RoleRow(string Name, string Permission);
+    private sealed record FilterRow(string Table, string Expression);
+    private sealed record RoleDetail(string Permission, List<FilterRow> Filters, List<string> Members);
+
+    // ---- Deep-link: /rls?ws=&ds=&role=&table= ----
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "role")] public string? Qrole { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "table")] public string? Qtable { get; set; }
+    private string? appliedDeepLink;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    /// <summary>Apply a deep-link AND re-apply when the URL changes via same-page navigation
+    /// (Frequent sidebar click while already on /rls). Re-entering the same selection short-circuits.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}|{Qds}|{Qrole}|{Qtable}";
+        if (key == appliedDeepLink) return;
+        appliedDeepLink = key;
+
+        BusyState.Begin();
+        try
+        {
+            if (workspaces.Count == 0) await LoadWorkspaces();
+            workspace = Qws!;
+            await OnWorkspaceChanged();
+            if (!string.IsNullOrEmpty(Qds))
+            {
+                dataset = Qds!;
+                Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.RlsContext);
+                await LoadRoles();
+                if (!string.IsNullOrEmpty(Qrole))
+                {
+                    await OnRoleClicked(Qrole!);
+                    if (!string.IsNullOrEmpty(Qtable))
+                    {
+                        selectedTable = Qtable;
+                    }
+                }
+            }
+        }
+        finally { BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private async Task LoadWorkspaces()
+    {
+        busy = true; BusyState.Begin(); error = null;
+        try { workspaces = ColumnValues(await Ui.WorkspacesAsync(), "name"); }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        datasets = new(); dataset = "";
+        ResetRoles();
+        if (string.IsNullOrEmpty(workspace)) return;
+        busy = true; BusyState.Begin(); error = null;
+        try
+        {
+            datasets = ColumnValues(await Ui.DatasetsAsync(workspace), "name");
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.RlsContext);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private async Task OnDatasetPicked()
+    {
+        ResetRoles();
+        if (string.IsNullOrEmpty(dataset)) return;
+        Usage.Record(UsageStore.Dataset, dataset, workspace, UsageStore.RlsContext);
+        await LoadRoles();
+    }
+
+    private void ResetRoles()
+    {
+        roles = null; rolesError = null;
+        expandedRoles.Clear(); roleDetail.Clear();
+        selectedRole = null; selectedTable = null;
+        lastPainted = default;
+    }
+
+    private async Task LoadRoles()
+    {
+        if (string.IsNullOrEmpty(dataset)) return;
+        rolesLoading = true; BusyState.Begin(); rolesError = null; roles = null; StateHasChanged();
+        try
+        {
+            var r = await Ui.RlsAsync(workspace, dataset);   // (Name, ModelPermission)
+            var list = new List<RoleRow>();
+            foreach (var row in r.Rows)
+            {
+                var name = row[0]?.ToString() ?? "";
+                var perm = row.Length > 1 ? row[1]?.ToString() ?? "" : "";
+                if (!string.IsNullOrEmpty(name)) list.Add(new RoleRow(name, perm));
+            }
+            // Alphabetical, case-insensitive — matches the UI-contract sorted-dropdowns rule for all lists.
+            list.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+            roles = list;
+        }
+        catch (Exception ex) { rolesError = ex.Message; }
+        finally { rolesLoading = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    /// <summary>Clicking a role toggles its expand-state and selects it (right pane shows summary).
+    /// First expand triggers a lazy load of its (Filters, Members).</summary>
+    private async Task OnRoleClicked(string roleName)
+    {
+        selectedRole = roleName;
+        selectedTable = null;
+        if (!expandedRoles.Add(roleName))
+        {
+            expandedRoles.Remove(roleName);   // toggle off
+        }
+        else if (!roleDetail.ContainsKey(roleName))
+        {
+            await LoadRoleDetail(roleName);
+        }
+    }
+
+    private void OnFilterClicked(string roleName, string table)
+    {
+        selectedRole = roleName;
+        selectedTable = table;
+        // Make sure the role is expanded too so the breadcrumb in the tree stays open.
+        expandedRoles.Add(roleName);
+    }
+
+    private async Task LoadRoleDetail(string roleName)
+    {
+        BusyState.Begin();
+        try
+        {
+            // Parallel — REST/XMLA wrappers each take their own session via DaxterUi. Cuts wall-clock
+            // for any role with both filters and members. Same pattern as the audit-stage scan.
+            var fTask = Ui.RoleFiltersAsync(workspace, dataset, roleName);
+            var mTask = Ui.RoleMembersAsync(workspace, dataset, roleName);
+            var (f, m) = (await fTask, await mTask);
+            var filters = f.Rows
+                .Where(row => row.Length > 0 && !string.IsNullOrEmpty(row[0]?.ToString()))
+                .Select(row => new FilterRow(row[0]?.ToString() ?? "", row.Length > 1 ? row[1]?.ToString() ?? "" : ""))
+                .OrderBy(x => x.Table, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var members = m.Rows
+                .Select(row => row.Length > 0 ? row[0]?.ToString() ?? "" : "")
+                .Where(s => !string.IsNullOrEmpty(s))
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var perm = roles?.FirstOrDefault(r => r.Name == roleName)?.Permission ?? "";
+            roleDetail[roleName] = new RoleDetail(perm, filters, members);
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { BusyState.End(); StateHasChanged(); }
+    }
+
+    /// <summary>Paint the DAX viewer after render. Done in OnAfterRenderAsync (not a binding) because
+    /// the highlighter is a JS module that wants to write innerHTML — Blazor would clobber it on the
+    /// next render if we put the colored HTML in the markup, so we re-call it each time the selection
+    /// changes.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (selectedRole is null || string.IsNullOrEmpty(selectedTable) || selectedTable == MembersToken) return;
+        if (!roleDetail.TryGetValue(selectedRole, out var detail)) return;
+        var f = detail.Filters.FirstOrDefault(x => x.Table == selectedTable);
+        if (f is null || string.IsNullOrWhiteSpace(f.Expression)) return;
+        if (lastPainted == (selectedRole, selectedTable)) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("daxComplete.rehighlight"); // no-op, just confirms module is loaded
+            // Read the highlighted HTML from JS and inject — Blazor doesn't let us call innerHTML
+            // directly, but JS interop with @ref's ElementReference does.
+            var html = await JS.InvokeAsync<string>("daxComplete.highlightHtml", f.Expression);
+            await JS.InvokeVoidAsync("eval",
+                $"document.querySelector('.dax-view .dax-hl-code') && (document.querySelector('.dax-view .dax-hl-code').innerHTML = {System.Text.Json.JsonSerializer.Serialize(html)})");
+            lastPainted = (selectedRole, selectedTable);
+        }
+        catch
+        {
+            // JS module not yet ready — next render will retry.
+        }
+    }
+
+    private async Task CopySelectedDax()
+    {
+        if (selectedRole is null || string.IsNullOrEmpty(selectedTable) || selectedTable == MembersToken) return;
+        if (!roleDetail.TryGetValue(selectedRole, out var detail)) return;
+        var f = detail.Filters.FirstOrDefault(x => x.Table == selectedTable);
+        if (f is null) return;
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", f.Expression); }
+        catch { /* clipboard unavailable */ }
+    }
+
+    private bool IsRoleExpanded(string name) => !string.IsNullOrEmpty(roleSearch) || expandedRoles.Contains(name);
+
+    private IEnumerable<RoleRow> FilteredRoles()
+    {
+        if (roles is null) yield break;
+        var q = roleSearch?.Trim();
+        foreach (var r in roles)
+        {
+            if (string.IsNullOrEmpty(q) || r.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                yield return r;
+        }
+    }
+
+    private static string PermClass(string perm) => (perm ?? "").Trim().ToLowerInvariant() switch
+    {
+        "administrator" or "admin" => "admin",
+        "refresh" => "refresh",
+        _ => "",
+    };
+
+    private static string PermLabel(string perm) => (perm ?? "").Trim().ToLowerInvariant() switch
+    {
+        "administrator" or "admin" => "Administrator",
+        "refresh" => "Refresh",
+        "read" => "Read",
+        _ => perm,
+    };
+
+    private static List<string> ColumnValues(QueryResult r, string column)
+    {
+        var idx = -1;
+        for (var i = 0; i < r.Columns.Count; i++)
+            if (string.Equals(r.Columns[i], column, StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+        if (idx < 0) return new();
+        return r.Rows.Select(row => row[idx]?.ToString() ?? "")
+                     .Where(s => s.Length > 0).OrderBy(s => s).ToList();
+    }
+}

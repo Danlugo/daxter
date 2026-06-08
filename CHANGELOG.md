@@ -6,6 +6,36 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-06-08
+
+### Fixed
+- **`daxter_capabilities` was classifying EVERY read tool as "write (gated, destructive)".** Bug
+  caught by an agent that called `daxter_capabilities` and saw `daxter_sql_query`, `daxter_rls`,
+  `daxter_role_filters`, etc. listed as destructive writes — so it refused to call them without
+  per-tool confirmations and ended up loading them piecemeal via ToolSearch instead. Root cause:
+  the kind-classification ladder checked `Destructive` before `ReadOnly`, and the
+  `McpServerToolAttribute.Destructive` default is `true`, so any tool that didn't explicitly set
+  `Destructive = false` fell into the destructive bucket even when `ReadOnly = true` was set.
+  Re-ordered to check `ReadOnly` first; locked in with a regression test asserting the canonical
+  read tools (sql_query, rls, role_filters, role_members, sql_export, …) all report `kind = "read"`.
+  Live capabilities call now correctly shows **44 read / 23 write** out of 67 tools.
+
+### Added
+- **RLS viewer** — new **`/rls`** page that shows a model's RLS roles, their members, and the **DAX
+  filter expression** each role applies per table — the same definitions you'd see in Tabular
+  Editor's role tree. Roles tree on the left (expand a role to see its filtered tables + a Members
+  leaf); right pane shows the per-(role, table) DAX in a syntax-highlighted read-only viewer
+  (reusing the DAX Query page's `t-fn / t-kw / t-tbl / t-col / t-str / t-num / t-com` palette via
+  `daxComplete.highlightHtml`). Own `RlsContext` Frequent sidebar, deep-link `?ws=&ds=&role=&table=`,
+  Back button, busy overlay. Filters + members loaded in parallel per role and cached for the
+  session. Copy-DAX button. Read-only — edits still go through Model Edit.
+- **MCP `daxter_role_filters`** and **`daxter_role_members`** — close the gap where `daxter_rls`
+  only listed roles. `daxter_role_filters(role)` returns `(Table, FilterExpression)` rows
+  (the raw DAX); `daxter_role_members(role)` returns the assigned members. Read-only.
+- **`daxComplete.highlightHtml(text)`** — small public helper in the DAX-highlighter JS so any
+  read-only viewer (the new RLS page, future M-code / measure-definition viewers) can paint
+  colored DAX with one call.
+
 ## [1.28.1] - 2026-06-08
 
 ### Fixed
