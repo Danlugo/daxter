@@ -130,10 +130,15 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
 
     private async Task<AuthenticationResult> AcquireForUserAsync(string[] scopes, CancellationToken ct)
     {
-        var app = await BuildUserAppAsync();
+        var isSqlScope = scopes == FabricSqlScopes;
+        var app = await BuildUserAppAsync(isSqlScope);
 
-        // Try the cache first so a previously signed-in user isn't re-prompted. Same MSAL account
-        // serves every DAXter scope — XMLA/REST first, Fabric SQL silently from the same account.
+        // Try the cache first so a previously signed-in user isn't re-prompted. MSAL refresh tokens
+        // are bound to (client_id, account), so the SQL-scope app sees its own cache slice — separate
+        // from the Power BI one. Microsoft's Power BI public client id is NOT pre-authorized for
+        // database.windows.net (AADSTS65002), so the SQL surface uses the Azure CLI's public client
+        // id by default (see DaxterConfig.DefaultFabricSqlClientId). Trade-off: one extra device-code
+        // sign-in the first time you query SQL.
         var account = (await app.GetAccountsAsync()).FirstOrDefault();
         if (account is not null)
         {
@@ -150,8 +155,10 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
         if (!_allowInteractive)
         {
             // MCP/headless: don't block on a device-code prompt the user can't see.
+            var which = isSqlScope ? "Fabric SQL endpoints" : "Power BI";
             throw new DaxterException(
-                "Not signed in to Power BI. Use the daxter_login tool to sign in (or `daxter login`).");
+                $"Not signed in to {which}. Use the daxter_login tool to sign in (or `daxter login`)" +
+                (isSqlScope ? " — SQL needs a separate one-time sign-in for the database.windows.net scope." : "."));
         }
 
         return await app
@@ -175,7 +182,19 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
     /// reason sign-in failed. Lets a UI show the code, then await completion to auto-refresh or
     /// surface the failure — instead of silently swallowing background errors.
     /// </summary>
-    public async Task<DeviceLogin> StartDeviceLoginAsync(CancellationToken cancellationToken = default)
+    public Task<DeviceLogin> StartDeviceLoginAsync(CancellationToken cancellationToken = default)
+        => StartDeviceLoginInternalAsync(Scopes, forFabricSql: false, cancellationToken);
+
+    /// <summary>Like <see cref="StartDeviceLoginAsync"/> but for the Fabric SQL endpoint scope
+    /// (database.windows.net) — uses the SQL-side client id (Azure CLI's by default; override via
+    /// DAXTER_SQL_CLIENT_ID). Returns "Already signed in." if a usable cached token exists for that
+    /// client id. The Power BI sign-in does NOT cover this one — MSAL refresh tokens are bound to
+    /// client_id, so the user signs in once for Power BI and once for SQL.</summary>
+    public Task<DeviceLogin> StartFabricSqlDeviceLoginAsync(CancellationToken cancellationToken = default)
+        => StartDeviceLoginInternalAsync(FabricSqlScopes, forFabricSql: true, cancellationToken);
+
+    private async Task<DeviceLogin> StartDeviceLoginInternalAsync(
+        string[] scopes, bool forFabricSql, CancellationToken cancellationToken)
     {
         if (_config.AuthMode == AuthMode.ServicePrincipal)
         {
@@ -183,13 +202,13 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
                 "This server uses a service principal — no interactive sign-in is needed.");
         }
 
-        var app = await BuildUserAppAsync();
+        var app = await BuildUserAppAsync(forFabricSql);
         var account = (await app.GetAccountsAsync()).FirstOrDefault();
         if (account is not null)
         {
             try
             {
-                await app.AcquireTokenSilent(Scopes, account).ExecuteAsync(cancellationToken);
+                await app.AcquireTokenSilent(scopes, account).ExecuteAsync(cancellationToken);
                 return new DeviceLogin("Already signed in.", Task.CompletedTask);
             }
             catch (MsalUiRequiredException)
@@ -203,7 +222,7 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
         {
             try
             {
-                await app.AcquireTokenWithDeviceCode(Scopes, result =>
+                await app.AcquireTokenWithDeviceCode(scopes, result =>
                 {
                     promptReady.TrySetResult(result);
                     return Task.CompletedTask;
@@ -226,14 +245,23 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
         return new DeviceLogin(prompt.Message, completion, prompt.VerificationUrl, prompt.UserCode);
     }
 
-    private async Task<IPublicClientApplication> BuildUserAppAsync()
+    private async Task<IPublicClientApplication> BuildUserAppAsync(bool forFabricSql = false)
     {
         // Device-code requires a PUBLIC client. Never use _config.ClientId here — that is the
         // service-principal (confidential) app id and the token endpoint would reject the
         // public device-code request with AADSTS7000218 ("must contain client_secret").
-        var clientId = string.IsNullOrWhiteSpace(_config.PublicClientId)
-            ? DaxterConfig.DefaultPublicClientId
-            : _config.PublicClientId;
+        // Two faces:
+        //   - Power BI / XMLA / Fabric REST: uses DefaultPublicClientId (Power BI Client Integrations).
+        //   - Fabric SQL endpoint (database.windows.net): uses DefaultFabricSqlClientId (Azure CLI's
+        //     id, pre-authorized for that resource). The Power BI id is NOT pre-authorized for the
+        //     SQL audience, so AAD returns AADSTS65002 if we try. Override via DAXTER_SQL_CLIENT_ID.
+        var clientId = forFabricSql
+            ? (string.IsNullOrWhiteSpace(_config.FabricSqlClientId)
+                ? DaxterConfig.DefaultFabricSqlClientId
+                : _config.FabricSqlClientId)
+            : (string.IsNullOrWhiteSpace(_config.PublicClientId)
+                ? DaxterConfig.DefaultPublicClientId
+                : _config.PublicClientId);
 
         var app = PublicClientApplicationBuilder
             .Create(clientId)

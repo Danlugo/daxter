@@ -25,9 +25,15 @@ public static class DaxterTools
         "features here. Use it whenever you're unsure what DAXter can do.")]
     public static string Capabilities() => DaxterToolRuntime.CapabilitiesJson();
 
-    [McpServerTool(Name = "daxter_login", Title = "Sign in to Power BI"), Description("Sign in to Power BI interactively (device code). Returns a URL and a code to enter in your browser; once you complete it, the other tools run as you. Call this if a tool reports 'Not signed in'. (No effect when the server uses a service principal.)")]
-    public static Task<string> Login(CancellationToken ct = default)
-        => DaxterToolRuntime.LoginAsync(ct);
+    [McpServerTool(Name = "daxter_login", Title = "Sign in to Power BI (and optionally Fabric SQL)"),
+     Description("Sign in interactively (device code). Returns a URL and a code to enter in your browser; once you complete it, the other tools run as you. " +
+                 "Call this if a tool reports 'Not signed in'. " +
+                 "Pass target=\"sql\" to sign in for Fabric Warehouse / Lakehouse SQL endpoints — that's a SEPARATE one-time sign-in (different pre-authorized client id) because Power BI's first-party client id isn't authorized for database.windows.net (AADSTS65002). " +
+                 "(No effect when the server uses a service principal.)")]
+    public static Task<string> Login(
+        [Description("Sign-in target: \"powerbi\" (default — XMLA + REST) or \"sql\" (Fabric SQL endpoint).")] string? target = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.LoginAsync(ct, target);
 
     [McpServerTool(Name = "daxter_query", ReadOnly = true, Title = "Run DAX/MDX query"), Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON.")]
     public static Task<string> Query(

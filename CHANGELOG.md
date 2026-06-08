@@ -6,6 +6,28 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.26.1] - 2026-06-07
+
+### Fixed
+- **`AADSTS65002` on Fabric SQL token acquisition.** Power BI's first-party public client id is NOT
+  pre-authorized by Microsoft for the `database.windows.net` audience, so reusing the existing MSAL
+  app for the SQL scope failed at AAD ("Consent between first party application X and first party
+  resource Y must be configured via preauthorization"). The SQL surface now uses a separate
+  pre-authorized client id — Azure CLI's public client id (`04b07795-…`) by default — which the
+  Microsoft identity service accepts for the SQL audience the same way `az login` does. Override via
+  the new env var `DAXTER_SQL_CLIENT_ID` (point it at a tenant app pre-authorized for BOTH Power BI
+  and Azure SQL to skip the second sign-in).
+
+### Added
+- **Separate one-time Fabric SQL sign-in.** Because MSAL refresh tokens are bound to client id, the
+  SQL-scope sign-in is a distinct device-code flow from Power BI's. Surfaced everywhere:
+  - **Web** — when a SQL call returns the "Not signed in" / `AADSTS65002` message, the `/sql` page
+    shows a yellow card with a **"🔐 Sign in for Fabric SQL"** button that pops a device-code modal
+    with URL + code. When the background sign-in completes the modal auto-closes and the page retries.
+  - **CLI** — `daxter login --target sql` (default target = `powerbi`, unchanged).
+  - **MCP** — `daxter_login` now accepts `target="sql"`.
+- **`DAXTER_SQL_CLIENT_ID`** environment variable on `DaxterConfig` for the override path.
+
 ## [1.26.0] - 2026-06-07
 
 ### Added

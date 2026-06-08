@@ -641,14 +641,20 @@ internal static class DaxterToolRuntime
     /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
     private static DaxterConfig TenantConfig() => DaxterConfig.FromEnvironment(requireWorkspace: false);
 
-    /// <summary>Starts interactive sign-in and returns a clean, click-first device-code message.</summary>
-    public static Task<string> LoginAsync(CancellationToken ct)
+    /// <summary>Starts interactive sign-in and returns a clean, click-first device-code message.
+    /// <paramref name="target"/> selects WHICH scope to sign in for: <c>"powerbi"</c> (default —
+    /// XMLA + Fabric REST) or <c>"sql"</c> (Fabric SQL endpoint, separate client id, separate cache
+    /// entry — required once because Power BI's first-party client id isn't pre-authorized for
+    /// <c>database.windows.net</c>).</summary>
+    public static Task<string> LoginAsync(CancellationToken ct, string? target = null)
         => Guard(async () =>
         {
             var provider = new MsalTokenProvider(TenantConfig(), deviceCodePrompt: Console.Error.WriteLine);
             // Returns the URL + code immediately; the token caches in the background once the
             // user completes sign-in (Completion task is intentionally not awaited here).
-            var login = await provider.StartDeviceLoginAsync(ct);
+            var login = string.Equals(target, "sql", StringComparison.OrdinalIgnoreCase)
+                ? await provider.StartFabricSqlDeviceLoginAsync(ct)
+                : await provider.StartDeviceLoginAsync(ct);
             return FormatLoginPrompt(login.VerificationUrl, login.UserCode);
         });
 

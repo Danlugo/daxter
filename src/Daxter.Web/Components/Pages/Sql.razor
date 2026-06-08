@@ -1,4 +1,5 @@
 @page "/sql"
+@using Daxter.Core.Auth
 @inject DaxterUi Ui
 @inject UsageStore Usage
 @inject IJSRuntime JS
@@ -32,6 +33,37 @@
         }
     </div>
 </div>
+
+@if (NeedsSqlSignIn(error) || NeedsSqlSignIn(objError))
+{
+    <div class="card" style="border-color:var(--warn); margin:.6rem 0;">
+        <strong>One-time SQL sign-in required.</strong>
+        <p class="muted" style="margin:.2rem 0 .4rem;">
+            Microsoft locks the Power BI client id out of <code>database.windows.net</code> at the AAD level (AADSTS65002),
+            so DAXter signs in to Fabric SQL endpoints with a separate (pre-authorized) client id. Your Power BI sign-in
+            still covers XMLA / REST — this is only for the SQL surface.
+        </p>
+        <button class="btn" @onclick="StartSqlLogin" disabled="@sqlLoginBusy">🔐 Sign in for Fabric SQL</button>
+    </div>
+}
+
+@if (sqlDevice is not null)
+{
+    <div class="modal-overlay" @onclick="CancelSqlLogin">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Sign in for Fabric SQL</h3>
+            <p>Open the URL below and enter the code:</p>
+            <p>
+                <a href="@sqlDevice.VerificationUrl" target="_blank" rel="noopener">@sqlDevice.VerificationUrl</a>
+                · code <code>@sqlDevice.UserCode</code>
+            </p>
+            <p class="muted">@sqlLoginStatus</p>
+            <div class="cmd-group">
+                <button class="btn-sm" @onclick="CancelSqlLogin">Close</button>
+            </div>
+        </div>
+    </div>
+}
 
 <ErrorBanner Message="@error" />
 
@@ -151,6 +183,59 @@
     private string? error;
     private bool busy;
     private string? pendingWrite;
+
+    // ---- SQL-scope device-code sign-in (separate from Power BI's) ----
+    private DeviceLogin? sqlDevice;
+    private string sqlLoginStatus = "Waiting for sign-in…";
+    private bool sqlLoginBusy;
+
+    /// <summary>True when an error string surfaced from a SQL call looks like the AAD pre-authorization
+    /// issue or the "Not signed in to Fabric SQL endpoints" guard — i.e. when the user needs to run the
+    /// SQL-scope device-code flow once. Pure check on the message text.</summary>
+    private static bool NeedsSqlSignIn(string? msg) =>
+        !string.IsNullOrEmpty(msg) &&
+        (msg.Contains("AADSTS65002", StringComparison.OrdinalIgnoreCase)
+         || msg.Contains("Not signed in to Fabric SQL", StringComparison.OrdinalIgnoreCase)
+         || msg.Contains("Fabric SQL authentication failed", StringComparison.OrdinalIgnoreCase));
+
+    private async Task StartSqlLogin()
+    {
+        if (sqlLoginBusy) return;
+        sqlLoginBusy = true; sqlLoginStatus = "Waiting for sign-in…";
+        try
+        {
+            sqlDevice = await Ui.BeginSqlLoginAsync();
+            if (sqlDevice.Completion.IsCompletedSuccessfully)
+            {
+                // Already signed in for SQL — close the modal and retry the last action.
+                sqlDevice = null;
+                error = null; objError = null;
+                if (HasEndpoint) await LoadObjects();
+                return;
+            }
+            // Await the background completion (token-cache write) and then retry the explorer load.
+            _ = sqlDevice.Completion.ContinueWith(async t =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    sqlLoginStatus = t.IsCompletedSuccessfully
+                        ? "✓ Signed in — closing…"
+                        : $"Sign-in failed: {t.Exception?.GetBaseException().Message}";
+                    if (t.IsCompletedSuccessfully)
+                    {
+                        sqlDevice = null;
+                        error = null; objError = null;
+                        if (HasEndpoint) await LoadObjects();
+                    }
+                    StateHasChanged();
+                });
+            }, TaskScheduler.Default);
+        }
+        catch (Exception ex) { error = ex.Message; sqlDevice = null; }
+        finally { sqlLoginBusy = false; StateHasChanged(); }
+    }
+
+    private void CancelSqlLogin() { sqlDevice = null; sqlLoginStatus = "Waiting for sign-in…"; }
 
     // ---- Objects explorer (left aside) ----
     private bool showObjects = true;

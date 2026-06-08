@@ -82,10 +82,16 @@ internal static class Program
             ct));
 
         // daxter login — interactive device-code sign-in (caches the token)
-        var loginCommand = new Command("login", "Sign in interactively and cache the token.");
+        var loginTargetOpt = new Option<string?>("--target")
+        {
+            Description = "Scope to sign in for: powerbi (default — XMLA + REST) or sql " +
+                          "(Fabric SQL endpoint, separate one-time sign-in — Power BI's client id isn't pre-authorized for database.windows.net).",
+        };
+        var loginCommand = new Command("login", "Sign in interactively and cache the token.") { loginTargetOpt };
         connectionOptions.AddTo(loginCommand);
         loginCommand.SetAction((parseResult, ct) => RunLoginAsync(
-            () => connectionOptions.Resolve(parseResult), ct));
+            () => connectionOptions.Resolve(parseResult, requireWorkspace: false),
+            parseResult.GetValue(loginTargetOpt), ct));
 
         var modelCommand = BuildModelCommand(connectionOptions, outputOption);
         var envCommand = BuildEnvCommand();
@@ -140,7 +146,7 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunLoginAsync(Func<DaxterConfig> configFactory, CancellationToken ct)
+    private static async Task<int> RunLoginAsync(Func<DaxterConfig> configFactory, string? target, CancellationToken ct)
     {
         try
         {
@@ -153,12 +159,20 @@ internal static class Program
                 Dataset = config.Dataset,
                 TenantId = config.TenantId,
                 ClientId = config.ClientId,
+                PublicClientId = config.PublicClientId,
+                FabricSqlClientId = config.FabricSqlClientId,
                 AuthMode = AuthMode.DeviceCode,
             };
 
             var provider = new MsalTokenProvider(interactive, deviceCodePrompt: WriteToStdErr);
-            var token = await provider.GetTokenAsync(ct);
-            Console.Error.WriteLine($"Signed in. Token valid until {token.ExpiresOn:u}.");
+            var forSql = string.Equals(target, "sql", StringComparison.OrdinalIgnoreCase);
+            // GetTokenAsync (XMLA scope) is the existing behaviour; GetFabricSqlTokenAsync uses the
+            // SQL-side client id and a separate cache slice — needed once because of AADSTS65002.
+            var token = forSql
+                ? await provider.GetFabricSqlTokenAsync(ct)
+                : await provider.GetTokenAsync(ct);
+            var which = forSql ? "Fabric SQL" : "Power BI";
+            Console.Error.WriteLine($"Signed in to {which}. Token valid until {token.ExpiresOn:u}.");
             return 0;
         }
         catch (Exception ex)

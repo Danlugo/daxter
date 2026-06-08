@@ -40,6 +40,14 @@ public sealed class DaxterConfig
     /// </summary>
     public string? PublicClientId { get; init; }
 
+    /// <summary>
+    /// Public-client app id used JUST for the Fabric SQL endpoint scope (database.windows.net).
+    /// Optional — defaults to <see cref="DefaultFabricSqlClientId"/> (Azure CLI's id, pre-authorized
+    /// for that resource). Set <c>DAXTER_SQL_CLIENT_ID</c> to use a tenant app pre-authorized for
+    /// BOTH Power BI and Azure SQL — then there's no second sign-in for SQL.
+    /// </summary>
+    public string? FabricSqlClientId { get; init; }
+
     /// <summary>Authentication mode. Defaults to <see cref="AuthMode.DeviceCode"/>.</summary>
     public AuthMode AuthMode { get; init; } = AuthMode.DeviceCode;
 
@@ -59,12 +67,27 @@ public sealed class DaxterConfig
     public const string EnvClientId = "DAXTER_CLIENT_ID";
     public const string EnvClientSecret = "DAXTER_CLIENT_SECRET";
     public const string EnvPublicClientId = "DAXTER_PUBLIC_CLIENT_ID";
+    /// <summary>Override for the public client id used JUST for the Fabric SQL endpoint scope
+    /// (database.windows.net). See <see cref="DefaultFabricSqlClientId"/>.</summary>
+    public const string EnvFabricSqlClientId = "DAXTER_SQL_CLIENT_ID";
     public const string EnvAuthMode = "DAXTER_AUTH_MODE";
     public const string EnvEnvironment = "DAXTER_ENV";
     public const string EnvProdWorkspaces = "DAXTER_PROD_WORKSPACES";
 
     /// <summary>Microsoft's first-party client id used for delegated Power BI access.</summary>
     public const string DefaultPublicClientId = "ea0616ba-638b-4df5-95b9-636659ae5121";
+
+    /// <summary>Default public client id used JUST for the Fabric SQL endpoint scope. Microsoft's
+    /// Power BI Client Integrations app id (<see cref="DefaultPublicClientId"/>) is NOT pre-authorized
+    /// for <c>https://database.windows.net</c> — AAD returns AADSTS65002 ("Consent between first
+    /// party application X and first party resource Y must be configured via preauthorization").
+    /// The Azure CLI's public client id IS pre-authorized for that scope (it's what <c>az login</c>
+    /// uses to talk to Azure SQL / Synapse / Fabric SQL endpoints), so we use it as the default for
+    /// the SQL surface only. The trade-off: a one-time second device-code sign-in for the SQL scope,
+    /// because MSAL refresh tokens are bound to client id — the cached Power BI sign-in can't be
+    /// re-used. Override via <c>DAXTER_SQL_CLIENT_ID</c> if you have a tenant app pre-authorized for
+    /// both scopes (then sign-in is one-and-done).</summary>
+    public const string DefaultFabricSqlClientId = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 
     /// <summary>
     /// Builds a config from environment variables. CLI option values, when present,
@@ -126,6 +149,7 @@ public sealed class DaxterConfig
             ClientId = clientId ?? Nz(saved.ClientId) ?? Env(EnvClientId),
             ClientSecret = clientSecret ?? Nz(saved.ClientSecret) ?? Env(EnvClientSecret),
             PublicClientId = Env(EnvPublicClientId),
+            FabricSqlClientId = Env(EnvFabricSqlClientId),
             AuthMode = resolvedAuth,
             Environment = string.IsNullOrWhiteSpace(activeEnv) ? null : activeEnv!.Trim().ToLowerInvariant(),
             ProdWorkspaces = ParseList(Nz(saved.ProdWorkspaces) ?? Env(EnvProdWorkspaces)),
@@ -141,6 +165,7 @@ public sealed class DaxterConfig
         ClientId = ClientId,
         ClientSecret = ClientSecret,
         PublicClientId = PublicClientId,
+        FabricSqlClientId = FabricSqlClientId,
         AuthMode = AuthMode,
         Environment = Environment,
         ProdWorkspaces = ProdWorkspaces,

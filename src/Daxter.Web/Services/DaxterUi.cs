@@ -135,6 +135,17 @@ public sealed class DaxterUi
         return new MsalTokenProvider(Config(), deviceCodePrompt: Console.Error.WriteLine).StartDeviceLoginAsync(ct);
     }
 
+    /// <summary>Starts device-code sign-in for the <b>Fabric SQL endpoint scope</b> (database.windows.net)
+    /// using the SQL-side client id. Needed because Power BI's first-party client id is NOT
+    /// pre-authorized for that scope (AADSTS65002) — so the SQL surface uses Azure CLI's client id by
+    /// default and the user signs in once for it. Returns the URL + code to show, plus a Completion
+    /// task to await; "Already signed in." when the SQL-scope cache is already warm.</summary>
+    public Task<DeviceLogin> BeginSqlLoginAsync(CancellationToken ct = default)
+    {
+        _log.LogInformation("Fabric SQL device-code sign-in started");
+        return new MsalTokenProvider(Config(), deviceCodePrompt: Console.Error.WriteLine).StartFabricSqlDeviceLoginAsync(ct);
+    }
+
     public Task<QueryResult> WorkspacesAsync(CancellationToken ct = default)
         => Track("workspaces", null, async () =>
         {
