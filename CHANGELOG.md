@@ -6,6 +6,24 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-06-07
+
+### Added
+- **SQL Objects explorer.** The `/sql` page now has a left-side **Objects** panel — schemas as
+  expandable folders containing **Tables / Views / Functions / Stored Procedures** groups, each
+  showing every object on the SQL endpoint. Same shape as Fabric's own SQL editor. Type-to-filter
+  search box on top; click an object to insert `[schema].[name]` into the SQL editor at the
+  caret. Auto-loads when the endpoint is picked (or arrived via a Frequent / deep-link click) and
+  auto-expands the first schema (usually `dbo`). One INFORMATION_SCHEMA UNION round-trip — Tables +
+  Views + Functions + Procedures all in one query — so the tree is alphabetical and fully populated
+  the moment it appears.
+- **`daxter sql objects --workspace W --endpoint NAME`** — same listing from the CLI; output as
+  table / CSV / JSON. `--server` / `--database` override the endpoint lookup.
+- **`daxter_sql_objects(workspace, endpoint)` MCP tool** — read-only. Returns `(schema, kind, name)`
+  rows. Pair it with `daxter_sql_endpoints` (workspace discovery) → `daxter_sql_objects` (what's in
+  here) → `daxter_sql_query` (run T-SQL) and an agent can navigate a warehouse end-to-end without
+  ever knowing the GUID hostname.
+
 ## [1.25.0] - 2026-06-07
 
 ### Added

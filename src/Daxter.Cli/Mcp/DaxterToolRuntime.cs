@@ -570,6 +570,32 @@ internal static class DaxterToolRuntime
             return Format(await rest.SqlEndpointsAsync(groupId, ct));
         });
 
+    /// <summary>Lists schemas + tables/views/functions/stored procedures on a Fabric SQL endpoint.
+    /// One INFORMATION_SCHEMA round-trip; resolves endpoint NAME → (server, database) via the
+    /// workspace's discovery list so the caller doesn't need the GUID hostname. Always read-only.</summary>
+    public static Task<string> SqlObjectsAsync(string? workspace, string endpointName, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(endpointName))
+                throw new DaxterException("endpoint is required (the Warehouse or Lakehouse name — see daxter_sql_endpoints).");
+            var config = Config(workspace, null);
+            var msal = MsalProvider(config);
+
+            using var rest = new PowerBiRestClient(msal);
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            var list = await rest.SqlEndpointsAsync(groupId, ct);
+            var match = list.Rows.FirstOrDefault(r =>
+                string.Equals(r[0]?.ToString(), endpointName, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+                throw new DaxterException(
+                    $"Endpoint '{endpointName}' not found in '{config.Workspace}'. Call daxter_sql_endpoints to list available endpoints.");
+
+            var server = match[1]?.ToString() ?? "";
+            var database = match[2]?.ToString() ?? "";
+            var client = new FabricSqlClient(msal);
+            return Format(await client.ListObjectsAsync(server, database, ct));
+        });
+
     /// <summary>Runs T-SQL on a Fabric SQL endpoint. Resolves (server, database) from the workspace
     /// + endpoint name via <see cref="PowerBiRestClient.SqlEndpointsAsync"/> (so the caller passes the
     /// friendly name, not the GUID hostname). Read-only T-SQL runs unconditionally; non-read T-SQL is

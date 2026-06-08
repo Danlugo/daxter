@@ -75,6 +75,30 @@ public sealed class FabricSqlClient
         return await MaterializeAsync(reader, ct);
     }
 
+    /// <summary>The objects in a Fabric SQL endpoint, flattened into one (schema, kind, name) table the
+    /// Web page renders as a left-side tree (schema → Tables/Views/Functions/Stored Procedures → name).
+    /// One round-trip — UNION ALL over INFORMATION_SCHEMA — ordered server-side so the page can group
+    /// without re-sorting. Always read-only (the gate doesn't trigger).</summary>
+    public Task<QueryResult> ListObjectsAsync(string server, string database, CancellationToken ct = default)
+        => ExecuteAsync(server, database, ListObjectsSql, allowWrite: false, ct);
+
+    /// <summary>Discovery query for <see cref="ListObjectsAsync"/>. Exposed so the CLI / MCP can run the
+    /// exact same SQL.</summary>
+    public const string ListObjectsSql = """
+        SELECT TABLE_SCHEMA AS [schema], 'Table' AS [kind], TABLE_NAME AS [name]
+          FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'
+        UNION ALL
+        SELECT TABLE_SCHEMA, 'View', TABLE_NAME
+          FROM INFORMATION_SCHEMA.VIEWS
+        UNION ALL
+        SELECT ROUTINE_SCHEMA, 'Function', ROUTINE_NAME
+          FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'FUNCTION'
+        UNION ALL
+        SELECT ROUTINE_SCHEMA, 'Stored Procedure', ROUTINE_NAME
+          FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'PROCEDURE'
+        ORDER BY [schema], [kind], [name]
+        """;
+
     private static async Task<QueryResult> MaterializeAsync(SqlDataReader reader, CancellationToken ct)
     {
         if (reader.FieldCount == 0)

@@ -475,6 +475,16 @@ public sealed class DaxterUi
             return await client.ExecuteAsync(server, database, sql, allowWrite: _state.AllowWrites, ct);
         }, ct));
 
+    /// <summary>Returns every object in a Fabric SQL endpoint — (schema, kind, name) — so the /sql
+    /// page can render its left-side explorer tree. Same INFORMATION_SCHEMA round-trip the CLI/MCP
+    /// use, offloaded to <see cref="Task.Run"/> so the busy overlay paints.</summary>
+    public Task<QueryResult> SqlObjectsAsync(string server, string database, CancellationToken ct = default)
+        => Track("sql-objects", $"{server}/{database}", () => Task.Run(async () =>
+        {
+            var client = new FabricSqlClient(SqlProvider(Config()));
+            return await client.ListObjectsAsync(server, database, ct);
+        }, ct));
+
     public Task<QueryResult> PipelinesAsync(CancellationToken ct = default)
         => Track("pipelines", null, async () =>
         {

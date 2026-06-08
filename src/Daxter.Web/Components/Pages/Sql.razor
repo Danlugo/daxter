@@ -35,19 +35,94 @@
 
 <ErrorBanner Message="@error" />
 
-<div class="dax-tools">
-    <button class="btn" @onclick="AskRunOrRun" disabled="@(!HasEndpoint || string.IsNullOrWhiteSpace(sql) || busy)">▶ Run SQL</button>
-    <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
-    <span class="muted dax-hint">
-        Tip: Ctrl+Enter runs · read-only by default — INSERT/UPDATE/DELETE/MERGE/DDL need the gate on the Configure page.
-        @if (!Ui.WritesEnabled) { <span> · <strong>Writes off</strong> — read queries only.</span> }
-    </span>
-</div>
+<div class="dax-layout">
+    @if (showObjects)
+    {
+        <aside class="dax-objects">
+            <div class="pane-head">
+                <span class="side-title">Objects</span>
+                <button class="pane-x" @onclick="() => showObjects = false" title="Hide objects">×</button>
+            </div>
+            @if (!HasEndpoint)
+            {
+                <p class="side-empty">Pick a SQL endpoint to browse its schemas, tables, views, functions, and stored procedures.</p>
+            }
+            else if (objError is not null)
+            {
+                <p class="bad-text">@objError</p>
+                <button class="btn-sm" @onclick="LoadObjects">Retry</button>
+            }
+            else if (objLoading || objects is null)
+            {
+                <p class="muted">Loading objects…</p>
+            }
+            else if (objects.Count == 0)
+            {
+                <p class="side-empty">No objects found in this endpoint.</p>
+            }
+            else
+            {
+                <input class="obj-search" @bind="objSearch" @bind:event="oninput" placeholder="filter objects…" autocomplete="off" />
+                <div class="obj-tree">
+                    @foreach (var schema in FilteredSchemas())
+                    {
+                        <div class="obj-table">
+                            <button class="obj-tname" @onclick="() => ToggleSchema(schema.Name)" title="@schema.Name">
+                                <span class="chev">@(IsSchemaExpanded(schema.Name) ? "▾" : "▸")</span>
+                                <span>@schema.Name</span>
+                                <small class="muted" style="margin-left:auto;">@schema.Total</small>
+                            </button>
+                            @if (IsSchemaExpanded(schema.Name))
+                            {
+                                @foreach (var grp in schema.Groups)
+                                {
+                                    var groupKey = $"{schema.Name}/{grp.Kind}";
+                                    <button class="obj-tname" @onclick="() => ToggleGroup(groupKey)" title="@grp.Kind"
+                                            style="padding-left:1rem;">
+                                        <span class="chev">@(IsGroupExpanded(groupKey) ? "▾" : "▸")</span>
+                                        <span>@KindLabel(grp.Kind)</span>
+                                        <small class="muted" style="margin-left:auto;">@grp.Items.Count</small>
+                                    </button>
+                                    @if (IsGroupExpanded(groupKey))
+                                    {
+                                        @foreach (var item in FilteredItems(grp.Items))
+                                        {
+                                            <button class="obj-item" style="padding-left:2.4rem;"
+                                                    @onclick="() => InsertObject(schema.Name, item)"
+                                                    title="Click to insert [@schema.Name].[@item]">
+                                                <span class="obj-icon">@KindIcon(grp.Kind)</span>@item
+                                            </button>
+                                        }
+                                    }
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </aside>
+    }
 
-<div class="dax-edit">
-    <textarea class="dax-editor" @bind="sql" @bind:event="oninput" rows="14"
-              placeholder="SELECT TOP 10 * FROM information_schema.tables ORDER BY table_name"
-              spellcheck="false" @onkeydown="OnEditorKey"></textarea>
+    <div class="dax-main">
+        <div class="dax-tools">
+            @if (!showObjects) { <button class="btn-sm" @onclick="() => showObjects = true" title="Show objects">▸ Objects</button> }
+            <button class="btn" @onclick="AskRunOrRun" disabled="@(!HasEndpoint || string.IsNullOrWhiteSpace(sql) || busy)">▶ Run SQL</button>
+            <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
+            <span class="muted dax-hint">
+                Tip: click an object on the left to insert it · Ctrl+Enter runs · read-only by default.
+                @if (!Ui.WritesEnabled) { <span> · <strong>Writes off</strong> — read queries only.</span> }
+            </span>
+        </div>
+
+        <div class="dax-edit">
+            <textarea class="dax-editor" @bind="sql" @bind:event="oninput" rows="14"
+                      placeholder="SELECT TOP 10 * FROM information_schema.tables ORDER BY table_name"
+                      spellcheck="false" @onkeydown="OnEditorKey"></textarea>
+        </div>
+
+        @if (busy) { <p class="muted">Running…</p> }
+        <ResultGrid Result="result" Error="@error" Empty="Pick a SQL endpoint, type a SELECT and Run." />
+    </div>
 </div>
 
 @if (pendingWrite is not null)
@@ -68,9 +143,6 @@
     </div>
 }
 
-@if (busy) { <p class="muted">Running…</p> }
-<ResultGrid Result="result" Error="@error" Empty="Pick a SQL endpoint, type a SELECT and Run." />
-
 @code {
     private List<string> workspaces = new();
     private List<FabricSqlClientEndpoint> endpoints = new();
@@ -79,6 +151,23 @@
     private string? error;
     private bool busy;
     private string? pendingWrite;
+
+    // ---- Objects explorer (left aside) ----
+    private bool showObjects = true;
+    private bool objLoading;
+    private string? objError;
+    private string? objectsFor;                            // endpoint name the current tree was loaded for
+    private List<SchemaNode>? objects;                     // grouped (schema → kind → name)
+    private readonly HashSet<string> expandedSchemas = new();
+    private readonly HashSet<string> expandedGroups = new();
+    private string objSearch = "";
+
+    /// <summary>Grouped data shape feeding the tree.</summary>
+    private sealed record KindGroup(string Kind, List<string> Items);
+    private sealed record SchemaNode(string Name, List<KindGroup> Groups)
+    {
+        public int Total => Groups.Sum(g => g.Items.Count);
+    }
 
     // Deep-link: /sql?ws=&ep=
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
@@ -123,6 +212,7 @@
             {
                 endpoint = Qep!;
                 Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+                await LoadObjects();
             }
         }
         finally { BusyState.End(); StateHasChanged(); }
@@ -141,6 +231,7 @@
     private async Task OnWorkspaceChanged()
     {
         endpoints = new(); endpoint = ""; result = null;
+        ResetObjects();
         if (string.IsNullOrEmpty(workspace)) return;
         busy = true; BusyState.Begin(); error = null;
         try
@@ -157,11 +248,132 @@
         finally { busy = false; BusyState.End(); }
     }
 
-    private void OnEndpointPicked()
+    private async Task OnEndpointPicked()
     {
         result = null;
-        if (!string.IsNullOrEmpty(endpoint))
-            Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+        ResetObjects();
+        if (string.IsNullOrEmpty(endpoint)) return;
+        Usage.Record(UsageStore.Dataset, endpoint, workspace, UsageStore.SqlContext);
+        await LoadObjects();
+    }
+
+    private void ResetObjects()
+    {
+        objects = null; objectsFor = null; objError = null;
+        expandedSchemas.Clear(); expandedGroups.Clear();
+    }
+
+    /// <summary>Loads the schema/tables/views/funcs/procs tree for the currently picked endpoint.
+    /// Single INFORMATION_SCHEMA UNION round-trip — see <see cref="FabricSqlClient.ListObjectsSql"/>.
+    /// The result is grouped by (schema, kind) here so render is allocation-free.</summary>
+    private async Task LoadObjects()
+    {
+        var ep = SelectedEndpoint();
+        if (ep is null) return;
+        objLoading = true; BusyState.Begin(); objError = null; objects = null; StateHasChanged();
+        try
+        {
+            var r = await Ui.SqlObjectsAsync(ep.Server, ep.Database);
+            objects = GroupObjects(r);
+            objectsFor = endpoint;
+            // Auto-expand the first schema (usually 'dbo') so the user sees something on landing.
+            if (objects.Count > 0) expandedSchemas.Add(objects[0].Name);
+        }
+        catch (Exception ex) { objError = ex.Message; }
+        finally { objLoading = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    /// <summary>Folds a flat (schema, kind, name) result into schema → kind-group → items. Pure so it
+    /// can be unit-tested without spinning up a Blazor host.</summary>
+    private static List<SchemaNode> GroupObjects(QueryResult r)
+    {
+        // Column order is fixed by FabricSqlClient.ListObjectsSql: schema, kind, name.
+        var bySchema = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in r.Rows)
+        {
+            var schema = row[0]?.ToString() ?? "";
+            var kind = row[1]?.ToString() ?? "";
+            var name = row[2]?.ToString() ?? "";
+            if (schema.Length == 0 || name.Length == 0) continue;
+
+            if (!bySchema.TryGetValue(schema, out var byKind))
+                bySchema[schema] = byKind = new(StringComparer.OrdinalIgnoreCase);
+            if (!byKind.TryGetValue(kind, out var items))
+                byKind[kind] = items = new();
+            items.Add(name);
+        }
+
+        // Stable kind order — matches Fabric's explorer (Tables, Views, Functions, Stored Procedures).
+        var kindOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            { ["Table"] = 0, ["View"] = 1, ["Function"] = 2, ["Stored Procedure"] = 3 };
+
+        return bySchema
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => new SchemaNode(kv.Key,
+                kv.Value
+                    .OrderBy(kg => kindOrder.TryGetValue(kg.Key, out var o) ? o : int.MaxValue)
+                    .ThenBy(kg => kg.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(kg => new KindGroup(kg.Key, kg.Value)).ToList()))
+            .ToList();
+    }
+
+    // ---- tree expand / filter / insert ----
+
+    private bool IsSchemaExpanded(string s)
+        => !string.IsNullOrEmpty(objSearch) || expandedSchemas.Contains(s);
+    private bool IsGroupExpanded(string key)
+        => !string.IsNullOrEmpty(objSearch) || expandedGroups.Contains(key);
+    private void ToggleSchema(string s) { if (!expandedSchemas.Remove(s)) expandedSchemas.Add(s); }
+    private void ToggleGroup(string key) { if (!expandedGroups.Remove(key)) expandedGroups.Add(key); }
+
+    /// <summary>Schemas that have at least one item matching the search (or the schema name itself
+    /// matches). Reuses the existing filter input pattern from the DAX Fields tree.</summary>
+    private IEnumerable<SchemaNode> FilteredSchemas()
+    {
+        if (objects is null) yield break;
+        var q = objSearch?.Trim();
+        foreach (var s in objects)
+        {
+            if (string.IsNullOrEmpty(q)
+                || s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || s.Groups.Any(g => g.Items.Any(i => i.Contains(q, StringComparison.OrdinalIgnoreCase))))
+                yield return s;
+        }
+    }
+
+    private IEnumerable<string> FilteredItems(List<string> items)
+    {
+        var q = objSearch?.Trim();
+        return string.IsNullOrEmpty(q) ? items
+            : items.Where(i => i.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "Table" => "Tables",
+        "View" => "Views",
+        "Function" => "Functions",
+        "Stored Procedure" => "Stored Procedures",
+        _ => kind,
+    };
+
+    // Single-char glyphs — match the DAX Fields tree style (⊞/▦/ƒ etc). Plain unicode so any font renders them.
+    private static string KindIcon(string kind) => kind switch
+    {
+        "Table" => "▦",
+        "View" => "▤",
+        "Function" => "ƒ",
+        "Stored Procedure" => "⚙",
+        _ => "·",
+    };
+
+    /// <summary>Appends a bracketed <c>[schema].[name]</c> reference to the SQL editor, with a leading
+    /// space if needed. Keeps cursor management cheap (no JS interop) — same approach as Query.razor.</summary>
+    private void InsertObject(string schemaName, string objectName)
+    {
+        var qualified = $"[{schemaName}].[{objectName}]";
+        var sep = string.IsNullOrEmpty(sql) || sql.EndsWith(" ") || sql.EndsWith("\n") ? "" : " ";
+        sql = sql + sep + qualified;
     }
 
     /// <summary>If the SQL looks like a write and the gate is on, show the confirm-modal first;

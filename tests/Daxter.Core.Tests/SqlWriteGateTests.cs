@@ -56,4 +56,11 @@ public class SqlWriteGateTests
     [InlineData("\n\t  \n")]
     public void IsReadOnly_treats_blank_as_safe(string sql)
         => Assert.True(SqlWriteGate.IsReadOnly(sql), sql);
+
+    // The object-discovery SQL ships embedded in the assembly — the Web page tree, the CLI `sql objects`
+    // command, and the MCP daxter_sql_objects tool all run this same string. If it ever drifts into
+    // something the write-gate refuses, the explorer breaks everywhere at once — pin it down here.
+    [Fact]
+    public void ListObjectsSql_is_classified_read_only()
+        => Assert.True(SqlWriteGate.IsReadOnly(FabricSqlClient.ListObjectsSql));
 }

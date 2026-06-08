@@ -1189,11 +1189,76 @@ internal static class Program
             pr.GetValue(allowWritesOpt),
             ct));
 
+        // daxter sql objects --workspace W --endpoint NAME
+        // Lists schemas + tables/views/functions/stored procedures in one INFORMATION_SCHEMA round-trip.
+        // No GUID hostname required — endpoint name from `sql endpoints` resolves to (server, database).
+        var objectsEndpointOpt = new Option<string?>("--endpoint")
+            { Description = "Warehouse or Lakehouse name (from `sql endpoints`)." };
+        var objectsServerOpt = new Option<string?>("--server")
+            { Description = "Override server hostname (skips discovery)." };
+        var objectsDatabaseOpt = new Option<string?>("--database")
+            { Description = "Override database name (used with --server)." };
+        var objects = new Command("objects", "List schemas + tables / views / functions / stored procedures.")
+            { objectsEndpointOpt, objectsServerOpt, objectsDatabaseOpt, outputOption };
+        connectionOptions.AddTo(objects);
+        objects.SetAction((pr, ct) => RunSqlObjectsAsync(
+            () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(objectsServerOpt) is null),
+            pr.GetValue(objectsEndpointOpt),
+            pr.GetValue(objectsServerOpt),
+            pr.GetValue(objectsDatabaseOpt),
+            () => pr.GetValue(outputOption),
+            ct));
+
         return new Command("sql",
-            "Fabric Warehouse / Lakehouse SQL endpoint — list endpoints, run T-SQL.")
+            "Fabric Warehouse / Lakehouse SQL endpoint — list endpoints, browse objects, run T-SQL.")
         {
-            endpoints, query,
+            endpoints, objects, query,
         };
+    }
+
+    /// <summary>Lists schemas + tables/views/functions/stored procedures on a Fabric SQL endpoint. Same
+    /// INFORMATION_SCHEMA round-trip the Web /sql tree uses; resolves endpoint NAME → (server, database)
+    /// via the discovery list so callers don't have to know the GUID hostname.</summary>
+    private static async Task<int> RunSqlObjectsAsync(
+        Func<DaxterConfig> configFactory,
+        string? endpointName, string? server, string? database,
+        Func<string?> outputFactory, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            var msal = BuildMsalProvider(config);
+
+            if (string.IsNullOrWhiteSpace(server))
+            {
+                if (string.IsNullOrWhiteSpace(endpointName))
+                    throw new DaxterException("Pass --endpoint <name> (from `daxter sql endpoints`) or --server + --database.");
+                using var rest = new PowerBiRestClient(msal);
+                var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+                var list = await rest.SqlEndpointsAsync(groupId, ct);
+                var match = list.Rows.FirstOrDefault(r =>
+                    string.Equals(r[0]?.ToString(), endpointName, StringComparison.OrdinalIgnoreCase));
+                if (match is null)
+                    throw new DaxterException(
+                        $"Endpoint '{endpointName}' not found in '{config.Workspace}'. Run `daxter sql endpoints` to see what's available.");
+                server = match[1]?.ToString();
+                database ??= match[2]?.ToString();
+            }
+            if (string.IsNullOrWhiteSpace(database))
+                throw new DaxterException("--database is required when --server is passed without --endpoint.");
+
+            var client = new FabricSqlClient(msal);
+            var result = await client.ListObjectsAsync(server!, database!, ct);
+
+            var format = ResultFormatterFactory.Parse(outputFactory());
+            Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
+            Console.Error.WriteLine($"({result.RowCount} row{(result.RowCount == 1 ? "" : "s")})");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
     }
 
     /// <summary>Runs a T-SQL query against a Fabric SQL endpoint. Resolves the (server, database)

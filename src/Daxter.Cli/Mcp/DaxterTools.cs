@@ -655,6 +655,17 @@ public static class DaxterTools
         CancellationToken ct = default)
         => DaxterToolRuntime.SqlEndpointsAsync(workspace, ct);
 
+    [McpServerTool(Name = "daxter_sql_objects", ReadOnly = true, Title = "List SQL endpoint objects (schemas + tables/views/functions/procs)"),
+     Description("List every schema and every Table / View / Function / Stored Procedure on a Fabric SQL endpoint, " +
+                 "as (schema, kind, name) rows. One INFORMATION_SCHEMA round-trip; resolves the endpoint NAME (from " +
+                 "daxter_sql_endpoints) into the server/database for you. " +
+                 "Use this before daxter_sql_query to discover what's queryable — pick a table, then SELECT from it.")]
+    public static Task<string> SqlObjects(
+        [Description("Workspace name or id.")] string workspace,
+        [Description("Warehouse or Lakehouse name (from daxter_sql_endpoints).")] string endpoint,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.SqlObjectsAsync(workspace, endpoint, ct);
+
     [McpServerTool(Name = "daxter_sql_query", ReadOnly = true, Title = "Run T-SQL on a Fabric SQL endpoint"),
      Description("Run T-SQL on a Fabric Warehouse or Lakehouse SQL endpoint. Pass the workspace and the endpoint NAME " +
                  "(from daxter_sql_endpoints) — the tool resolves the server + database for you. " +
