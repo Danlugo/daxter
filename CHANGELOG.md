@@ -6,6 +6,15 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.26.2] - 2026-06-07
+
+### Fixed
+- **`/sql` editor: typed SQL was invisible.** The textarea reused `.dax-edit .dax-editor`, which is
+  intentionally `color:transparent` on the DAX page (a colored `<pre>` paints highlighted text
+  underneath). The SQL page has no highlight overlay, so the transparent text rule was rendering
+  white-on-white. New `.sql-edit` wrapper class keeps the size/font of the DAX editor but flips
+  `color` / `-webkit-text-fill-color` back to `var(--text)` so the SQL you type is visible.
+
 ## [1.26.1] - 2026-06-07
 
 ### Fixed

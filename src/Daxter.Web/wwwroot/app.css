@@ -112,6 +112,20 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .dax-edit .dax-hl-code { font:inherit; }
 .dax-edit .dax-editor { position:relative; z-index:1; min-height:16rem; resize:vertical; background:transparent; color:transparent; caret-color:var(--text); -webkit-text-fill-color:transparent; }
 .dax-edit .dax-editor::placeholder { color:var(--faint); -webkit-text-fill-color:var(--faint); }
+/* SQL editor — no highlight overlay, so make the textarea text VISIBLE.
+   (.dax-edit makes its child .dax-editor transparent because the DAX page paints a colored
+   <pre> behind it. The SQL page reuses the dimensions/font of .dax-editor but has no overlay,
+   so wrap in .sql-edit to flip the color back on.) */
+.sql-edit { position:relative; }
+.sql-edit .dax-editor {
+    width:100%; box-sizing:border-box; margin:0;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.5;
+    padding:.4rem; border:1px solid var(--line); border-radius:6px;
+    white-space:pre-wrap; overflow-wrap:break-word; word-break:break-word;
+    min-height:16rem; resize:vertical;
+    background:var(--bg); color:var(--text); -webkit-text-fill-color:var(--text);
+}
+.sql-edit .dax-editor::placeholder { color:var(--faint); -webkit-text-fill-color:var(--faint); }
 /* token colors (GitHub-light) */
 .t-fn { color:#8250df; } .t-kw { color:var(--bad); font-weight:600; } .t-str { color:#0a3069; }
 .t-tbl { color:#953800; } .t-col { color:var(--link); } .t-num { color:#0550ae; } .t-com { color:#6e7781; font-style:italic; }
