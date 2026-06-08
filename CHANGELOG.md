@@ -6,6 +6,16 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.28.1] - 2026-06-08
+
+### Fixed
+- **`/sql` export-options layout was broken.** The new *Quote-all* and *CRLF* checkboxes inherited
+  the global `input { min-width:240px }` rule, stretching the checkbox boxes across the toolbar.
+  Added a tight `input[type="checkbox"]` reset (`min-width:0; width:auto; accent-color:var(--accent)`)
+  and grouped the *Export All CSV* button + its two checkboxes into one bordered `.export-group`
+  visual chip — muted small text on the labels, accent-colored ticks, hover-highlight on each
+  option. The DAX Query / model-edit checkboxes pick up the same reset so they render normally too.
+
 ## [1.28.0] - 2026-06-08
 
 ### Added

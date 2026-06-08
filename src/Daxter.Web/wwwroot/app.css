@@ -189,6 +189,15 @@ a.btn-sm { display:inline-block; text-decoration:none; color:var(--text); }
 .usercode { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:1.5rem; font-weight:700; letter-spacing:.15em; background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.4rem .8rem; user-select:all; }
 label.inline { display:inline-flex; align-items:center; gap:.35rem; color:var(--text); margin:0; }
 label.inline input, label.inline select { min-width:auto; }
+/* Checkbox sizing — defeat the global input min-width:240px even when the input isn't wrapped in label.inline. */
+input[type="checkbox"], input[type="radio"] { min-width:0; width:auto; padding:0; margin:0; accent-color:var(--accent); cursor:pointer; }
+
+/* "Export All CSV" + its format options sit as one visual group on /sql. The button anchors the
+   group; the two checkboxes hang off it as muted opt-ins (no border bling, no input stretching). */
+.export-group { display:inline-flex; align-items:center; gap:.5rem; padding:.15rem .5rem .15rem .15rem; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); }
+.export-group .btn-sm { background:transparent; }
+.export-opt { color:var(--muted); font-size:.82rem; padding:.2rem .3rem; border-radius:4px; cursor:pointer; user-select:none; white-space:nowrap; }
+.export-opt:hover { background:var(--surface-2); color:var(--text); }
 .grid td.nowrap { white-space:nowrap; }
 .grid td.msg { white-space:normal; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; }
 .grid.logs tr.lvl-Error td, .grid.logs tr.lvl-Critical td { background:var(--bad-bg); }
