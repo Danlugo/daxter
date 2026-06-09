@@ -14,6 +14,16 @@ the environment, e.g. `Marketing - QA`; an unsuffixed name like `Sales Analytics
 > `Sales Analytics - Dev`, default model `Retail Model`. Name another workspace to target
 > it. It's read-only unless writes are explicitly enabled. Start with `daxter_workspaces`.
 
+## Discover what's available
+
+Before anything else, ask Claude **"what can DAXter do?"** — it calls `daxter_capabilities`,
+which reflects the live tool set at runtime (76 tools today: 50 read · 26 gated writes).
+Every release auto-surfaces its new tools here; no out-of-band docs to keep in sync.
+
+| You say | Tool |
+|---|---|
+| "What DAXter tools are available?" | `daxter_capabilities` (returns version + every tool's name, title, kind, description) |
+
 ## Sign in (device-code default)
 
 When the server is configured for your own login (default), sign in once per machine:
@@ -21,10 +31,14 @@ When the server is configured for your own login (default), sign in once per mac
 | Ask | Tool |
 |-----|------|
 | "Sign in to Power BI" | `daxter_login` — returns a URL + code; open it, enter the code, sign in. The token is then cached. |
+| "Sign in for Fabric SQL" (one-time second sign-in for the SQL audience) | `daxter_login` with `target="sql"` — same flow against a separate pre-authorized client id. |
 | "List my workspaces" (after sign-in) | `daxter_workspaces` — then pick a default, or name a workspace per request. |
 
-If any tool replies *"Not signed in to Power BI"*, just say "sign in" again. (With a service
-principal there's nothing to sign in — it's already authenticated.)
+If any tool replies *"Not signed in to Power BI"*, just say "sign in" again. If it says
+*"Not signed in to Fabric SQL endpoints"*, sign in once more with `target="sql"` — that's a
+separate token because Power BI's first-party client id isn't pre-authorized for
+`database.windows.net` (AADSTS65002). After that one extra sign-in, both surfaces refresh
+silently for ~90 days. (With a service principal there's nothing to sign in.)
 
 ## Query & metadata
 
@@ -39,6 +53,8 @@ principal there's nothing to sign in — it's already authenticated.)
 | "What parameters does this model have?" | `daxter_parameters` |
 | "When were the Sales partitions last refreshed?" | `daxter_partitions` |
 | "List the RLS roles" | `daxter_rls` |
+| "Show the DAX filter expressions for the IHUB role" | `daxter_role_filters` (returns `(Table, FilterExpression)` for each filtered table — the raw DAX a model author wrote in Tabular Editor) |
+| "Who's a member of the Regional Manager role?" | `daxter_role_members` |
 | "Export the model definition (.bim)" | `daxter_export` |
 | "Compare measures between Retail Model and Retail Model v2" | `daxter_diff_measures` |
 | "Test RLS: COUNTROWS('Sales') as jdoe@contoso.com" | `daxter_test_rls` |
@@ -82,11 +98,77 @@ Deployment rules are inferred by comparing a model's parameter values across pip
 | "When was the model last refreshed?" | `daxter_refresh_history` |
 | "List the refresh jobs / what's queued or running?" | `daxter_refresh_jobs` (shared queue, all interfaces; shows worker liveness) |
 
+## Fabric SQL endpoints (Warehouses + Lakehouse SQL endpoints)
+
+T-SQL against any Fabric Warehouse or Lakehouse SQL endpoint, AAD-authenticated via the
+same MSAL account (one extra one-time `daxter_login` with `target="sql"`). Discover → browse
+→ query → export.
+
+| Ask | Tool |
+|-----|------|
+| "What SQL endpoints exist in the Data Warehouse workspace?" | `daxter_sql_endpoints` (lists every Warehouse + Lakehouse SQL endpoint with server + database + kind) |
+| "What tables/views/procs are on the RetailWH endpoint?" | `daxter_sql_objects` (one INFORMATION_SCHEMA round-trip; (schema, kind, name) rows for tables/views/functions/stored procedures) |
+| "Show me the top 10 orders from RetailWH" | `daxter_sql_query` (read-only by default; capped JSON result for sampling) |
+| "Export every row of `dbo.orders` to a file" | `daxter_sql_export` (streams full result-set CSV straight to `~/.daxter/exports/sql/<ts>-<endpoint>.csv` on the persistent volume — no in-memory materialization, safe for `SELECT *` on multi-million-row tables) |
+| "Export with Excel-Windows formatting" | `daxter_sql_export` with `quoteAll=true, crlf=true` (matches Power BI / Excel "Export data" byte-for-byte) |
+
+Write statements (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC) are **refused by default** —
+`daxter_sql_query` and `daxter_sql_export` only execute reads unless the Allow-writes gate
+is on AND the workspace doesn't match the read-only patterns.
+
+## Fabric Copy Jobs + Notebooks (view, run, monitor)
+
+Browse Data Factory Copy Jobs and Fabric Notebooks · view definitions · run on demand
+(writes-gated, dry-run by default) · watch run history · cancel a running instance.
+The `daxter_item_runs` / `daxter_item_job_status` / `daxter_cancel_item_job` tools work
+on ANY Fabric item — Copy Job, Notebook, Pipeline — so the monitoring loop is uniform.
+
+| Ask | Tool |
+|-----|------|
+| "List the Copy Jobs in this workspace" | `daxter_copy_jobs` |
+| "Show the JSON definition for the IngestSales copy job" | `daxter_copy_job_definition` (the full `copyjob-content.json` — source/destination/mapping) |
+| "Run the IngestSales copy job" (dry run) | `daxter_run_copy_job` (returns the plan without firing) |
+| "Run the IngestSales copy job, do it" | `daxter_run_copy_job` with `execute: true` — returns the new instance id |
+| "Did that run finish?" | `daxter_item_job_status` with the item id + instance id (terminal states: `Completed` / `Failed` / `Cancelled`) |
+| "Show me the last few runs of IngestSales" | `daxter_item_runs` (instanceId, status, invokeType, start/end, durationSec, failureReason) |
+| "Cancel that running instance" | `daxter_cancel_item_job` with `execute: true` |
+| "List the Notebooks" | `daxter_notebooks` |
+| "Show me the cells of the DataPrep notebook" | `daxter_notebook_definition` (ipynb by default; pass `format: "FabricGitSource"` for the .py/.scala/.sql source file) |
+| "Run the DataPrep notebook" | `daxter_run_notebook` with `execute: true` |
+| "Run DataPrep with as_of_date=2026-06-01" | `daxter_run_notebook` with `execute: true, executionData: '{"parameters":{"as_of_date":{"value":"2026-06-01","type":"string"}}}'` |
+
+The discover → inspect → run → poll loop:
+`daxter_copy_jobs` → `daxter_copy_job_definition` → `daxter_run_copy_job (execute=true)` →
+poll `daxter_item_job_status` until status is terminal.
+
+## Workspace writes-gate (read-only / write-allowed patterns)
+
+DAXter's MCP refuses writes against workspaces in your **read-only list** (deny-list) or
+outside your **write-allowed list** (allow-list, when set). Patterns use `*` as wildcard,
+case-insensitive, anchored to the whole name. Refuse messages name the matched pattern:
+*"REFUSED — 'Reporting Prod East' is READ-ONLY (read-only pattern '*Prod*')"*.
+
+Configure once on the **/configure** web page (the two new inputs) or via env vars on the
+MCP server container:
+
+```bash
+# Deny-list: anything matching is locked from writes:
+DAXTER_READONLY_WORKSPACES=*Prod*, Reporting*
+# Allow-list: when set, ONLY workspaces matching one of these can be written to:
+DAXTER_WRITE_WORKSPACES=Data*Dev, *QA
+```
+
+When you set either list, the MCP **auto-enforces it** — no extra opt-in env var needed.
+(Legacy heuristic-only setups still gate via `DAXTER_MCP_BLOCK_PROD_WRITES=true`.)
+
 ## Gated write tools (off by default)
 
 `daxter_refresh` and `daxter_clear_cache` are **dry-run by default** and only act when `execute=true`
-**and** writes are enabled. PROD targets are allowed by default once writes are on (set
-`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block them).
+**and** writes are enabled. Workspaces matching your **read-only patterns** (or outside your
+**write-allowed patterns**, when that list is non-empty) are refused even with writes on —
+see [Workspace writes-gate](#workspace-writes-gate-read-only--write-allowed-patterns).
+For legacy heuristic-only setups (no explicit lists), the prod-block stays opt-in via
+`DAXTER_MCP_BLOCK_PROD_WRITES=true`.
 
 **Refreshes are queued, not run inline.** `daxter_refresh` with `execute=true` **enqueues** a job onto
 the shared queue and returns a **job id**; the single worker hosted by the DAXter **web container** runs

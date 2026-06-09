@@ -143,9 +143,15 @@ queue.
 > administers the gateway** (see [Authenticate](#authenticate)), be added as an admin of that
 > gateway, or look it up in *Manage connections and gateways* in the Power BI portal.
 
-## RLS testing (impersonation)
+## RLS — view definitions, test impersonation
 
 ```bash
+# List roles + view a role's DAX filter expressions + members (same definitions
+# Tabular Editor shows in its role tree; read-only — edits go through `model edit role`)
+./bin/daxter model rls                                # list roles + permission level
+./bin/daxter model rls --role "Regional Manager"      # table filters (DAX) + members
+
+# Run a query under the role's identity (impersonate a user; engine applies the RLS filter)
 ./bin/daxter test-rls --role "Regional Manager" --user jdoe@contoso.com \
   -q "EVALUATE ROW(\"rows\", COUNTROWS('Sales'))"
 ```
@@ -157,6 +163,85 @@ queue.
 ./bin/daxter pipeline stages --pipeline <id>      # stages (dev/test/prod) + workspaces
 ./bin/daxter pipeline operations --pipeline <id>  # recent deploy operations
 ```
+
+## Fabric SQL endpoints (Warehouses + Lakehouse SQL endpoints)
+
+T-SQL against any Fabric Warehouse or Lakehouse SQL endpoint, AAD-authenticated with your
+existing sign-in (one extra one-time device-code for the SQL scope — Power BI's client id
+isn't pre-authorized for `database.windows.net`).
+
+```bash
+# One-time second sign-in for the SQL scope (silent thereafter):
+./bin/daxter login --target sql
+
+# Discovery — list every Warehouse + Lakehouse SQL endpoint in a workspace
+./bin/daxter sql endpoints --workspace "Sales Analytics"
+
+# Browse what's queryable on a specific endpoint (schemas → tables/views/functions/procs)
+./bin/daxter sql objects --workspace "Sales Analytics" --endpoint "RetailWH"
+
+# Sampling query (read-only by default; results in the chosen output format)
+./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
+  "SELECT TOP 10 * FROM [dbo].[orders] ORDER BY order_date DESC"
+
+# Stream the FULL result set straight to a .csv (no in-memory materialization;
+# safe for SELECT * on multi-million-row tables)
+./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
+  --out /out/orders_full.csv "SELECT * FROM [dbo].[orders]"
+
+# Power BI / Excel "Export data" byte-compatible CSV (quote every field + CRLF endings)
+./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
+  --out /out/orders_excel.csv --quote-all --crlf \
+  "SELECT * FROM [dbo].[orders]"
+
+# Writes are gated behind --allow-writes (off by default — only SELECT/EXPLAIN/SHOW go through)
+./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
+  --allow-writes "UPDATE staging.summary SET status='processed' WHERE id IN (1,2,3)"
+```
+
+## Fabric Copy Jobs + Notebooks (view, run, monitor)
+
+Browse Data Factory Copy Jobs and Fabric Notebooks in a workspace, view their definitions,
+run on demand, and watch run history. Reads anytime; runs/cancels are dry-run unless `--yes`.
+
+```bash
+# List + inspect Copy Jobs
+./bin/daxter fabric copy-jobs ls --workspace "Sales Analytics"
+./bin/daxter fabric copy-jobs show --workspace "Sales Analytics" --copy-job <id>   # full copyjob-content.json
+
+# Run on demand + watch (--yes to actually fire)
+./bin/daxter fabric copy-jobs run --workspace "Sales Analytics" --copy-job <id> --yes
+./bin/daxter fabric copy-jobs runs --workspace "Sales Analytics" --copy-job <id>   # instances + status + duration
+./bin/daxter fabric copy-jobs cancel --workspace "Sales Analytics" --copy-job <id> --instance <instance-id> --yes
+
+# Same shape for Notebooks
+./bin/daxter fabric notebooks ls --workspace "Sales Analytics"
+./bin/daxter fabric notebooks show --workspace "Sales Analytics" --notebook <id>             # ipynb by default
+./bin/daxter fabric notebooks show --workspace "Sales Analytics" --notebook <id> --format FabricGitSource  # source file
+./bin/daxter fabric notebooks run --workspace "Sales Analytics" --notebook <id> --yes
+./bin/daxter fabric notebooks run --workspace "Sales Analytics" --notebook <id> \
+  --execution-data '{"parameters":{"as_of_date":{"value":"2026-06-01","type":"string"}}}' --yes
+./bin/daxter fabric notebooks runs --workspace "Sales Analytics" --notebook <id>
+```
+
+## Writes-gate workspaces (deny / allow lists with glob patterns)
+
+DAXter's writes-gate is two lists of glob patterns (`*` = zero-or-more chars, case-insensitive,
+match the whole name). **Deny wins; allow-list restricts further when non-empty.** Set via the
+web console (Configure page) or env vars on every container:
+
+```bash
+# Deny-list — anything matching is locked from writes even with Allow writes on:
+export DAXTER_READONLY_WORKSPACES='*Prod*, Reporting*'
+
+# Allow-list — when non-empty, ONLY workspaces matching one of these can be written to:
+export DAXTER_WRITE_WORKSPACES='Data*Dev, *QA'
+
+# Legacy DAXTER_PROD_WORKSPACES still works — its entries become additional read-only patterns.
+```
+
+The refuse messages name the matched pattern: `Refusing to refresh a READ-ONLY target
+('Reporting Prod East') — matched read-only pattern "*Prod*".`
 
 ## Editing the model (`model edit`)
 
