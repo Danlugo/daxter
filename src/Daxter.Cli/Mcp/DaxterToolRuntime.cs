@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using Daxter.Core;
+using Daxter.Core.Artifacts;
 using Daxter.Core.Audit;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
@@ -624,7 +625,7 @@ internal static class DaxterToolRuntime
     /// default; non-SELECT requires the writes gate same as the live-query path.</summary>
     public static Task<string> SqlExportAsync(
         string? workspace, string endpointName, string sql, CancellationToken ct,
-        bool quoteAll = false, bool crlf = false)
+        bool quoteAll = false, bool crlf = false, string? artifactKey = null)
         => Guard(async () =>
         {
             if (string.IsNullOrWhiteSpace(endpointName))
@@ -666,9 +667,25 @@ internal static class DaxterToolRuntime
             await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var sw = new StreamWriter(fs);
             var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), sw, ct, style: style);
-            return $"Wrote {rows} row{(rows == 1 ? "" : "s")} to {path} on the container's persistent volume " +
+            await sw.FlushAsync(ct);
+            await fs.FlushAsync(ct);
+
+            // Optional second hop — also persist the bytes into the artifact store under a
+            // caller-chosen key. Lets the agent then fetch the CSV via daxter_artifact_get /
+            // bundle, with no docker-cp / bind-mount required. Source-tool stamp survives so
+            // the /artifacts page shows where each artifact came from.
+            string? artifactLine = null;
+            if (!string.IsNullOrWhiteSpace(artifactKey))
+            {
+                await using var src = File.OpenRead(path);
+                var aref = await Artifacts.PutAsync(artifactKey, src,
+                    new ArtifactMeta(SourceTool: "daxter_sql_export"), ct);
+                artifactLine = $" Mirrored to artifact '{aref.Key}' ({aref.Bytes:N0} bytes) — fetch via daxter_artifact_get.";
+            }
+
+            return $"Wrote {rows} row{(rows == 1 ? "" : "s")} to {path} on the container's persistent volume" +
                    (quoteAll || crlf ? $" (style: QuoteAll={quoteAll}, CRLF={crlf})" : "") +
-                   $" (use `docker cp daxter-mcp-…:{path} ./` to pull it onto your host, or mount the volume to a host path).";
+                   (artifactLine ?? $" (use `docker cp daxter-mcp-…:{path} ./` to pull it onto your host, or pass artifactKey to mirror to the artifact store).");
         });
 
     /// <summary>Runs T-SQL on a Fabric SQL endpoint. Resolves (server, database) from the workspace
@@ -1034,4 +1051,154 @@ internal static class DaxterToolRuntime
         var capped = new QueryResult(result.Columns, result.Rows.Take(RowCap).ToList());
         return Json.Format(capped) + $"\n/* truncated: showing {RowCap} of {result.RowCount} rows */";
     }
+
+    // ── Artifact-store MCP runtime ────────────────────────────────────────────────────────────
+    // The MCP server is long-lived (one stdio process per Claude Desktop session), so we use a
+    // process-wide singleton store. The Web host already does its own DI registration; CLI
+    // commands instantiate per-invocation. All three converge on the same on-disk root, so
+    // bytes written by one surface are immediately visible to the others.
+    //
+    // INLINE-vs-URL strategy. MCP can carry bytes inline as base64, but blowing through the
+    // protocol's per-message budget with a 100MB .pbix is a recipe for the agent silently
+    // truncating. For artifacts ≤ this threshold we return base64; above it we return an
+    // HTTPS URL pointing at the /api/artifacts endpoint the Web host exposes. The agent then
+    // streams it directly (no MCP overhead). The threshold is conservative — it can grow once
+    // we've measured real-world payload sizes.
+    private const int InlineBytesThreshold = 10 * 1024 * 1024;   // 10 MB
+    private static readonly Lazy<LocalArtifactStore> ArtifactsLazy = new(() => new LocalArtifactStore());
+    public static IArtifactStore Artifacts => ArtifactsLazy.Value;
+
+    /// <summary>List artifacts as a JSON envelope the agent can iterate. Returns up to
+    /// <see cref="RowCap"/> entries (then truncates) so a large store can't blow the context.</summary>
+    public static Task<string> ArtifactListAsync(string? prefix, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var items = await Artifacts.ListAsync(prefix, ct);
+            var capped = items.Count <= RowCap ? items : items.Take(RowCap).ToList();
+            var usage = await Artifacts.CurrentUsageBytesAsync(ct);
+            var envelope = new
+            {
+                items = capped.Select(a => new
+                {
+                    key = a.Key,
+                    bytes = a.Bytes,
+                    created_utc = a.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    expires_utc = a.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    source_tool = a.SourceTool,
+                }),
+                total_listed = items.Count,
+                returned = capped.Count,
+                truncated = items.Count > capped.Count,
+                usage_bytes = usage,
+                quota_bytes = Artifacts.QuotaBytes,
+            };
+            return System.Text.Json.JsonSerializer.Serialize(envelope,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        });
+
+    /// <summary>Get a single artifact. ≤ 10 MB: return base64 inline so the agent can parse it
+    /// immediately (PBIR JSON, copy-job def). &gt; 10 MB: return an HTTP URL and prompt the
+    /// agent to fetch it via the streaming endpoint (a 200 MB .pbix never enters the MCP body).</summary>
+    public static Task<string> ArtifactGetAsync(string key, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var meta = await Artifacts.GetMetaAsync(key, ct)
+                ?? throw new DaxterException($"Artifact not found: {key}");
+
+            if (meta.Bytes > InlineBytesThreshold)
+            {
+                return System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    key = meta.Key,
+                    bytes = meta.Bytes,
+                    download_url = $"/api/artifacts/{Uri.EscapeDataString(meta.Key).Replace("%2F", "/")}",
+                    inline = false,
+                    note = $"Artifact exceeds {InlineBytesThreshold:N0} bytes — fetch it via the URL " +
+                           "(GET against the DAXter web host, e.g. http://localhost:8088 + download_url).",
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+
+            await using var fs = await Artifacts.OpenReadAsync(key, ct);
+            using var ms = new MemoryStream();
+            await fs.CopyToAsync(ms, ct);
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                key = meta.Key,
+                bytes = meta.Bytes,
+                created_utc = meta.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                expires_utc = meta.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                source_tool = meta.SourceTool,
+                inline = true,
+                content_base64 = Convert.ToBase64String(ms.ToArray()),
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        });
+
+    /// <summary>Zip a prefix and return either inline base64 (≤ threshold) or a download URL.
+    /// The Web /api/artifacts/{key}?bundle=1 endpoint serves the streaming version.</summary>
+    public static Task<string> ArtifactBundleAsync(string prefix, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var members = await Artifacts.ListAsync(prefix, ct);
+            if (members.Count == 0) throw new DaxterException($"No artifacts under prefix: {prefix}");
+            var estimatedBytes = members.Sum(m => m.Bytes);
+            // Cheap pre-check — if the uncompressed total is already over budget, don't bother
+            // zipping; redirect the agent to the URL endpoint. Compression might shrink it but we
+            // can't know without zipping, and we don't want to do that work just to throw it away.
+            if (estimatedBytes > InlineBytesThreshold)
+            {
+                return System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    prefix,
+                    member_count = members.Count,
+                    uncompressed_bytes = estimatedBytes,
+                    download_url = $"/api/artifacts/{Uri.EscapeDataString(prefix).Replace("%2F", "/")}?bundle=1",
+                    inline = false,
+                    note = "Bundle estimated > 10 MB — fetch via the URL (it streams the zip without buffering).",
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+
+            await using var bundle = await Artifacts.OpenBundleAsync(prefix, ct);
+            using var ms = new MemoryStream();
+            await bundle.CopyToAsync(ms, ct);
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                prefix,
+                member_count = members.Count,
+                bytes = ms.Length,
+                inline = true,
+                content_base64 = Convert.ToBase64String(ms.ToArray()),
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        });
+
+    /// <summary>Metadata for one artifact key (size, created, TTL, source tool). Cheap; returns
+    /// JSON the agent can drop into a report or use to decide whether to fetch.</summary>
+    public static Task<string> ArtifactMetaAsync(string key, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var meta = await Artifacts.GetMetaAsync(key, ct);
+            if (meta is null) return $"Not found: {key}";
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                key = meta.Key,
+                bytes = meta.Bytes,
+                created_utc = meta.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                expires_utc = meta.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                source_tool = meta.SourceTool,
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        });
+
+    /// <summary>Delete one artifact or a prefix (recursive). Returns the count removed. NOT
+    /// gated on Allow-writes — this is the user's own local data, not a Power BI mutation. The
+    /// tool description warns the agent to confirm with the user first.</summary>
+    public static Task<string> ArtifactDeleteAsync(string keyPrefix, CancellationToken ct)
+        => Guard(async () =>
+        {
+            // Show what'll be deleted before doing it — the agent can echo this back to the user
+            // and confirm. Since we can't pause for confirmation in a single tool call, this is
+            // the agent's responsibility; we just provide the receipt.
+            var hits = await Artifacts.ListAsync(keyPrefix, ct);
+            if (hits.Count == 0) return $"Nothing matches '{keyPrefix}'.";
+            var removed = await Artifacts.DeleteAsync(keyPrefix, ct);
+            return $"Removed {removed} artifact(s) ({hits.Sum(h => h.Bytes):N0} bytes) under '{keyPrefix}'.";
+        });
 }

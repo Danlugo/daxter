@@ -1,0 +1,204 @@
+@page "/artifacts"
+@using Daxter.Core.Artifacts
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+@inject NavigationManager Nav
+
+<PageTitle>DAXter — Artifacts</PageTitle>
+
+<h1>Artifacts</h1>
+<p class="muted">
+    The transport-agnostic file plane DAXter uses to ferry bytes between itself and the agent —
+    PBIR exports, SQL CSVs, copy-job / notebook definition bundles. Persists in the
+    <code>~/.daxter/artifacts/</code> volume so an MCP/CLI tool that wrote here yesterday is still
+    here today, and the agent can fetch it via this page or
+    <code>GET /api/artifacts/{key}</code>. Phase 1: read + delete (writes/uploads land in Phase&nbsp;2).
+</p>
+
+<div class="dax-tools">
+    <button class="btn-sm back-btn" @onclick="GoBack" title="Back">← Back</button>
+    <button class="btn-sm" @onclick="Refresh" disabled="@busy" title="Re-scan the store">Refresh</button>
+    <button class="btn-sm" @onclick="PurgeExpired" disabled="@busy" title="Delete every artifact whose TTL has expired">Purge expired</button>
+    <span class="muted" style="margin-left:auto;">
+        @FormatBytes(usageBytes) / @FormatBytes(quotaBytes) used
+    </span>
+</div>
+
+<div class="row" style="margin-top:8px;">
+    <div>
+        <label>Search <span class="muted">(filters by key substring — case-insensitive)</span></label>
+        <input type="text" @bind="search" @bind:event="oninput" placeholder="e.g. sales-dashboard, or .pbix" style="min-width:320px;" />
+    </div>
+    <div>
+        <label>Prefix <span class="muted">(narrow the scan, e.g. reports/)</span></label>
+        <input type="text" @bind="prefix" placeholder="(everything)" style="min-width:240px;" />
+        <button class="btn-sm" @onclick="Refresh">Apply</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+@if (items is null)
+{
+    <p class="muted">Loading…</p>
+}
+else if (visible.Count == 0)
+{
+    <p class="muted">
+        No artifacts@(string.IsNullOrEmpty(search) ? "" : $" match '{search}'").
+        Tools that produce artifacts: <code>daxter_export_report --artifact-key …</code>,
+        <code>daxter_sql_export --artifact-key …</code>, and (Phase 2)
+        <code>daxter_artifact_put</code>.
+    </p>
+}
+else
+{
+    <table class="grid" style="margin-top:12px;">
+        <thead>
+            <tr>
+                <th>Key</th>
+                <th style="width:120px;text-align:right;">Size</th>
+                <th style="width:170px;">Created (UTC)</th>
+                <th style="width:170px;">Expires (UTC)</th>
+                <th style="width:170px;">Source tool</th>
+                <th style="width:240px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var a in visible)
+            {
+                <tr class="@(IsExpired(a) ? "row-expired" : null)">
+                    <td><code>@a.Key</code></td>
+                    <td style="text-align:right;">@FormatBytes(a.Bytes)</td>
+                    <td>@a.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td>@(a.ExpiresAt is { } e ? e.ToString("yyyy-MM-dd HH:mm:ss") : "—")</td>
+                    <td><span class="muted">@(a.SourceTool ?? "—")</span></td>
+                    <td>
+                        <a class="btn-sm" href="@DownloadHref(a.Key)" target="_blank"
+                           @onclick="() => RecordOpen(a.Key)">Download</a>
+                        <a class="btn-sm" href="@BundleHref(a.Key)" target="_blank"
+                           title="If this key is a directory prefix, download every file under it as a zip">Bundle ↓</a>
+                        <button class="btn-sm btn-danger" @onclick="() => Delete(a.Key)"
+                                @onclick:preventDefault="true" title="Delete this artifact">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="muted" style="margin-top:8px;">
+        @visible.Count of @items.Count artifacts shown.
+        <a href="/api/artifacts@(string.IsNullOrEmpty(prefix) ? "" : "?prefix=" + Uri.EscapeDataString(prefix))" target="_blank">View raw JSON</a>.
+    </p>
+}
+
+@code {
+    private IReadOnlyList<ArtifactRef>? items;
+    private List<ArtifactRef> visible = new();
+    private string search = "";
+    private string prefix = "";
+    private long usageBytes;
+    private long quotaBytes;
+    private string? error;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        quotaBytes = Ui.ArtifactStore.QuotaBytes;
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        if (busy) return;
+        busy = true; error = null;
+        BusyState.Begin();
+        try
+        {
+            items = await Ui.ArtifactsListAsync(string.IsNullOrWhiteSpace(prefix) ? null : prefix);
+            usageBytes = await Ui.ArtifactsUsageBytesAsync();
+            ApplyFilter();
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    private void ApplyFilter()
+    {
+        if (items is null) { visible = new(); return; }
+        if (string.IsNullOrWhiteSpace(search))
+            visible = items.ToList();
+        else
+            visible = items
+                .Where(a => a.Key.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                            (a.SourceTool is not null && a.SourceTool.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+    }
+
+    private async Task PurgeExpired()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Delete every artifact whose TTL has expired?")) return;
+        busy = true; BusyState.Begin();
+        try
+        {
+            var freed = await Ui.ArtifactsPurgeExpiredAsync();
+            await Refresh();
+            error = freed > 0 ? null : "Nothing to purge — no expired artifacts.";
+            if (freed > 0) error = $"Freed {FormatBytes(freed)}.";  // shown in the banner as info
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private async Task Delete(string key)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete artifact '{key}'?")) return;
+        busy = true; BusyState.Begin();
+        try
+        {
+            var removed = await Ui.ArtifactsDeleteAsync(key);
+            await Refresh();
+            if (removed == 0) error = $"Nothing matched '{key}'.";
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; BusyState.End(); }
+    }
+
+    private void RecordOpen(string key)
+    {
+        Usage.Record(UsageStore.Artifact, key, null, UsageStore.ArtifactsContext);
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    /// <summary>Trigger a watchdog re-filter whenever the search box changes — @bind:event="oninput"
+    /// fires this on every keystroke.</summary>
+    private string Search
+    {
+        get => search;
+        set { search = value; ApplyFilter(); }
+    }
+
+    // The two action URLs go through the streaming endpoint, NOT the Blazor circuit — that's why
+    // they're plain hrefs with target="_blank" instead of @onclick handlers.
+    private string DownloadHref(string key) => "/api/artifacts/" + Uri.EscapeDataString(key).Replace("%2F", "/");
+    private string BundleHref(string key)   => DownloadHref(key) + "?bundle=1";
+
+    private static bool IsExpired(ArtifactRef a) => a.ExpiresAt is { } e && e <= DateTime.UtcNow;
+
+    private static string FormatBytes(long b)
+    {
+        if (b < 1024) return $"{b} B";
+        if (b < 1024 * 1024) return $"{b / 1024.0:N1} KB";
+        if (b < 1024L * 1024 * 1024) return $"{b / 1024.0 / 1024:N1} MB";
+        return $"{b / 1024.0 / 1024 / 1024:N2} GB";
+    }
+}
+
+<style>
+    /* Expired rows are dimmed so they're easy to spot at a glance — the user can then click
+       "Purge expired" to clear them all, or Delete one at a time. */
+    .row-expired { opacity: 0.55; }
+    .row-expired td { font-style: italic; }
+</style>

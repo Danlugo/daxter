@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Daxter.Core;
+using Daxter.Core.Artifacts;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
@@ -29,11 +30,13 @@ public sealed class DaxterUi
 {
     private readonly ConfigState _state;
     private readonly ILogger<DaxterUi> _log;
+    private readonly IArtifactStore _artifacts;
 
-    public DaxterUi(ConfigState state, ILogger<DaxterUi> log)
+    public DaxterUi(ConfigState state, ILogger<DaxterUi> log, IArtifactStore artifacts)
     {
         _state = state;
         _log = log;
+        _artifacts = artifacts;
     }
 
     /// <summary>The console's current effective config (editable via the Configure page).</summary>
@@ -917,4 +920,39 @@ public sealed class DaxterUi
             throw;
         }
     }
+
+    // ── Artifacts bridge ──────────────────────────────────────────────────────────────────────
+    // The IArtifactStore singleton is owned by the Web host; both /artifacts (Razor) and the
+    // /api/artifacts streaming HTTP endpoints route through this bridge so logging is uniform
+    // and so future cross-store routing (local FS today, S3 tomorrow) has one chokepoint to
+    // change. The store handles its own key sanitisation + quota; bridge methods are thin
+    // wrappers that add Track-pattern logging.
+
+    /// <summary>Direct access to the singleton store — used by the HTTP /api/artifacts streaming
+    /// endpoints, which need the raw IArtifactStore to pipe straight to Response.Body.</summary>
+    public IArtifactStore ArtifactStore => _artifacts;
+
+    /// <summary>List artifacts under an optional prefix. Returned newest-first for the /artifacts
+    /// page; raw key order is still available via the store directly when callers want it.</summary>
+    public Task<IReadOnlyList<ArtifactRef>> ArtifactsListAsync(string? prefix = null, CancellationToken ct = default)
+        => Track<IReadOnlyList<ArtifactRef>>("artifacts-list", prefix, () => _artifacts.ListAsync(prefix, ct));
+
+    /// <summary>Metadata for a single artifact key. Null when the key doesn't exist.</summary>
+    public Task<ArtifactRef?> ArtifactsMetaAsync(string key, CancellationToken ct = default)
+        => Track<ArtifactRef?>("artifacts-meta", key, () => _artifacts.GetMetaAsync(key, ct));
+
+    /// <summary>Delete one artifact or an entire prefix (recursive). Returns files removed. The
+    /// store is the user's own data — no Allow-writes gate needed (unlike Power BI mutations).</summary>
+    public Task<int> ArtifactsDeleteAsync(string keyPrefix, CancellationToken ct = default)
+        => Track<int>("artifacts-delete", keyPrefix, () => _artifacts.DeleteAsync(keyPrefix, ct));
+
+    /// <summary>Trigger an on-demand purge of every artifact whose TTL has expired. Mostly a UI
+    /// affordance — the nightly hosted-service tick (Phase 2) does this automatically.</summary>
+    public Task<long> ArtifactsPurgeExpiredAsync(CancellationToken ct = default)
+        => Track<long>("artifacts-purge-expired", null, () => _artifacts.PurgeExpiredAsync(ct));
+
+    /// <summary>Current usage in bytes — the /artifacts page surfaces this with the quota so a
+    /// glance at the footer shows how full the store is.</summary>
+    public Task<long> ArtifactsUsageBytesAsync(CancellationToken ct = default)
+        => _artifacts.CurrentUsageBytesAsync(ct);
 }

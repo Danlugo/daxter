@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Diagnostics;
 using Daxter.Core;
+using Daxter.Core.Artifacts;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
@@ -102,6 +103,7 @@ internal static class Program
         var pipelineCommand = BuildPipelineCommand(connectionOptions, outputOption);
         var sqlCommand = BuildSqlCommand(connectionOptions, outputOption, fileOption);
         var fabricCommand = BuildFabricCommand(connectionOptions, outputOption);
+        var artifactCommand = BuildArtifactCommand(outputOption);
 
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
@@ -115,7 +117,7 @@ internal static class Program
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
             refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand, fabricCommand,
-            mcpCommand, webCommand,
+            artifactCommand, mcpCommand, webCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -1371,9 +1373,11 @@ internal static class Program
             { Description = "Wrap every CSV field in quotes (matches Power BI / Excel \"Export data\" style). Default off = RFC 4180 (quote-when-needed). Only meaningful with --out." };
         var crlfOpt = new Option<bool>("--crlf")
             { Description = "End each CSV line with CRLF (\\r\\n) instead of LF (\\n). Excel-on-Windows convention. Only meaningful with --out." };
+        var artifactKeyOpt = new Option<string?>("--artifact-key")
+            { Description = "Also mirror the exported CSV into the artifact store under this key (e.g. 'sql/sales-2026.csv'). Fetch via `daxter artifact get` / the /artifacts page / GET /api/artifacts. Only meaningful with --out." };
 
         var query = new Command("query", "Run T-SQL on a Fabric SQL endpoint.")
-            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt, quoteAllOpt, crlfOpt };
+            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt, quoteAllOpt, crlfOpt, artifactKeyOpt };
         connectionOptions.AddTo(query);
         query.SetAction((pr, ct) => RunSqlQueryAsync(
             () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(serverOpt) is null),
@@ -1386,6 +1390,7 @@ internal static class Program
             pr.GetValue(outFileOpt),
             pr.GetValue(quoteAllOpt),
             pr.GetValue(crlfOpt),
+            pr.GetValue(artifactKeyOpt),
             ct));
 
         // daxter sql objects --workspace W --endpoint NAME
@@ -1470,7 +1475,7 @@ internal static class Program
         Func<DaxterConfig> configFactory, Func<string> sqlFactory,
         string? endpointName, string? server, string? database,
         Func<string?> outputFactory, bool allowWrites, string? outFile,
-        bool quoteAll, bool crlf, CancellationToken ct)
+        bool quoteAll, bool crlf, string? artifactKey, CancellationToken ct)
     {
         try
         {
@@ -1504,9 +1509,24 @@ internal static class Program
             if (!string.IsNullOrWhiteSpace(outFile))
             {
                 var style = new Daxter.Core.Formatting.CsvStyle(QuoteAll: quoteAll, Crlf: crlf);
-                await using var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read);
-                await using var sw = new StreamWriter(fs);
-                var rows = await client.StreamCsvAsync(server!, database!, sql, allowWrites, sw, ct, style: style);
+                long rows;
+                await using (var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read))
+                await using (var sw = new StreamWriter(fs))
+                {
+                    rows = await client.StreamCsvAsync(server!, database!, sql, allowWrites, sw, ct, style: style);
+                }
+
+                // Optional mirror into the artifact store — same source-tool stamp the MCP path
+                // uses, so the /artifacts page can show "produced by sql_export" regardless of
+                // which surface wrote it.
+                if (!string.IsNullOrWhiteSpace(artifactKey))
+                {
+                    var store = new LocalArtifactStore();
+                    await using var src = File.OpenRead(outFile);
+                    var aref = await store.PutAsync(artifactKey, src,
+                        new ArtifactMeta(SourceTool: "daxter_sql_export"), ct);
+                    Console.Error.WriteLine($"Mirrored to artifact '{aref.Key}' ({aref.Bytes:N0} bytes).");
+                }
                 Console.Error.WriteLine($"Wrote {rows} row{(rows == 1 ? "" : "s")} to {outFile}" +
                     (quoteAll || crlf ? $" (QuoteAll:{quoteAll}, CRLF:{crlf})." : "."));
                 return 0;
@@ -1918,5 +1938,153 @@ internal static class Program
 
         Console.Error.WriteLine($"daxter: unexpected error: {ex}");
         return 2;
+    }
+
+    // ── Artifact-store CLI verbs ──────────────────────────────────────────────────────────────
+    // The artifact subcommand group is the CLI face of the transport-agnostic file plane (see
+    // src/Daxter.Core/Artifacts/ArtifactStore.cs). Five verbs: list / get / bundle / meta / rm.
+    // Phase 1 = read + delete; put + extract land in Phase 2.
+    //
+    // Important: no DaxterConfig / no MSAL token here. The artifact store is a LOCAL filesystem
+    // resource; there's no Power BI / Fabric REST call involved. We instantiate LocalArtifactStore
+    // per invocation — the CLI process is short-lived, so no singleton coordination needed.
+    private static Command BuildArtifactCommand(Option<string> outputOption)
+    {
+        var prefixArg = new Argument<string?>("prefix")
+        {
+            Description = "Optional prefix to narrow the scan (e.g. reports/, sql/, alignment/).",
+            Arity = ArgumentArity.ZeroOrOne,
+        };
+        var ls = new Command("list", "List artifacts in the store. Optional <prefix> narrows the scan.")
+            { prefixArg, outputOption };
+        ls.SetAction((pr, ct) => RunArtifactListAsync(pr.GetValue(prefixArg), () => pr.GetValue(outputOption), ct));
+
+        var keyArg = new Argument<string>("key") { Description = "Artifact key (forward-slash path, e.g. reports/sales/page.json)." };
+        var outFileOpt = new Option<string?>("--out", "-o")
+            { Description = "Write content to this file path (defaults to the key's filename in the current directory)." };
+        var get = new Command("get", "Download a single artifact's content.") { keyArg, outFileOpt };
+        get.SetAction((pr, ct) => RunArtifactGetAsync(pr.GetValue(keyArg)!, pr.GetValue(outFileOpt), ct));
+
+        var prefixArg2 = new Argument<string>("prefix")
+            { Description = "Key prefix to zip (every file under it goes into the archive)." };
+        var bundleOutOpt = new Option<string?>("--out", "-o")
+            { Description = "Write the zip to this file (defaults to <prefix>.zip in the current directory)." };
+        var bundle = new Command("bundle", "Zip every file under a prefix into a single archive.") { prefixArg2, bundleOutOpt };
+        bundle.SetAction((pr, ct) => RunArtifactBundleAsync(pr.GetValue(prefixArg2)!, pr.GetValue(bundleOutOpt), ct));
+
+        var metaKeyArg = new Argument<string>("key") { Description = "Artifact key to inspect." };
+        var meta = new Command("meta", "Show one artifact's metadata (size, created, expires, source tool).") { metaKeyArg };
+        meta.SetAction((pr, ct) => RunArtifactMetaAsync(pr.GetValue(metaKeyArg)!, ct));
+
+        var rmKeyArg = new Argument<string>("prefix") { Description = "Artifact key OR key prefix (deletes recursively)." };
+        var rmYesOpt = new Option<bool>("--yes") { Description = "Skip the are-you-sure confirmation." };
+        var rm = new Command("rm", "Delete one artifact or an entire prefix.") { rmKeyArg, rmYesOpt };
+        rm.SetAction((pr, ct) => RunArtifactRmAsync(pr.GetValue(rmKeyArg)!, pr.GetValue(rmYesOpt), ct));
+
+        return new Command("artifact",
+            "Local artifact store — list / download / zip-bundle / inspect / delete. The transport-agnostic " +
+            "file plane DAXter uses to ferry bytes between itself and the agent (PBIR exports, SQL CSVs, " +
+            "future definition uploads). Phase 1 = read + delete; Phase 2 adds put + extract.")
+        { ls, get, bundle, meta, rm };
+    }
+
+    private static async Task<int> RunArtifactListAsync(string? prefix, Func<string?> outputFactory, CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            var items = await store.ListAsync(prefix, ct);
+            var cols = new List<string> { "key", "bytes", "created_utc", "expires_utc", "source_tool" };
+            var rows = items.Select(a => new object?[]
+            {
+                a.Key, a.Bytes,
+                a.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                a.ExpiresAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                a.SourceTool ?? "",
+            }).ToList();
+            var result = new QueryResult(cols, rows);
+            var format = ResultFormatterFactory.Parse(outputFactory());
+            Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
+            Console.Error.WriteLine($"({result.RowCount} artifact{(result.RowCount == 1 ? "" : "s")}, " +
+                $"{await store.CurrentUsageBytesAsync(ct):N0} bytes used of {store.QuotaBytes:N0} quota)");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactGetAsync(string key, string? outFile, CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            var dest = outFile ?? Path.GetFileName(key.TrimEnd('/'));
+            if (string.IsNullOrWhiteSpace(dest)) dest = "artifact.bin";
+            await using var src = await store.OpenReadAsync(key, ct);
+            await using var dst = File.Create(dest);
+            await src.CopyToAsync(dst, ct);
+            Console.Error.WriteLine($"Wrote {new FileInfo(dest).Length:N0} bytes → {dest}");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactBundleAsync(string prefix, string? outFile, CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            // Best-effort filename: trailing segment of the prefix, .zip-suffixed.
+            var dest = outFile ?? (prefix.TrimEnd('/').Split('/').LastOrDefault() ?? "bundle") + ".zip";
+            await using var src = await store.OpenBundleAsync(prefix, ct);
+            await using var dst = File.Create(dest);
+            await src.CopyToAsync(dst, ct);
+            Console.Error.WriteLine($"Bundled {new FileInfo(dest).Length:N0} bytes → {dest}");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactMetaAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            var meta = await store.GetMetaAsync(key, ct);
+            if (meta is null) { Console.Error.WriteLine($"Not found: {key}"); return 1; }
+            Console.Out.WriteLine($"key:         {meta.Key}");
+            Console.Out.WriteLine($"bytes:       {meta.Bytes:N0}");
+            Console.Out.WriteLine($"created_utc: {meta.CreatedAt:yyyy-MM-dd HH:mm:ss}");
+            Console.Out.WriteLine($"expires_utc: {meta.ExpiresAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "(no TTL)"}");
+            Console.Out.WriteLine($"source_tool: {meta.SourceTool ?? "(not recorded)"}");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactRmAsync(string prefix, bool yes, CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            if (!yes)
+            {
+                // Show what'll get hit BEFORE asking — so the user can sanity-check the prefix.
+                var hits = await store.ListAsync(prefix, ct);
+                if (hits.Count == 0) { Console.Error.WriteLine($"Nothing matches '{prefix}'."); return 0; }
+                Console.Error.WriteLine($"About to delete {hits.Count} artifact(s) ({hits.Sum(h => h.Bytes):N0} bytes) under '{prefix}':");
+                foreach (var h in hits.Take(20)) Console.Error.WriteLine($"  {h.Key}");
+                if (hits.Count > 20) Console.Error.WriteLine($"  ... and {hits.Count - 20} more");
+                Console.Error.Write("Proceed? [y/N] ");
+                var line = Console.ReadLine();
+                if (line is null || !line.Trim().Equals("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("Aborted."); return 1;
+                }
+            }
+            var removed = await store.DeleteAsync(prefix, ct);
+            Console.Error.WriteLine($"Removed {removed} artifact(s).");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
     }
 }

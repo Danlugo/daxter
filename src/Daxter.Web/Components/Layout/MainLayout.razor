@@ -32,6 +32,7 @@
         <NavLink href="rls">RLS</NavLink>
         <NavLink href="copy-jobs">Copy Jobs</NavLink>
         <NavLink href="notebooks">Notebooks</NavLink>
+        <NavLink href="artifacts">Artifacts</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -283,6 +284,7 @@
             "rls" => UsageStore.RlsContext,
             "copy-jobs" => UsageStore.CopyJobsContext,
             "notebooks" => UsageStore.NotebooksContext,
+            "artifacts" => UsageStore.ArtifactsContext,
             _ => null,
         };
     }

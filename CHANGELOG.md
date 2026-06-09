@@ -6,6 +6,64 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-06-09
+
+### Added
+- **Artifact store — the transport-agnostic file plane.** A new shared service
+  (`Daxter.Core.Artifacts.LocalArtifactStore`) backs `~/.daxter/artifacts/` (override via
+  `DAXTER_ARTIFACTS_ROOT`; 5 GB default cap, override via `DAXTER_ARTIFACTS_QUOTA_MB`).
+  Replaces the bind-mount / `docker cp` workaround for moving file-shaped data between
+  DAXter and the agent — same API whether DAXter is on local Docker, a private VM, or a
+  hosted instance later. Streams in/out, no in-memory materialization. Backed by an
+  atomic-rename metadata index for TTL + source-tool tracking. Key sanitisation rejects
+  `..`, absolute paths, drive letters, and control chars at the API boundary. **25 new
+  unit tests** pin every invariant (round-trip, prefix filtering, zip round-trip, quota,
+  TTL purge, key escapes).
+- **`/artifacts` Web page.** Tree view of every entry in the store with search box, prefix
+  filter, size / created / expires / source-tool columns, per-row Download + Bundle ↓ +
+  Delete actions, "Purge expired" sweep button, live usage / quota footer. Frequent
+  sidebar context = `artifact`; recent keys recall via the standard sidebar. Conforms to
+  `.claude/ui-contract.md`: standard Back, shared layout, search + export per the data-grid
+  rule. New nav link in `MainLayout.razor`.
+- **`GET /api/artifacts` + `GET /api/artifacts/{*key}` streaming endpoints.** Bypass the
+  Blazor SignalR circuit so multi-GB downloads don't buffer in the browser. JSON listing,
+  single-file stream, and `?bundle=1` zip-stream of a prefix. Same `Content-Disposition:
+  attachment` pattern `SqlExportEndpoint` already uses. (POST upload lands in Phase 2.)
+- **Five new MCP tools** (`daxter_artifact_list`, `_get`, `_bundle`, `_meta`, `_delete`).
+  Read tools tagged `ReadOnly = true`; `_delete` is `Destructive = true`. Inline-base64
+  payload for ≤ 10 MB; above the threshold the tool returns a `download_url` pointing at
+  the HTTP endpoint so multi-hundred-MB `.pbix` files never enter MCP messages.
+- **Five new CLI verbs** under `daxter artifact`: `list [prefix]`, `get <key> [--out]`,
+  `bundle <prefix> [--out]`, `meta <key>`, `rm <prefix> [--yes]`. Confirmation prompt on
+  `rm` unless `--yes`.
+- **`daxter_export_report` gained `artifact_key`.** When set, the PBIR parts mirror into
+  the store under `<artifact_key>/...` and the `.pbix` lands at `<artifact_key>.pbix` —
+  source-tool stamped so the `/artifacts` page shows provenance. Closes the host-access
+  gap that previously required `docker cp` after every report export.
+- **`daxter_sql_export` + `daxter sql query --out` gained `artifactKey`/`--artifact-key`.**
+  Same shape: the streaming CSV is mirrored into the artifact store under that key in
+  addition to the legacy file path.
+
+### Why
+The DAXter web console + MCP server run inside a Docker container; the agent's skills
+(Diego's `powerbi-alignment-check` / `_fix`, future automation) typically run outside the
+container in the host's Claude Desktop session. Until now, byte transfer between the two
+relied on bind-mounting the token volume on the host — fragile, and impossible the moment
+DAXter is hosted on another server. The artifact store gives every surface (CLI, MCP, Web
+HTTP) the same content-addressable API on top of one logical store; transport is the
+agent's choice (inline base64 for small payloads, HTTP streaming for large).
+
+### Notes
+- Phase 1 ships **read + delete + retrofit** of the two biggest producers (`export_report`,
+  `sql_export`). Phase 2 (`v1.32.0`) adds the **write path** — `daxter_artifact_put`,
+  `_extract`, `POST /api/artifacts/{*key}`, quota enforcement on put, nightly
+  `PurgeExpiredAsync` hosted-service tick. Phase 3 (`v1.33.0`) adds the **Fabric
+  write-backs** — `daxter_update_report_definition`, `_notebook_definition`,
+  `_copy_job_definition` — closing Diego's alignment round-trip end-to-end.
+- The store is a singleton in the Web host; CLI commands instantiate per-invocation; the
+  long-lived MCP server uses a `Lazy<>` singleton. All three converge on the same on-disk
+  root, so bytes written by one surface are immediately visible to the others.
+
 ## [1.30.1] - 2026-06-08
 
 ### Added

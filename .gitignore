@@ -3,7 +3,9 @@ src/**/bin/
 src/**/obj/
 tests/**/bin/
 tests/**/obj/
-artifacts/
+# Top-level CI build artifacts (tarballs etc.). Anchored at the repo root so it doesn't
+# silently swallow src/Daxter.Core/Artifacts/ — the artifact-store namespace folder.
+/artifacts/
 *.tar.gz
 
 # Secrets — never commit

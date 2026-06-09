@@ -159,13 +159,14 @@ public static class DaxterTools
         => DaxterToolRuntime.RestAsync(workspace, null, async (rest, cfg, c) =>
             await rest.ReportInventoryAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
 
-    [McpServerTool(Name = "daxter_export_report", ReadOnly = true, Title = "Export a report (definition + .pbix)"), Description("Download a report's artifacts: its PBIR/PBIR-Legacy definition (the JSON carrying every field reference — Table[Column], measures — for column-usage analysis) and/or its .pbix. By DEFAULT both are downloaded. Files are written under the persistent token volume (~/.daxter/exports/<report>/) and the tool returns where they landed; pass 'output_dir' to write elsewhere (mount a host path in the MCP config to land them on your machine). Pass pbix=false for just the definition, or definition=false for just the .pbix. Pass 'part' (e.g. report.json) to also return that definition file's content inline for analysis. .pbix fails for service-authored / XMLA-edited reports — that's reported, the definition still comes through. Reads only.")]
+    [McpServerTool(Name = "daxter_export_report", ReadOnly = true, Title = "Export a report (definition + .pbix)"), Description("Download a report's artifacts: its PBIR/PBIR-Legacy definition (the JSON carrying every field reference — Table[Column], measures — for column-usage analysis) and/or its .pbix. By DEFAULT both are downloaded. Files are written under the persistent token volume (~/.daxter/exports/<report>/) and the tool returns where they landed; pass 'output_dir' to write elsewhere. PREFERRED: pass 'artifact_key' to ALSO mirror the PBIR parts into the artifact store under that key prefix (and the .pbix at <key>.pbix) — then fetch via daxter_artifact_bundle / _get from any host, no docker cp needed. The artifact-store path is how the Power BI alignment-check skill consumes report definitions. Pass pbix=false for just the definition, or definition=false for just the .pbix. Pass 'part' (e.g. report.json) to also return that definition file's content inline for analysis. .pbix fails for service-authored / XMLA-edited reports — that's reported, the definition still comes through. Reads only.")]
     public static Task<string> ExportReport(
         [Description("Report name or id.")] string report,
         [Description("Download the .pbix binary (default true).")] bool pbix = true,
         [Description("Download the PBIR/legacy definition JSON (default true).")] bool definition = true,
         [Description("Directory to write into (default: ~/.daxter/exports, which persists in the token volume).")] string? output_dir = null,
         [Description("Also return this definition file's content inline (e.g. report.json) for analysis.")] string? part = null,
+        [Description("Also mirror PBIR parts and .pbix into the artifact store under this key prefix (e.g. 'alignment/sales-dashboard'). Lets the agent fetch via daxter_artifact_bundle / _get from any host with no docker cp.")] string? artifact_key = null,
         string? workspace = null, CancellationToken ct = default)
         => DaxterToolRuntime.RestTextAsync(workspace, async (rest, cfg, c) =>
         {
@@ -196,6 +197,21 @@ public static class DaxterTools
                         await File.WriteAllTextAsync(dest, p.Content, c);
                     }
                     log.AppendLine($"definition: {parts.Count} part(s) → {baseDir}");
+
+                    // Mirror to the artifact store under the user-chosen key prefix. Stamp the
+                    // source tool so the /artifacts page tells the user where it came from. This
+                    // is the path Diego's alignment-check skill will consume.
+                    if (!string.IsNullOrWhiteSpace(artifact_key))
+                    {
+                        var meta = new Daxter.Core.Artifacts.ArtifactMeta(SourceTool: "daxter_export_report");
+                        foreach (var p in parts)
+                        {
+                            var key = $"{artifact_key.TrimEnd('/')}/{p.Path}";
+                            await DaxterToolRuntime.Artifacts.PutAsync(key,
+                                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(p.Content)), meta, c);
+                        }
+                        log.AppendLine($"definition: also mirrored to artifact prefix '{artifact_key}/' ({parts.Count} files) — fetch via daxter_artifact_bundle.");
+                    }
                 }
             }
             if (pbix)
@@ -207,6 +223,16 @@ public static class DaxterTools
                     var pbixPath = Path.Combine(dir, safe + ".pbix");
                     await File.WriteAllBytesAsync(pbixPath, bytes, c);
                     log.AppendLine($"pbix: {bytes.Length:N0} bytes → {pbixPath}");
+
+                    // Same artifact-store mirror for the .pbix. Lands as <artifact_key>.pbix so
+                    // it sits alongside the PBIR parts under the same logical prefix.
+                    if (!string.IsNullOrWhiteSpace(artifact_key))
+                    {
+                        var key = $"{artifact_key.TrimEnd('/')}.pbix";
+                        await DaxterToolRuntime.Artifacts.PutAsync(key, new MemoryStream(bytes),
+                            new Daxter.Core.Artifacts.ArtifactMeta(SourceTool: "daxter_export_report"), c);
+                        log.AppendLine($"pbix: also mirrored to artifact '{key}'.");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -799,8 +825,9 @@ public static class DaxterTools
         [Description("T-SQL statement (typically a SELECT).")] string sql,
         [Description("Wrap every field in quotes (Power BI / Excel \"Export data\" style). Default false = RFC 4180 quote-when-needed.")] bool quoteAll = false,
         [Description("End lines with CRLF (\\r\\n) instead of LF (\\n). Excel-on-Windows convention. Default false.")] bool crlf = false,
+        [Description("Optional — also mirror the CSV into the artifact store under this key (e.g. 'sql/exports/sales-2026-06-09.csv') so daxter_artifact_get can fetch it without docker cp.")] string? artifactKey = null,
         CancellationToken ct = default)
-        => DaxterToolRuntime.SqlExportAsync(workspace, endpoint, sql, ct, quoteAll, crlf);
+        => DaxterToolRuntime.SqlExportAsync(workspace, endpoint, sql, ct, quoteAll, crlf, artifactKey);
 
     [McpServerTool(Name = "daxter_sql_query", ReadOnly = true, Title = "Run T-SQL on a Fabric SQL endpoint"),
      Description("Run T-SQL on a Fabric Warehouse or Lakehouse SQL endpoint. Pass the workspace and the endpoint NAME " +
@@ -815,4 +842,61 @@ public static class DaxterTools
         [Description("T-SQL statement(s).")] string sql,
         CancellationToken ct = default)
         => DaxterToolRuntime.SqlQueryAsync(workspace, endpoint, sql, ct);
+
+    // ── Artifact store ────────────────────────────────────────────────────────────────────────
+    // The transport-agnostic file plane. Every file-shaped DAXter feature (PBIR exports, SQL
+    // CSVs, future definition uploads) goes through here, so any agent — local or remote —
+    // gets to bytes through the same MCP surface. See src/Daxter.Core/Artifacts/ArtifactStore.cs.
+
+    [McpServerTool(Name = "daxter_artifact_list", ReadOnly = true, Title = "List artifacts in the local store"),
+     Description("List artifacts persisted by other DAXter tools (PBIR exports from daxter_export_report, " +
+                 "CSV exports from daxter_sql_export, future definition bundles). Pass `prefix` to narrow the scan " +
+                 "(e.g. 'reports/' / 'sql/' / 'alignment/'). Returns key, byte size, created/expires timestamps, and " +
+                 "the source tool that produced each entry — plus the store's current usage / quota. " +
+                 "Use this to discover what's available before calling daxter_artifact_get / _bundle.")]
+    public static Task<string> ArtifactList(
+        [Description("Optional key prefix to narrow the listing (e.g. 'reports/sales/').")] string? prefix = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactListAsync(prefix, ct);
+
+    [McpServerTool(Name = "daxter_artifact_get", ReadOnly = true, Title = "Download one artifact's content"),
+     Description("Download a single artifact's bytes. Returns the content INLINE as base64 when ≤ 10 MB " +
+                 "(JSON envelope with content_base64, inline=true) — caller decodes it directly. " +
+                 "Above 10 MB the response carries a download_url (relative to the DAXter web host) for the " +
+                 "agent to fetch via plain GET — that path streams the file with no MCP overhead. " +
+                 "Pair with daxter_artifact_list to discover keys first.")]
+    public static Task<string> ArtifactGet(
+        [Description("Artifact key — forward-slash path, e.g. 'reports/sales/report.json'.")] string key,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactGetAsync(key, ct);
+
+    [McpServerTool(Name = "daxter_artifact_bundle", ReadOnly = true, Title = "Zip a prefix and download it"),
+     Description("Zip every artifact under a prefix into one archive and download it. Mirrors the single-file " +
+                 "daxter_artifact_get behavior: inline base64 when the uncompressed total is ≤ 10 MB, otherwise " +
+                 "a download_url pointing at the streaming /api/artifacts/{prefix}?bundle=1 endpoint. " +
+                 "Use this to grab whole PBIR folders (every visual.json + report.json + pages/) in one shot — " +
+                 "the typical flow for the Power BI alignment-check skill.")]
+    public static Task<string> ArtifactBundle(
+        [Description("Key prefix to bundle, e.g. 'reports/sales-dashboard' bundles every file under reports/sales-dashboard/.")] string prefix,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactBundleAsync(prefix, ct);
+
+    [McpServerTool(Name = "daxter_artifact_meta", ReadOnly = true, Title = "Show one artifact's metadata"),
+     Description("Show just the metadata (size, created, TTL, source tool) for one artifact key — without " +
+                 "downloading bytes. Cheap; use this to decide whether to fetch or to confirm an artifact is " +
+                 "still in the store before referencing it in a later step.")]
+    public static Task<string> ArtifactMeta(
+        [Description("Artifact key.")] string key,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactMetaAsync(key, ct);
+
+    [McpServerTool(Name = "daxter_artifact_delete", Destructive = true, Title = "Delete an artifact or prefix"),
+     Description("Delete a single artifact OR every artifact under a key prefix (recursive). The user's local " +
+                 "data — NOT gated on the Allow-writes / prod-block guards (those are for Power BI mutations). " +
+                 "Always echo back to the user what you're about to delete and CONFIRM before calling — once " +
+                 "executed the bytes are gone. Returns the count removed.")]
+    public static Task<string> ArtifactDelete(
+        [Description("Artifact key OR key prefix (deletes everything under it).")] string keyPrefix,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactDeleteAsync(keyPrefix, ct);
 }

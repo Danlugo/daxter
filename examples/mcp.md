@@ -230,3 +230,50 @@ written first. To apply, enable *Allow model edits* in the web console (or
 | "Delete the measure `Old KPI`" | `daxter_delete_measure` |
 | "Add an import table `Region` from this M query with columns RegionKey, Region" | `daxter_create_import_table` |
 | "Relate Sales[RegionKey] to Region[RegionKey]" | `daxter_edit_relationship` |
+
+## Artifact store — the transport-agnostic file plane
+
+DAXter persists file-shaped output (PBIR exports, SQL CSVs, future definition uploads)
+into `~/.daxter/artifacts/` on the volume. Five MCP tools let the agent **list, fetch,
+zip-bundle, inspect, delete** without needing filesystem access to the container — same
+API whether DAXter is local Docker or a hosted instance. Files ≤ 10 MB come back inline as
+base64; bigger ones return a `download_url` the agent fetches via plain HTTP (the Web host's
+`/api/artifacts/{key}` streaming endpoint).
+
+| Ask | Tool |
+|---|---|
+| "What's in the artifact store?" | `daxter_artifact_list` (optional `prefix` to narrow) |
+| "Get me the report.json for the sales dashboard" | `daxter_artifact_get` with `key: "reports/sales-dashboard/report.json"` |
+| "Download the whole PBIR folder for sales-dashboard" | `daxter_artifact_bundle` with `prefix: "reports/sales-dashboard"` (returns zip, inline or url) |
+| "How big is reports/sales-dashboard/report.json — and when does it expire?" | `daxter_artifact_meta` with `key: …` |
+| "Delete the old sql/exports/q3.csv" | `daxter_artifact_delete` with `keyPrefix: "sql/exports/q3.csv"` — echoes count + bytes |
+
+### Two existing tools now mirror to the store
+
+- **`daxter_export_report`** accepts `artifact_key` — when set, the PBIR parts mirror into
+  the store under that key prefix and the `.pbix` lands at `<key>.pbix`. Pair with
+  `daxter_artifact_bundle` to grab the whole PBIR folder over the wire.
+- **`daxter_sql_export`** accepts `artifactKey` — when set, the streaming CSV is ALSO
+  written into the artifact store under that key (in addition to the legacy
+  `~/.daxter/exports/sql/` file path).
+
+### End-to-end flow — Diego's alignment-check round-trip
+
+```text
+You:    "Export the Sales Dashboard report from Data Hub - Dev and put the PBIR parts
+         under alignment/sales-dashboard so I can run the alignment check."
+Claude: → daxter_export_report
+          report:       "Sales Dashboard"
+          workspace:    "Data Hub - Dev"
+          pbix:         false
+          artifact_key: "alignment/sales-dashboard"
+        ↳ "definition: 17 parts → /home/daxter/.daxter/exports/Sales Dashboard/
+                       also mirrored to artifact prefix 'alignment/sales-dashboard/'."
+
+You:    "Download the whole thing as a zip — I'll feed it to the alignment skill."
+Claude: → daxter_artifact_bundle  prefix: "alignment/sales-dashboard"
+        ↳ inline base64 (zip) for ≤ 10 MB, OR a download_url for bigger.
+
+Claude runs powerbi-alignment-check on the unzipped folder (Diego's skill).
+Phase 3 (future): `daxter_update_report_definition` to upload corrected files back.
+```

@@ -1,3 +1,4 @@
+using Daxter.Core.Artifacts;
 using Daxter.Web.Components;
 using Daxter.Web.Services;
 
@@ -8,6 +9,13 @@ builder.Services.AddSingleton<ConfigState>();
 builder.Services.AddScoped<UiBusy>();
 builder.Services.AddScoped<DaxterUi>();
 builder.Services.AddScoped<ExploreActions>();
+
+// Artifact store — the transport-agnostic file plane every file-shaped feature passes through.
+// Singleton because LocalArtifactStore serialises index-file writes via a process-wide
+// SemaphoreSlim; a per-request instance would defeat that guarantee. Backs onto
+// ~/.daxter/artifacts/ (override via DAXTER_ARTIFACTS_ROOT) with a 5GB default cap (override
+// via DAXTER_ARTIFACTS_QUOTA_MB).
+builder.Services.AddSingleton<IArtifactStore>(_ => new LocalArtifactStore());
 
 // Update check (GitHub releases) — GitHub requires a User-Agent.
 builder.Services.AddHttpClient("github", c =>
@@ -50,5 +58,11 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 // buffer in the browser. The /sql page POSTs a hidden form here; the response is a streaming CSV
 // download (Content-Disposition: attachment). See SqlExportEndpoint.cs for the implementation.
 Daxter.Web.Endpoints.SqlExportEndpoint.Map(app);
+
+// Artifact streaming — same Blazor-circuit-bypass story. /artifacts uses these to download a
+// single file or zip-stream a whole prefix (PBIR bundle, copy-job definition, etc.). External
+// MCP/CLI callers also fetch large artifacts via these URLs when the inline base64 path is too
+// big. Phase 1: GET (list + download). Phase 2: POST (upload).
+Daxter.Web.Endpoints.ArtifactsEndpoint.Map(app);
 
 app.Run();

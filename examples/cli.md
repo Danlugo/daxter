@@ -282,3 +282,57 @@ docker run --rm --env-file ~/.daxter/clients/acme.env \
 # or target any workspace by name (the name encodes the env):
 ./bin/daxter ls --workspace "Marketing - QA" --dataset "Some Model"
 ```
+
+## Artifact store — the transport-agnostic file plane
+
+DAXter persists file-shaped output (PBIR exports, SQL CSVs, future definition uploads)
+into `~/.daxter/artifacts/` on the container volume. Five CLI verbs let you list, download,
+zip, inspect, and delete entries — same store every MCP tool / Web page reads. Useful when
+running DAXter remotely (hosted on another box): the artifact-store path is the API, not
+the filesystem.
+
+```bash
+# Pre-seed the store: export a report and mirror its PBIR parts to the store under a key
+# you choose. (The legacy ~/.daxter/exports/<report>/ path still works too — alongside.)
+./bin/daxter fabric reports export --report "Sales Dashboard" --workspace "Data Hub - Dev"
+#   → writes both PBIR parts and the .pbix into ~/.daxter/exports/Sales Dashboard/
+
+# (To mirror into the artifact store too, use the MCP tool with artifact_key= or the SQL
+#  --artifact-key option below — the export CLI doesn't expose it yet; coming in Phase 2.)
+
+# List artifacts (with optional prefix to narrow):
+./bin/daxter artifact list
+./bin/daxter artifact list reports/sales-dashboard
+# → key, bytes, created_utc, expires_utc, source_tool — JSON / table / CSV via -o
+
+# Download one artifact's bytes:
+./bin/daxter artifact get reports/sales-dashboard/report.json
+./bin/daxter artifact get reports/sales-dashboard/report.json --out ./report.json
+
+# Zip an entire prefix (every file under reports/sales-dashboard/ goes into one archive):
+./bin/daxter artifact bundle reports/sales-dashboard --out ./sales-dashboard.zip
+# → great for handing a full PBIR folder to the Power BI alignment-check skill in one shot.
+
+# Inspect metadata without downloading:
+./bin/daxter artifact meta reports/sales-dashboard/report.json
+
+# Delete a single artifact or a whole prefix (recursive). Without --yes it confirms first.
+./bin/daxter artifact rm reports/sales-dashboard
+./bin/daxter artifact rm sql/exports/old.csv --yes
+```
+
+`daxter sql query --out` accepts `--artifact-key` to mirror the CSV into the store:
+
+```bash
+./bin/daxter sql query --workspace "Data Hub - Dev" --endpoint "Sales WH" \
+  "SELECT * FROM dbo.fact_orders" \
+  --out ./orders.csv --artifact-key sql/exports/orders-2026-06-09.csv
+# → streams to ./orders.csv on disk AND mirrors into the artifact store under that key.
+```
+
+Quota + root are env-controlled — defaults are 5 GB at `~/.daxter/artifacts/`:
+
+```bash
+# Override on the docker run (the daxter-tokens volume already mounts ~/.daxter):
+docker run -e DAXTER_ARTIFACTS_QUOTA_MB=20480 -e DAXTER_ARTIFACTS_ROOT=/data/daxter-artifacts ...
+```

@@ -18,6 +18,9 @@ public sealed class UsageStore
     public const string Dataset = "dataset";
     public const string Table = "table";
     public const string Measure = "measure";
+    /// <summary>Frequent-list kind for artifact-store keys — the /artifacts page records each
+    /// key the user opens so the sidebar can recall it (same shape as Workspace/Dataset).</summary>
+    public const string Artifact = "artifact";
 
     // Page contexts (each page keeps its own Frequent list).
     public const string ExploreContext = "explore";
@@ -30,6 +33,8 @@ public sealed class UsageStore
     public const string RlsContext = "rls";
     public const string CopyJobsContext = "copy-jobs";
     public const string NotebooksContext = "notebooks";
+    /// <summary>Page context for /artifacts — the artifact-store browser.</summary>
+    public const string ArtifactsContext = "artifacts";
 
     private const int MaxItems = 500;
 
