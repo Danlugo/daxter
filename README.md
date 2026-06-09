@@ -52,9 +52,10 @@ multi-client, service principal) → **[`SETUP.md`](SETUP.md)**; a prompt per to
 | **Test** | `test-rls --role/--user` (XMLA impersonation) |
 | **Pipeline** | `pipeline ls/stages/operations` · `pipeline rules` (deployment rules, inferred from per-stage parameter differences) · `pipeline audit` (models without rules, or `--mode check` to find matching models) · saved rule sets |
 | **SQL** | `sql endpoints` (list Warehouses + Lakehouse SQL endpoints in a workspace) · `sql query --endpoint NAME --query "…"` (T-SQL on a Fabric SQL endpoint over TDS, AAD-authenticated with your existing sign-in). Read-only by default; `--allow-writes` for INSERT/UPDATE/DELETE/MERGE/DDL. In **CLI · MCP (`daxter_sql_endpoints` / `daxter_sql_query`) · web (SQL page)** |
+| **Fabric items** | View, run, and monitor **Copy Jobs** and **Notebooks** — list per workspace, view definition (the `copyjob-content.json` / `artifact.content.ipynb`), run on demand (writes-gated, confirm modal), and watch recent runs (status / duration / failure reason) with cancel. In **CLI (`fabric copy-jobs/notebooks ls/show/run/runs/cancel`) · MCP (`daxter_copy_jobs`, `daxter_copy_job_definition`, `daxter_run_copy_job`, `daxter_notebooks`, `daxter_notebook_definition`, `daxter_run_notebook`, `daxter_item_runs`, `daxter_item_job_status`, `daxter_cancel_item_job`) · web (Copy Jobs + Notebooks pages)** |
 | **Foundations** | environment profiles (`--env`), device-code + service-principal auth |
 
-The MCP server exposes these at **full parity** as **53 tools** (`daxter_login` + 35 read + 17 gated
+The MCP server exposes these at **full parity** as **62 tools** (`daxter_login` + 41 read + 20 gated
 write/edit). Refreshes from any interface (CLI, MCP, UI) are **queued through one shared worker** that
 runs them **one per model at a time** — see [Refresh scheduler](#refresh-scheduler). See
 [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product plan,

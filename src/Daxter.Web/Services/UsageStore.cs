@@ -28,6 +28,8 @@ public sealed class UsageStore
     public const string ConnectionsContext = "connections";
     public const string SqlContext = "sql";
     public const string RlsContext = "rls";
+    public const string CopyJobsContext = "copy-jobs";
+    public const string NotebooksContext = "notebooks";
 
     private const int MaxItems = 500;
 

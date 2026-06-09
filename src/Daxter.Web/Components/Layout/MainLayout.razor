@@ -30,6 +30,8 @@
         <NavLink href="connections">Connections</NavLink>
         <NavLink href="sql">SQL</NavLink>
         <NavLink href="rls">RLS</NavLink>
+        <NavLink href="copy-jobs">Copy Jobs</NavLink>
+        <NavLink href="notebooks">Notebooks</NavLink>
         <NavLink href="logs">Logs</NavLink>
     </nav>
     <button class="gear @(OnConfigure ? "active" : "")" @onclick="ToggleConfigure"
@@ -48,6 +50,8 @@
             UsageStore.ConnectionsContext => " · Connections",
             UsageStore.SqlContext => " · SQL",
             UsageStore.RlsContext => " · RLS",
+            UsageStore.CopyJobsContext => " · Copy Jobs",
+            UsageStore.NotebooksContext => " · Notebooks",
             _ => "" })</div>
 
         @if (context is null)
@@ -80,6 +84,8 @@
                     UsageStore.AuditContext => "Pipelines",
                     UsageStore.SqlContext => "SQL endpoints",
                     UsageStore.RlsContext => "Models",
+                    UsageStore.CopyJobsContext => "Copy Jobs",
+                    UsageStore.NotebooksContext => "Notebooks",
                     _ => "Datasets" })</div>
                 @foreach (var d in dsTop)
                 {
@@ -101,6 +107,19 @@
                     {
                         <a class="side-item" href="@($"sql?ws={Uri.EscapeDataString(d.Parent ?? "")}&ep={Uri.EscapeDataString(d.Name)}")" title="@($"{d.Name} — in workspace “{d.Parent}”")">
                             <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@d.Parent</small></span>
+                            <span class="side-count">@d.Count</span>
+                        </a>
+                    }
+                    else if (context == UsageStore.CopyJobsContext || context == UsageStore.NotebooksContext)
+                    {
+                        @* d.Name = displayName, d.Parent = "workspace<sep>itemId" (we record the id
+                           so a Frequent click deep-links back to the exact item). *@
+                        var parts = (d.Parent ?? "").Split(Sep);
+                        var ws = parts.Length > 0 ? parts[0] : "";
+                        var id = parts.Length > 1 ? parts[1] : "";
+                        var page = context == UsageStore.CopyJobsContext ? "copy-jobs" : "notebooks";
+                        <a class="side-item" href="@($"{page}?ws={Uri.EscapeDataString(ws)}&id={Uri.EscapeDataString(id)}")" title="@($"{d.Name} — in workspace “{ws}”")">
+                            <span class="side-name"><span class="nm">@d.Name</span><small class="side-sub">@ws</small></span>
                             <span class="side-count">@d.Count</span>
                         </a>
                     }
@@ -262,6 +281,8 @@
             "connections" => UsageStore.ConnectionsContext,
             "sql" => UsageStore.SqlContext,
             "rls" => UsageStore.RlsContext,
+            "copy-jobs" => UsageStore.CopyJobsContext,
+            "notebooks" => UsageStore.NotebooksContext,
             _ => null,
         };
     }

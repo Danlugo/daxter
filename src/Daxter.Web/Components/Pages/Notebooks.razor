@@ -1,0 +1,106 @@
+@page "/notebooks"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+
+<PageTitle>DAXter — Notebooks</PageTitle>
+
+<h1>Notebooks</h1>
+<p class="muted">Browse a workspace's Fabric Notebooks — view the cells in standard Jupyter <code>ipynb</code> format, run on demand, and watch run history. Read + run + monitor; edits go through the Fabric Notebook editor.</p>
+
+<div class="dax-tools">
+    <button class="btn-sm back-btn" @onclick="GoBack" title="Back">← Back</button>
+</div>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" />
+        <button class="btn-sm" @onclick="LoadWorkspaces">Load</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+<FabricItemViewer @ref="viewer"
+                  Workspace="@workspace"
+                  DeepLinkId="@Qid"
+                  ItemKindLabel="Notebooks"
+                  ItemGlyph="📓"
+                  ListAsync="ws => Ui.NotebooksAsync(ws)"
+                  GetDefinitionAsync="GetIpynb"
+                  RunAsync="(ws, id) => Ui.RunNotebookAsync(ws, id)"
+                  OnItemSelected="OnItemSelected" />
+
+@code {
+    private List<string> workspaces = new();
+    private string workspace = "";
+    private string? error;
+    private FabricItemViewer? viewer;
+
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "id")] public string? Qid { get; set; }
+    private string? appliedDeepLink;
+
+    private const char Sep = '';
+
+    /// <summary>Force the standard Jupyter <c>ipynb</c> format on the viewer — Fabric's default is
+    /// <c>FabricGitSource</c> which returns the language-specific source file (<c>.py</c>/<c>.scala</c>
+    /// /<c>.sql</c>/<c>.r</c>), but a JSON ipynb is easier to read & copy.</summary>
+    private Task<IReadOnlyList<Daxter.Core.Rest.FabricItemPart>?> GetIpynb(string ws, string id)
+        => Ui.NotebookDefinitionAsync(ws, id, format: "ipynb");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}|{Qid}";
+        if (key == appliedDeepLink) return;
+        appliedDeepLink = key;
+
+        BusyState.Begin();
+        try
+        {
+            if (workspaces.Count == 0) await LoadWorkspaces();
+            workspace = Qws!;
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.NotebooksContext);
+        }
+        finally { BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private async Task LoadWorkspaces()
+    {
+        BusyState.Begin(); error = null;
+        try
+        {
+            var r = await Ui.WorkspacesAsync();
+            var idx = -1;
+            for (var i = 0; i < r.Columns.Count; i++)
+                if (string.Equals(r.Columns[i], "name", StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+            workspaces = idx < 0 ? new() : r.Rows.Select(row => row[idx]?.ToString() ?? "")
+                .Where(s => s.Length > 0).OrderBy(s => s).ToList();
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { BusyState.End(); }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        if (string.IsNullOrEmpty(workspace)) return;
+        Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.NotebooksContext);
+        if (viewer is not null) await viewer.Refresh();
+    }
+
+    private void OnItemSelected(FabricItemViewer.FabricItem it)
+    {
+        Usage.Record(UsageStore.Dataset, it.DisplayName, $"{workspace}{Sep}{it.Id}", UsageStore.NotebooksContext);
+    }
+}

@@ -450,6 +450,106 @@ public sealed class DaxterUi
             throw new DaxterException($"Refusing to {what} on a production target ('{cfg.Workspace}').");
     }
 
+    // ---- Fabric items: Copy Jobs + Notebooks (list, definition, run, monitor) ----
+
+    /// <summary>All Copy Jobs in a workspace. Read-only Fabric REST.</summary>
+    public Task<QueryResult> CopyJobsAsync(string ws, CancellationToken ct = default)
+        => Track("copy-jobs", ws, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            return await rest.CopyJobsAsync(groupId, ct);
+        });
+
+    /// <summary>All Notebooks in a workspace. Read-only Fabric REST.</summary>
+    public Task<QueryResult> NotebooksAsync(string ws, CancellationToken ct = default)
+        => Track("notebooks", ws, async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            return await rest.NotebooksAsync(groupId, ct);
+        });
+
+    /// <summary>A Copy Job's full <c>copyjob-content.json</c> definition (Base64-decoded parts) —
+    /// the source/destination/connection/mapping JSON the Fabric UI calls "View JSON code". Returns
+    /// null on failure so the page can show an inline error instead of a broken viewer.</summary>
+    public async Task<IReadOnlyList<FabricItemPart>?> CopyJobDefinitionAsync(string ws, string copyJobId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await Track<IReadOnlyList<FabricItemPart>>("copy-job-definition", $"{ws}/{copyJobId}", async () =>
+            {
+                using var rest = new PowerBiRestClient(Provider(Config()));
+                var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+                return await rest.CopyJobDefinitionAsync(groupId, copyJobId, ct);
+            });
+        }
+        catch (Exception ex) { _log.LogWarning(ex, "copy-job definition unavailable [{Ws}/{Id}]", ws, copyJobId); return null; }
+    }
+
+    /// <summary>A Notebook's full definition — typically a single <c>artifact.content.ipynb</c>
+    /// payload (the notebook cells, in standard Jupyter format) plus a small <c>.platform</c> file.
+    /// Pass <paramref name="format"/> = "ipynb" to force Jupyter format regardless of the notebook's
+    /// language (otherwise the service returns the language-specific source — .py/.scala/.sql/.r).</summary>
+    public async Task<IReadOnlyList<FabricItemPart>?> NotebookDefinitionAsync(string ws, string notebookId, string? format = null, CancellationToken ct = default)
+    {
+        try
+        {
+            return await Track<IReadOnlyList<FabricItemPart>>("notebook-definition", $"{ws}/{notebookId}", async () =>
+            {
+                using var rest = new PowerBiRestClient(Provider(Config()));
+                var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+                return await rest.NotebookDefinitionAsync(groupId, notebookId, format, ct);
+            });
+        }
+        catch (Exception ex) { _log.LogWarning(ex, "notebook definition unavailable [{Ws}/{Id}]", ws, notebookId); return null; }
+    }
+
+    /// <summary>Triggers a Copy Job on demand and returns the new instance id. Writes-gated like
+    /// every other mutation (Allow writes + non-prod check). Pass <paramref name="executionData"/>
+    /// for parameterized runs (almost always null for Copy Jobs).</summary>
+    public async Task<string> RunCopyJobAsync(string ws, string copyJobId, string? executionData = null, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, null), "run a Copy Job");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var instanceId = await rest.StartItemJobAsync(groupId, copyJobId, "Execute", executionData, ct);
+        _log.LogInformation("copy-job RUN [{Ws}/{Id}] → instance {Instance}", ws, copyJobId, instanceId);
+        return instanceId;
+    }
+
+    /// <summary>Triggers a Notebook on demand and returns the new instance id. Writes-gated.
+    /// <paramref name="executionData"/> can carry parameter overrides — see the Job Scheduler API.</summary>
+    public async Task<string> RunNotebookAsync(string ws, string notebookId, string? executionData = null, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, null), "run a Notebook");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        var instanceId = await rest.StartItemJobAsync(groupId, notebookId, "RunNotebook", executionData, ct);
+        _log.LogInformation("notebook RUN [{Ws}/{Id}] → instance {Instance}", ws, notebookId, instanceId);
+        return instanceId;
+    }
+
+    /// <summary>Recent run instances for a Fabric item (Copy Job, Notebook, or any other) — status,
+    /// start/end, duration, failure reason. Read-only.</summary>
+    public Task<QueryResult> ItemJobInstancesAsync(string ws, string itemId, CancellationToken ct = default)
+        => Track("item-runs", $"{ws}/{itemId}", async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            return await rest.ListItemJobInstancesAsync(groupId, itemId, ct);
+        });
+
+    /// <summary>Cancels a running item-job instance. Writes-gated.</summary>
+    public async Task CancelItemJobInstanceAsync(string ws, string itemId, string instanceId, CancellationToken ct = default)
+    {
+        EnsureWritable(_state.ToConfig(ws, null), "cancel a job instance");
+        using var rest = new PowerBiRestClient(Provider(Config()));
+        var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+        await rest.CancelItemJobInstanceAsync(groupId, itemId, instanceId, ct);
+        _log.LogInformation("job-instance CANCEL [{Ws}/{Item}/{Instance}] → OK", ws, itemId, instanceId);
+    }
+
     // ---- Fabric SQL endpoints (Warehouse + Lakehouse SQL analytics endpoint) ----
 
     /// <summary>Every SQL endpoint in a workspace — every Warehouse and every Lakehouse SQL endpoint
@@ -774,6 +874,26 @@ public sealed class DaxterUi
         {
             var result = await body();
             _log.LogInformation("{Label} → {Rows} rows in {Ms} ms", label, result.RowCount, sw.ElapsedMilliseconds);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError("{Label} failed after {Ms} ms: {Error}", label, sw.ElapsedMilliseconds, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Same as <see cref="Track(string, string?, Func{Task{QueryResult}})"/> but generic —
+    /// for ops that return a typed payload (item-definition parts, job-instance records). Lets
+    /// non-QueryResult bridge methods still benefit from start/success/error logging.</summary>
+    private async Task<T> Track<T>(string op, string? target, Func<Task<T>> body)
+    {
+        var label = target is null ? op : $"{op} [{target}]";
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var result = await body();
+            _log.LogInformation("{Label} → OK in {Ms} ms", label, sw.ElapsedMilliseconds);
             return result;
         }
         catch (Exception ex)

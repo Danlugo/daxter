@@ -33,6 +33,12 @@ public class CapabilitiesClassificationTests
             "daxter_connections",      // Fabric REST
             "daxter_workspaces",       // Power BI REST
             "daxter_capabilities",     // self-introspection
+            "daxter_copy_jobs",        // Fabric Copy Job list
+            "daxter_copy_job_definition",
+            "daxter_notebooks",        // Fabric Notebook list
+            "daxter_notebook_definition",
+            "daxter_item_runs",        // job-instance history
+            "daxter_item_job_status",  // single job-instance status
         };
 
         foreach (var tool in tools.EnumerateArray())

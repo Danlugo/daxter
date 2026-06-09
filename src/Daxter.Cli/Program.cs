@@ -101,6 +101,7 @@ internal static class Program
         var testRlsCommand = BuildTestRlsCommand(connectionOptions, outputOption);
         var pipelineCommand = BuildPipelineCommand(connectionOptions, outputOption);
         var sqlCommand = BuildSqlCommand(connectionOptions, outputOption, fileOption);
+        var fabricCommand = BuildFabricCommand(connectionOptions, outputOption);
 
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
@@ -113,7 +114,7 @@ internal static class Program
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
-            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand,
+            refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand, fabricCommand,
             mcpCommand, webCommand,
         };
 
@@ -1156,6 +1157,181 @@ internal static class Program
 
     private static MsalTokenProvider BuildMsalProvider(DaxterConfig config)
         => new MsalTokenProvider(config, deviceCodePrompt: WriteToStdErr);
+
+    // ---- Fabric items: Copy Jobs + Notebooks (view + run + monitor) ----
+
+    private static Command BuildFabricCommand(ConnectionOptions connectionOptions, Option<string> outputOption)
+    {
+        Command List(string name, string desc,
+            Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op)
+        {
+            var cmd = new Command(name, desc) { outputOption };
+            connectionOptions.AddTo(cmd);
+            cmd.SetAction((pr, ct) => RunRestQueryAsync(
+                () => connectionOptions.Resolve(pr, requireWorkspace: true),
+                () => pr.GetValue(outputOption), op, ct));
+            return cmd;
+        }
+
+        // --- copy-jobs ---
+        var cjLs = List("ls", "List Copy Jobs in the workspace.",
+            async (rest, cfg, c) => await rest.CopyJobsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c));
+
+        var cjIdOpt = new Option<string>("--copy-job") { Description = "Copy Job item id (GUID; from `fabric copy-jobs ls`)." };
+        var cjShow = new Command("show", "Show a Copy Job's definition (the copyjob-content.json).") { cjIdOpt };
+        connectionOptions.AddTo(cjShow);
+        cjShow.SetAction((pr, ct) => RunFabricDefinitionAsync(
+            () => connectionOptions.Resolve(pr), kind: "copyJob",
+            itemId: pr.GetValue(cjIdOpt) ?? throw new DaxterException("--copy-job is required."),
+            format: null, ct));
+
+        var yesOpt = new Option<bool>("--yes") { Description = "Actually run / cancel (omit for a dry run)." };
+        var cjRun = new Command("run", "Start a Copy Job on demand (dry-run unless --yes).") { cjIdOpt, yesOpt };
+        connectionOptions.AddTo(cjRun);
+        cjRun.SetAction((pr, ct) => RunItemJobActionAsync(
+            () => connectionOptions.Resolve(pr),
+            itemId: pr.GetValue(cjIdOpt) ?? throw new DaxterException("--copy-job is required."),
+            jobType: "Execute", execute: pr.GetValue(yesOpt), ct: ct));
+
+        // `runs` command — can't use the List() helper because we need to reach the --copy-job
+        // option inside the op lambda, which the helper doesn't expose. Wire it explicitly.
+        var cjRunsCmd = new Command("runs", "List recent run instances for a Copy Job.") { cjIdOpt, outputOption };
+        connectionOptions.AddTo(cjRunsCmd);
+        cjRunsCmd.SetAction((pr, ct) => RunRestQueryAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
+            async (rest, cfg, c) => await rest.ListItemJobInstancesAsync(
+                await rest.ResolveGroupIdAsync(cfg.Workspace, c),
+                pr.GetValue(cjIdOpt) ?? throw new DaxterException("--copy-job is required."), c), ct));
+
+        var cjInstOpt = new Option<string>("--instance") { Description = "Job instance id." };
+        var cjCancel = new Command("cancel", "Cancel a running Copy Job instance (dry-run unless --yes).")
+            { cjIdOpt, cjInstOpt, yesOpt };
+        connectionOptions.AddTo(cjCancel);
+        cjCancel.SetAction((pr, ct) => RunCancelItemJobAsync(
+            () => connectionOptions.Resolve(pr),
+            itemId: pr.GetValue(cjIdOpt) ?? throw new DaxterException("--copy-job is required."),
+            instanceId: pr.GetValue(cjInstOpt) ?? throw new DaxterException("--instance is required."),
+            execute: pr.GetValue(yesOpt), ct));
+
+        var copyJobs = new Command("copy-jobs", "Fabric Copy Jobs — list, view, run, monitor.")
+            { cjLs, cjShow, cjRun, cjRunsCmd, cjCancel };
+
+        // --- notebooks ---
+        var nbLs = List("ls", "List Notebooks in the workspace.",
+            async (rest, cfg, c) => await rest.NotebooksAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c));
+
+        var nbIdOpt = new Option<string>("--notebook") { Description = "Notebook item id (GUID; from `fabric notebooks ls`)." };
+        var nbFormatOpt = new Option<string?>("--format")
+            { Description = "Definition format: \"ipynb\" (default — standard Jupyter) or \"FabricGitSource\" (language-specific source file)." };
+        var nbShow = new Command("show", "Show a Notebook's definition.") { nbIdOpt, nbFormatOpt };
+        connectionOptions.AddTo(nbShow);
+        nbShow.SetAction((pr, ct) => RunFabricDefinitionAsync(
+            () => connectionOptions.Resolve(pr), kind: "notebook",
+            itemId: pr.GetValue(nbIdOpt) ?? throw new DaxterException("--notebook is required."),
+            format: pr.GetValue(nbFormatOpt) ?? "ipynb", ct));
+
+        var nbExecOpt = new Option<string?>("--execution-data")
+            { Description = "JSON payload for parameterized run (see Fabric Job Scheduler docs)." };
+        var nbRun = new Command("run", "Start a Notebook on demand (dry-run unless --yes).") { nbIdOpt, nbExecOpt, yesOpt };
+        connectionOptions.AddTo(nbRun);
+        nbRun.SetAction((pr, ct) => RunItemJobActionAsync(
+            () => connectionOptions.Resolve(pr),
+            itemId: pr.GetValue(nbIdOpt) ?? throw new DaxterException("--notebook is required."),
+            jobType: "RunNotebook", execute: pr.GetValue(yesOpt),
+            executionData: pr.GetValue(nbExecOpt), ct: ct));
+
+        var nbRunsCmd = new Command("runs", "List recent run instances for a Notebook.") { nbIdOpt, outputOption };
+        connectionOptions.AddTo(nbRunsCmd);
+        nbRunsCmd.SetAction((pr, ct) => RunRestQueryAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption),
+            async (rest, cfg, c) => await rest.ListItemJobInstancesAsync(
+                await rest.ResolveGroupIdAsync(cfg.Workspace, c),
+                pr.GetValue(nbIdOpt) ?? throw new DaxterException("--notebook is required."), c), ct));
+
+        var nbCancel = new Command("cancel", "Cancel a running Notebook instance (dry-run unless --yes).")
+            { nbIdOpt, cjInstOpt, yesOpt };
+        connectionOptions.AddTo(nbCancel);
+        nbCancel.SetAction((pr, ct) => RunCancelItemJobAsync(
+            () => connectionOptions.Resolve(pr),
+            itemId: pr.GetValue(nbIdOpt) ?? throw new DaxterException("--notebook is required."),
+            instanceId: pr.GetValue(cjInstOpt) ?? throw new DaxterException("--instance is required."),
+            execute: pr.GetValue(yesOpt), ct));
+
+        var notebooks = new Command("notebooks", "Fabric Notebooks — list, view, run, monitor.")
+            { nbLs, nbShow, nbRun, nbRunsCmd, nbCancel };
+
+        return new Command("fabric", "Fabric items — Copy Jobs, Notebooks (view, run, monitor).") { copyJobs, notebooks };
+    }
+
+    /// <summary>Prints a Fabric item's definition to stdout — joining all parts (rare; usually 1) with
+    /// a <c># ----- path</c> marker so multi-part definitions stay distinguishable.</summary>
+    private static async Task<int> RunFabricDefinitionAsync(
+        Func<DaxterConfig> configFactory, string kind, string itemId, string? format, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var parts = kind switch
+            {
+                "copyJob" => await rest.CopyJobDefinitionAsync(groupId, itemId, ct),
+                "notebook" => await rest.NotebookDefinitionAsync(groupId, itemId, format, ct),
+                _ => throw new DaxterException($"Unknown item kind: {kind}"),
+            };
+            if (parts.Count == 0) { Console.Error.WriteLine("(empty definition)"); return 0; }
+            for (var i = 0; i < parts.Count; i++)
+            {
+                if (parts.Count > 1) Console.Out.WriteLine($"# ----- {parts[i].Path}");
+                Console.Out.Write(parts[i].Content);
+                if (!parts[i].Content.EndsWith('\n')) Console.Out.WriteLine();
+            }
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunItemJobActionAsync(
+        Func<DaxterConfig> configFactory, string itemId, string jobType, bool execute,
+        string? executionData = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var config = configFactory();
+            if (!execute)
+            {
+                Console.Error.WriteLine($"DRY RUN — would start jobType={jobType} on item {itemId} in '{config.Workspace}'. Pass --yes to actually run.");
+                return 0;
+            }
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var instanceId = await rest.StartItemJobAsync(groupId, itemId, jobType, executionData, ct);
+            Console.Error.WriteLine($"Started — instanceId: {instanceId}. Use `runs --{(jobType == "Execute" ? "copy-job" : "notebook")} {itemId}` to track it.");
+            Console.Out.WriteLine(instanceId);
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunCancelItemJobAsync(
+        Func<DaxterConfig> configFactory, string itemId, string instanceId, bool execute, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            if (!execute)
+            {
+                Console.Error.WriteLine($"DRY RUN — would cancel instance {instanceId} on item {itemId} in '{config.Workspace}'. Pass --yes to actually cancel.");
+                return 0;
+            }
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            await rest.CancelItemJobInstanceAsync(groupId, itemId, instanceId, ct);
+            Console.Error.WriteLine($"Cancellation requested for instance {instanceId}. Next status check should report 'Cancelled'.");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
 
     // ---- SQL: Fabric Warehouse / Lakehouse SQL endpoint ----
 

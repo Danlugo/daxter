@@ -19,6 +19,20 @@ public sealed record EnhancedRefreshStatus(string Status, IReadOnlyList<RefreshO
 /// <paramref name="Content"/> (empty for binary parts).</summary>
 public sealed record ReportPart(string Path, string Content);
 
+/// <summary>One file of a Fabric item's definition (returned by <c>getDefinition</c>) — a path like
+/// <c>copyjob-content.json</c> / <c>notebook-content.py</c> / <c>artifact.content.ipynb</c> /
+/// <c>.platform</c> plus the decoded text content. Binary parts come back with empty content.</summary>
+public sealed record FabricItemPart(string Path, string Content);
+
+/// <summary>A Fabric item-job run instance — what <c>POST /items/{id}/jobs/instances</c> creates and
+/// <c>GET .../jobs/instances/{instanceId}</c> reports on. <paramref name="Status"/> is one of
+/// <c>NotStarted | InProgress | Completed | Failed | Cancelled | Unknown</c>; <paramref name="JobType"/>
+/// echoes what the caller asked for (<c>Execute</c> for Copy Job, <c>RunNotebook</c> for Notebook).
+/// <paramref name="FailureReason"/> is populated when the run failed.</summary>
+public sealed record FabricJobInstance(
+    string Id, string ItemId, string JobType, string InvokeType,
+    string Status, DateTimeOffset? StartTimeUtc, DateTimeOffset? EndTimeUtc, string? FailureReason);
+
 /// <summary>
 /// Thin client over the Power BI REST API (<c>https://api.powerbi.com/v1.0/myorg/</c>).
 /// Uses the same Entra ID token as XMLA. Responses are mapped to <see cref="QueryResult"/>
@@ -443,6 +457,221 @@ public sealed class PowerBiRestClient : IDisposable
         // Sort alphabetically — same convention every DAXter picker uses (see UI contract).
         rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a[0]?.ToString(), b[0]?.ToString()));
         return new QueryResult(columns, rows);
+    }
+
+    // ---- Fabric items: Copy Jobs + Notebooks (list, definition, run, status, cancel) ----
+
+    /// <summary>All Copy Jobs in a workspace — id, displayName, description. Columns:
+    /// <c>id, displayName, description</c>. Read-only Fabric REST.</summary>
+    public async Task<QueryResult> CopyJobsAsync(string workspaceId, CancellationToken ct = default)
+        => await FetchFabricItemsAsync(
+            $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/copyJobs", ct);
+
+    /// <summary>All Notebooks in a workspace — id, displayName, description. Columns:
+    /// <c>id, displayName, description</c>. Read-only Fabric REST.</summary>
+    public async Task<QueryResult> NotebooksAsync(string workspaceId, CancellationToken ct = default)
+        => await FetchFabricItemsAsync(
+            $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/notebooks", ct);
+
+    /// <summary>Fetches a Copy Job's full <c>copyjob-content.json</c> definition (and any platform
+    /// metadata parts) — the source/destination/connection/mapping payload. Handles the 202 +
+    /// long-running-operation poll the Fabric API uses for getDefinition. Base64 parts decoded;
+    /// binary parts come back with empty content.</summary>
+    public Task<IReadOnlyList<FabricItemPart>> CopyJobDefinitionAsync(string workspaceId, string copyJobId, CancellationToken ct = default)
+        => GetItemDefinitionAsync(
+            $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/copyJobs/{copyJobId}/getDefinition", ct);
+
+    /// <summary>Fetches a Notebook's definition — the cells as <c>artifact.content.ipynb</c>
+    /// (or <c>notebook-content.py</c> in <c>FabricGitSource</c> format) plus the <c>.platform</c>
+    /// metadata. Pass <paramref name="format"/> = "ipynb" to force the standard Jupyter format
+    /// (otherwise the service returns the language-specific source file).</summary>
+    public Task<IReadOnlyList<FabricItemPart>> NotebookDefinitionAsync(
+        string workspaceId, string notebookId, string? format = null, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/notebooks/{notebookId}/getDefinition";
+        if (!string.IsNullOrEmpty(format)) url += $"?format={Uri.EscapeDataString(format)}";
+        return GetItemDefinitionAsync(url, ct);
+    }
+
+    /// <summary>Starts an on-demand item job — <c>POST .../items/{itemId}/jobs/instances?jobType=…</c>.
+    /// <paramref name="jobType"/> is <c>Execute</c> for Copy Jobs, <c>RunNotebook</c> for Notebooks
+    /// (and <c>DefaultJob</c> for pipelines). The API returns 202 with a <c>Location</c> header
+    /// pointing at the new instance — we extract and return the instance id so the caller can poll
+    /// it. Pass <paramref name="executionData"/> JSON for notebook parameter/session config
+    /// (e.g. <c>{"parameters":{"x":{"value":"…","type":"string"}}}</c>).</summary>
+    public async Task<string> StartItemJobAsync(
+        string workspaceId, string itemId, string jobType,
+        string? executionData = null, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/items/{itemId}/jobs/instances?jobType={Uri.EscapeDataString(jobType)}";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        if (!string.IsNullOrWhiteSpace(executionData))
+        {
+            request.Content = new StringContent(executionData, Encoding.UTF8, "application/json");
+        }
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);   // 200 or 202
+
+        // The Location header carries the new instance URL — last path segment is the instance id.
+        // Some responses return a 200 with the job body instead; fall back to that.
+        var loc = response.Headers.Location?.ToString();
+        if (string.IsNullOrEmpty(loc) && response.Headers.TryGetValues("Location", out var v))
+            loc = v.FirstOrDefault();
+        if (!string.IsNullOrEmpty(loc))
+        {
+            var seg = loc.TrimEnd('/').Split('/').LastOrDefault();
+            if (!string.IsNullOrEmpty(seg)) return seg;
+        }
+
+        // No Location → try the body.
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            using var doc = JsonDocument.Parse(body);
+            var id = Str(doc.RootElement, "id");
+            if (!string.IsNullOrEmpty(id)) return id!;
+        }
+        throw new DaxterException("Job started but no instance id was returned by the service.");
+    }
+
+    /// <summary>Lists recent job instances for an item — every run with status, kind (Manual /
+    /// Scheduled / OnDemand), start/end times, and failure reason. Default limit 50; pagination not
+    /// surfaced (the Fabric API supports a continuationToken but ops dashboards rarely need it).</summary>
+    public async Task<QueryResult> ListItemJobInstancesAsync(string workspaceId, string itemId, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/items/{itemId}/jobs/instances";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var root = await SendJsonAsync(request, ct);
+
+        string[] columns = ["instanceId", "status", "invokeType", "startTimeUtc", "endTimeUtc", "durationSec", "failureReason"];
+        var rows = new List<object?[]>();
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            var start = TryDate(item, "startTimeUtc");
+            var end = TryDate(item, "endTimeUtc");
+            double? duration = start is { } s && end is { } e ? (e - s).TotalSeconds : null;
+            rows.Add(
+            [
+                Str(item, "id"),
+                Str(item, "status"),
+                Str(item, "invokeType"),
+                start,
+                end,
+                duration,
+                ExtractFailureReason(item),
+            ]);
+        }
+        return new QueryResult(columns, rows);
+    }
+
+    /// <summary>Gets a single item-job instance — typed via <see cref="FabricJobInstance"/>. Used
+    /// by the Web page to refresh "the run we just started" without re-fetching the whole list.</summary>
+    public async Task<FabricJobInstance> GetItemJobInstanceAsync(
+        string workspaceId, string itemId, string instanceId, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/items/{itemId}/jobs/instances/{instanceId}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var root = await SendJsonAsync(request, ct);
+        return new FabricJobInstance(
+            Id: Str(root, "id") ?? instanceId,
+            ItemId: Str(root, "itemId") ?? itemId,
+            JobType: Str(root, "jobType") ?? "",
+            InvokeType: Str(root, "invokeType") ?? "",
+            Status: Str(root, "status") ?? "Unknown",
+            StartTimeUtc: TryDate(root, "startTimeUtc"),
+            EndTimeUtc: TryDate(root, "endTimeUtc"),
+            FailureReason: ExtractFailureReason(root));
+    }
+
+    /// <summary>Cancels a running item-job instance. The Fabric API returns 202 + Location header
+    /// pointing back at the same instance — the next status poll will report <c>Cancelled</c> once
+    /// the engine accepts the cancel.</summary>
+    public async Task CancelItemJobInstanceAsync(
+        string workspaceId, string itemId, string instanceId, CancellationToken ct = default)
+    {
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/items/{itemId}/jobs/instances/{instanceId}/cancel";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);   // 200 or 202
+    }
+
+    // ---- shared helpers for Fabric items (Copy Jobs + Notebooks share the shape) ----
+
+    private async Task<QueryResult> FetchFabricItemsAsync(string url, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var root = await SendJsonAsync(request, ct);
+        string[] columns = ["id", "displayName", "description"];
+        var rows = new List<object?[]>();
+        foreach (var item in Value(root).EnumerateArray())
+        {
+            rows.Add([Str(item, "id"), Str(item, "displayName"), Str(item, "description")]);
+        }
+        rows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a[1]?.ToString(), b[1]?.ToString()));
+        return new QueryResult(columns, rows);
+    }
+
+    private async Task<IReadOnlyList<FabricItemPart>> GetItemDefinitionAsync(string url, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+
+        JsonElement root;
+        if (response.StatusCode == System.Net.HttpStatusCode.Accepted)
+        {
+            // Long-running op — same poll helper Report.getDefinition uses.
+            root = await PollOperationResultAsync(response, ct);
+        }
+        else
+        {
+            await EnsureSuccessAsync(response, ct);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            root = doc.RootElement.Clone();
+        }
+
+        var parts = new List<FabricItemPart>();
+        if (root.TryGetProperty("definition", out var def) && def.TryGetProperty("parts", out var partsEl)
+            && partsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var p in partsEl.EnumerateArray())
+            {
+                var path = Str(p, "path") ?? "";
+                var payload = Str(p, "payload") ?? "";
+                var type = Str(p, "payloadType") ?? "";
+                var content = "";
+                if (string.Equals(type, "InlineBase64", StringComparison.OrdinalIgnoreCase) && payload.Length > 0)
+                {
+                    try { content = Encoding.UTF8.GetString(Convert.FromBase64String(payload)); }
+                    catch { content = ""; }
+                }
+                parts.Add(new FabricItemPart(path, content));
+            }
+        }
+        return parts;
+    }
+
+    /// <summary>Pulls a failure message out of either the legacy top-level <c>failureReason</c>
+    /// string OR the nested <c>error</c> object Fabric returns on newer LROs.</summary>
+    private static string? ExtractFailureReason(JsonElement el)
+    {
+        var s = Str(el, "failureReason");
+        if (!string.IsNullOrEmpty(s)) return s;
+        if (el.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.Object)
+        {
+            var msg = Str(err, "message");
+            if (!string.IsNullOrEmpty(msg)) return msg;
+        }
+        return null;
+    }
+
+    private static DateTimeOffset? TryDate(JsonElement el, string property)
+    {
+        var s = Str(el, property);
+        if (string.IsNullOrEmpty(s)) return null;
+        return DateTimeOffset.TryParse(s, out var d) ? d : null;
     }
 
     // ---- take ownership + gateway binding (service-level config; XMLA can't do these) ----

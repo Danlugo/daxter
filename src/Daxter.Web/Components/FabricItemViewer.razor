@@ -1,0 +1,280 @@
+@* Reusable Fabric-item viewer: items list (left) + tabs (Definition / Recent Runs) on the right.
+   Used by /copy-jobs and /notebooks — they each just plug in their list/definition/run callbacks.
+   Read + run + monitor (no edit/delete in this slice). *@
+@using Daxter.Core.Rest
+@inject DaxterUi Ui
+@inject UiBusy BusyState
+@inject IJSRuntime JS
+
+<div class="dax-layout">
+    <aside class="dax-objects fabric-items">
+        <div class="pane-head">
+            <span class="side-title">@ItemKindLabel<span class="muted"> (@items.Count)</span></span>
+            <button class="pane-x" @onclick="Refresh" title="Refresh">↻</button>
+        </div>
+        @if (string.IsNullOrEmpty(Workspace))
+        {
+            <p class="side-empty">Pick a workspace to list @ItemKindLabel.ToLower().</p>
+        }
+        else if (listError is not null)
+        {
+            <p class="bad-text">@listError</p>
+            <button class="btn-sm" @onclick="Refresh">Retry</button>
+        }
+        else if (loading)
+        {
+            <p class="muted">Loading…</p>
+        }
+        else if (items.Count == 0)
+        {
+            <p class="side-empty">No @ItemKindLabel.ToLower() in this workspace.</p>
+        }
+        else
+        {
+            <input class="obj-search" @bind="search" @bind:event="oninput" placeholder="@($"filter {ItemKindLabel.ToLower()}…")" autocomplete="off" />
+            <div class="obj-tree">
+                @foreach (var it in Filtered())
+                {
+                    <button class="obj-tname @(selected?.Id == it.Id ? "active" : "")"
+                            @onclick="() => SelectAsync(it)" title="@($"{it.DisplayName} · {it.Id}")">
+                        <span class="obj-icon">@ItemGlyph</span>
+                        <span>@it.DisplayName</span>
+                    </button>
+                    @if (!string.IsNullOrEmpty(it.Description) && selected?.Id == it.Id)
+                    {
+                        <div class="obj-item-sub muted">@it.Description</div>
+                    }
+                }
+            </div>
+        }
+    </aside>
+
+    <div class="dax-main">
+        @if (selected is null)
+        {
+            <p class="muted">Pick @ItemKindLabel.ToLower().TrimEnd('s') on the left.</p>
+        }
+        else
+        {
+            <h3 style="margin-top:0;">@selected.DisplayName <small class="muted">— @selected.Id</small></h3>
+
+            <div class="tabs">
+                <button class="tab @(tab == "definition" ? "active" : "")" @onclick='() => tab = "definition"'>📄 Definition</button>
+                <button class="tab @(tab == "runs" ? "active" : "")" @onclick='() => SwitchToRunsAsync()'>▶ Recent runs</button>
+            </div>
+
+            @if (tab == "definition")
+            {
+                @if (defError is not null)
+                {
+                    <p class="bad-text">@defError</p>
+                    <button class="btn-sm" @onclick="LoadDefinitionAsync">Retry</button>
+                }
+                else if (defLoading || definition is null)
+                {
+                    <p class="muted">Loading definition…</p>
+                }
+                else if (definition.Count == 0)
+                {
+                    <p class="muted">(empty definition)</p>
+                }
+                else
+                {
+                    <div class="fabric-tools">
+                        <button class="btn" @onclick="AskRunAsync" disabled="@(busy || !Ui.WritesEnabled)" title="Start a run on demand (writes-gated)">▶ Run on demand</button>
+                        <button class="btn-sm" @onclick="CopyDefinitionAsync">📋 Copy</button>
+                        @if (!Ui.WritesEnabled) { <span class="muted">Writes off — turn on in Configure to run.</span> }
+                    </div>
+                    @foreach (var part in definition)
+                    {
+                        @if (definition.Count > 1) { <div class="rls-section-h">@part.Path</div> }
+                        <pre class="dax-view code-wrap">@part.Content</pre>
+                    }
+                }
+            }
+            else if (tab == "runs")
+            {
+                <div class="fabric-tools">
+                    <button class="btn" @onclick="AskRunAsync" disabled="@(busy || !Ui.WritesEnabled)">▶ Run on demand</button>
+                    <button class="btn-sm" @onclick="LoadRunsAsync" disabled="@busy">↻ Refresh</button>
+                    @if (lastInstanceId is not null) { <span class="muted">last started: <code>@lastInstanceId</code></span> }
+                </div>
+                <ResultGrid Result="runs" Error="@runsError" Empty="No recent runs." />
+            }
+        }
+    </div>
+</div>
+
+@if (pendingRun)
+{
+    <div class="modal-overlay" @onclick="() => pendingRun = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Run @ItemKindLabel.TrimEnd('s')</h3>
+            <p>Start an on-demand run of:</p>
+            <p><strong>@selected?.DisplayName</strong> <small class="muted">(@selected?.Id)</small><br />
+               in workspace <strong>@Workspace</strong></p>
+            <p class="muted">This writes to the Fabric service.</p>
+            <div class="cmd-group">
+                <button class="btn-sm" @onclick="() => pendingRun = false">Cancel</button>
+                <button class="btn" @onclick="ConfirmRunAsync" disabled="@busy">✓ Confirm — run</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The workspace currently selected (parent page passes it down).</summary>
+    [Parameter] public string Workspace { get; set; } = "";
+    /// <summary>The item id from the deep-link (?id=…), if any. The viewer auto-selects it once items load.</summary>
+    [Parameter] public string? DeepLinkId { get; set; }
+    /// <summary>"Copy Jobs" or "Notebooks" — labels in the UI.</summary>
+    [Parameter] public string ItemKindLabel { get; set; } = "Items";
+    /// <summary>Single-char glyph in the item-list row.</summary>
+    [Parameter] public string ItemGlyph { get; set; } = "◆";
+
+    // ---- Plug-in callbacks the parent provides ----
+    [Parameter] public Func<string, Task<QueryResult>>? ListAsync { get; set; }
+    [Parameter] public Func<string, string, Task<IReadOnlyList<FabricItemPart>?>>? GetDefinitionAsync { get; set; }
+    [Parameter] public Func<string, string, Task<string>>? RunAsync { get; set; }
+    /// <summary>Fired when the user picks an item — lets the parent update its deep-link / record usage.</summary>
+    [Parameter] public EventCallback<FabricItem> OnItemSelected { get; set; }
+
+    public sealed record FabricItem(string Id, string DisplayName, string Description);
+
+    private List<FabricItem> items = new();
+    private bool loading;
+    private string? listError;
+    private string search = "";
+
+    private FabricItem? selected;
+    private string tab = "definition";
+
+    private IReadOnlyList<FabricItemPart>? definition;
+    private bool defLoading;
+    private string? defError;
+
+    private QueryResult? runs;
+    private string? runsError;
+    private string? lastInstanceId;
+
+    private bool pendingRun;
+    private bool busy;
+
+    private string? lastDeepLink;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Workspace changes refresh the list. DeepLinkId changes auto-select.
+        if (string.IsNullOrEmpty(Workspace))
+        {
+            ResetAll(); return;
+        }
+        if (items.Count == 0 || (selected is not null && !items.Contains(selected)))
+        {
+            await Refresh();
+        }
+        if (!string.IsNullOrEmpty(DeepLinkId) && DeepLinkId != lastDeepLink)
+        {
+            lastDeepLink = DeepLinkId;
+            var match = items.FirstOrDefault(i => i.Id == DeepLinkId);
+            if (match is not null) await SelectAsync(match);
+        }
+    }
+
+    private void ResetAll()
+    {
+        items.Clear(); listError = null;
+        selected = null; definition = null; runs = null; lastInstanceId = null;
+    }
+
+    public async Task Refresh()
+    {
+        if (string.IsNullOrEmpty(Workspace) || ListAsync is null) return;
+        loading = true; BusyState.Begin(); listError = null; StateHasChanged();
+        try
+        {
+            var r = await ListAsync(Workspace);
+            items = r.Rows.Select(row => new FabricItem(
+                row[0]?.ToString() ?? "",
+                row.Length > 1 ? row[1]?.ToString() ?? "" : "",
+                row.Length > 2 ? row[2]?.ToString() ?? "" : "")).Where(i => !string.IsNullOrEmpty(i.Id)).ToList();
+        }
+        catch (Exception ex) { listError = ex.Message; }
+        finally { loading = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task SelectAsync(FabricItem it)
+    {
+        if (selected?.Id == it.Id) return;
+        selected = it;
+        definition = null; defError = null;
+        runs = null; runsError = null;
+        lastInstanceId = null;
+        tab = "definition";
+        if (OnItemSelected.HasDelegate) await OnItemSelected.InvokeAsync(it);
+        await LoadDefinitionAsync();
+    }
+
+    private async Task LoadDefinitionAsync()
+    {
+        if (selected is null || GetDefinitionAsync is null) return;
+        defLoading = true; BusyState.Begin(); defError = null; definition = null; StateHasChanged();
+        try { definition = await GetDefinitionAsync(Workspace, selected.Id) ?? Array.Empty<FabricItemPart>(); }
+        catch (Exception ex) { defError = ex.Message; }
+        finally { defLoading = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task SwitchToRunsAsync()
+    {
+        tab = "runs";
+        if (runs is null) await LoadRunsAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        if (selected is null) return;
+        busy = true; BusyState.Begin(); runsError = null; runs = null; StateHasChanged();
+        try { runs = await Ui.ItemJobInstancesAsync(Workspace, selected.Id); }
+        catch (Exception ex) { runsError = ex.Message; }
+        finally { busy = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    private void AskRunAsync()
+    {
+        if (selected is null || !Ui.WritesEnabled) return;
+        pendingRun = true;
+    }
+
+    private async Task ConfirmRunAsync()
+    {
+        pendingRun = false;
+        if (selected is null || RunAsync is null) return;
+        busy = true; BusyState.Begin(); StateHasChanged();
+        try
+        {
+            lastInstanceId = await RunAsync(Workspace, selected.Id);
+            tab = "runs";
+            await LoadRunsAsync();
+        }
+        catch (Exception ex) { runsError = ex.Message; tab = "runs"; }
+        finally { busy = false; BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task CopyDefinitionAsync()
+    {
+        if (definition is null || definition.Count == 0) return;
+        var text = string.Join("\n", definition.Select(p => p.Content));
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); }
+        catch { /* clipboard unavailable */ }
+    }
+
+    private IEnumerable<FabricItem> Filtered()
+    {
+        var q = search?.Trim();
+        return string.IsNullOrEmpty(q) ? items
+            : items.Where(i =>
+                i.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || i.Description.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || i.Id.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+}

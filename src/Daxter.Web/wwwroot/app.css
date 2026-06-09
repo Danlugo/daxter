@@ -214,6 +214,15 @@ input[type="checkbox"], input[type="radio"] { min-width:0; width:auto; padding:0
 .rls-members { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem; line-height:1.6; padding:.5rem .7rem; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); }
 .rls-members li { list-style:none; padding:0; margin:0; }
 .rls-members ul { margin:0; padding:0; }
+
+/* ---- /copy-jobs + /notebooks (FabricItemViewer) ---- */
+.fabric-items .obj-tname { font-weight:500; }
+.fabric-items .obj-item-sub { font-size:.78rem; padding:.05rem .15rem .35rem 1.7rem; line-height:1.4; }
+.fabric-tools { display:flex; align-items:center; gap:.5rem; margin:.4rem 0 .6rem; flex-wrap:wrap; }
+.fabric-tools .muted { font-size:.84rem; }
+.fabric-tools code { font-size:.78rem; background:var(--surface-2); padding:.05rem .25rem; border-radius:3px; }
+/* Wrap long JSON/ipynb content nicely in the read-only viewer. */
+.dax-view.code-wrap { white-space:pre; overflow:auto; max-height:62vh; }
 .grid td.nowrap { white-space:nowrap; }
 .grid td.msg { white-space:normal; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; }
 .grid.logs tr.lvl-Error td, .grid.logs tr.lvl-Critical td { background:var(--bad-bg); }

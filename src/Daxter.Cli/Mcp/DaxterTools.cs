@@ -677,6 +677,93 @@ public static class DaxterTools
 
     // ---- Fabric SQL endpoints (Warehouse + Lakehouse SQL analytics endpoint) ----
 
+    // ---- Fabric items: Copy Jobs + Notebooks (view + run + monitor) ----
+
+    [McpServerTool(Name = "daxter_copy_jobs", ReadOnly = true, Title = "List Copy Jobs in a workspace"),
+     Description("List every Copy Job in a Fabric workspace — id, displayName, description. " +
+                 "Pair with daxter_copy_job_definition to see a job's source/destination/mapping JSON, " +
+                 "daxter_run_copy_job to execute one on demand, and daxter_item_runs to see its history.")]
+    public static Task<string> CopyJobs(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.CopyJobsAsync(workspace, ct);
+
+    [McpServerTool(Name = "daxter_copy_job_definition", ReadOnly = true, Title = "Show a Copy Job's definition (JSON)"),
+     Description("Show the full copyjob-content.json for a Copy Job — same content the Fabric UI shows under \"View JSON code\". " +
+                 "Includes the source connection, destination connection, table mappings, type conversions, " +
+                 "and (for CDC jobs) the watermark / change-capture config. Read-only.")]
+    public static Task<string> CopyJobDefinition(
+        [Description("Copy Job item id (GUID; from daxter_copy_jobs).")] string copyJobId,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.CopyJobDefinitionAsync(workspace, copyJobId, ct);
+
+    [McpServerTool(Name = "daxter_notebooks", ReadOnly = true, Title = "List Notebooks in a workspace"),
+     Description("List every Notebook in a Fabric workspace — id, displayName, description. " +
+                 "Pair with daxter_notebook_definition to read the cells, daxter_run_notebook to execute, " +
+                 "and daxter_item_runs to see run history.")]
+    public static Task<string> Notebooks(string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.NotebooksAsync(workspace, ct);
+
+    [McpServerTool(Name = "daxter_notebook_definition", ReadOnly = true, Title = "Show a Notebook's definition (ipynb)"),
+     Description("Show a Notebook's full definition — the cells, in standard Jupyter ipynb format by default. " +
+                 "Pass format=\"FabricGitSource\" to get the language-specific source file instead " +
+                 "(notebook-content.py / .scala / .sql / .r). Read-only.")]
+    public static Task<string> NotebookDefinition(
+        [Description("Notebook item id (GUID; from daxter_notebooks).")] string notebookId,
+        [Description("\"ipynb\" (default) or \"FabricGitSource\".")] string? format = null,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.NotebookDefinitionAsync(workspace, notebookId, format, ct);
+
+    [McpServerTool(Name = "daxter_run_copy_job", Destructive = false, Title = "Run a Copy Job on demand (gated)"),
+     Description("Start an on-demand run of a Copy Job. DRY RUN by default — pass execute=true to actually run. " +
+                 "The workspace + writes gates (Allow writes + non-PROD) apply same as other mutations. " +
+                 "Returns the new instance id; poll daxter_item_job_status to track it.")]
+    public static Task<string> RunCopyJob(
+        [Description("Copy Job item id.")] string copyJobId,
+        [Description("Actually start the run (default false = dry run).")] bool execute = false,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RunItemJobAsync(workspace, copyJobId, "Execute", null, execute, ct);
+
+    [McpServerTool(Name = "daxter_run_notebook", Destructive = false, Title = "Run a Notebook on demand (gated)"),
+     Description("Start an on-demand run of a Notebook. DRY RUN by default — pass execute=true to actually run. " +
+                 "Pass executionData as a JSON string for parameterized runs " +
+                 "(e.g. '{\"parameters\":{\"x\":{\"value\":\"2026-06-01\",\"type\":\"string\"}}}'). " +
+                 "The workspace + writes gates (Allow writes + non-PROD) apply.")]
+    public static Task<string> RunNotebook(
+        [Description("Notebook item id.")] string notebookId,
+        [Description("Actually start the run (default false = dry run).")] bool execute = false,
+        [Description("Optional JSON payload for parameterization / session config (see Fabric Job Scheduler docs).")] string? executionData = null,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RunItemJobAsync(workspace, notebookId, "RunNotebook", executionData, execute, ct);
+
+    [McpServerTool(Name = "daxter_item_runs", ReadOnly = true, Title = "Recent runs for any Fabric item"),
+     Description("List recent job-instance runs for ANY Fabric item — Copy Job, Notebook, Pipeline. " +
+                 "Returns one row per run: instanceId, status (NotStarted | InProgress | Completed | Failed | Cancelled), " +
+                 "invokeType (Manual | Scheduled), startTimeUtc, endTimeUtc, durationSec, failureReason. " +
+                 "Use to inspect history or find an instanceId for daxter_cancel_item_job / daxter_item_job_status.")]
+    public static Task<string> ItemRuns(
+        [Description("Item id (Copy Job / Notebook / Pipeline / …).")] string itemId,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ItemRunsAsync(workspace, itemId, ct);
+
+    [McpServerTool(Name = "daxter_item_job_status", ReadOnly = true, Title = "Get one job-instance's status"),
+     Description("Get the detailed status of a single item-job instance — typed view of the run record. " +
+                 "Use to poll a run started by daxter_run_copy_job / daxter_run_notebook until it reaches a " +
+                 "terminal state (Completed | Failed | Cancelled).")]
+    public static Task<string> ItemJobStatus(
+        [Description("Item id.")] string itemId,
+        [Description("Job instance id (from daxter_run_* or daxter_item_runs).")] string instanceId,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ItemJobStatusAsync(workspace, itemId, instanceId, ct);
+
+    [McpServerTool(Name = "daxter_cancel_item_job", Destructive = false, Title = "Cancel a running job instance (gated)"),
+     Description("Cancel a running item-job instance. DRY RUN by default — pass execute=true to actually cancel. " +
+                 "Writes gate applies. After cancel, the next daxter_item_job_status should report 'Cancelled'.")]
+    public static Task<string> CancelItemJob(
+        [Description("Item id.")] string itemId,
+        [Description("Job instance id.")] string instanceId,
+        [Description("Actually cancel (default false = dry run).")] bool execute = false,
+        string? workspace = null, CancellationToken ct = default)
+        => DaxterToolRuntime.CancelItemJobAsync(workspace, itemId, instanceId, execute, ct);
+
     [McpServerTool(Name = "daxter_sql_endpoints", ReadOnly = true, Title = "List Fabric SQL endpoints"),
      Description("List every Fabric SQL endpoint in a workspace — each Warehouse and each Lakehouse's SQL analytics endpoint — " +
                  "with name, server (TDS hostname), database, and kind (Warehouse | Lakehouse). " +

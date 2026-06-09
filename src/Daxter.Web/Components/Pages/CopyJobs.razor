@@ -1,0 +1,105 @@
+@page "/copy-jobs"
+@inject DaxterUi Ui
+@inject UsageStore Usage
+@inject IJSRuntime JS
+@inject UiBusy BusyState
+
+<PageTitle>DAXter — Copy Jobs</PageTitle>
+
+<h1>Copy Jobs</h1>
+<p class="muted">Browse a workspace's Fabric Data Factory Copy Jobs — view the <code>copyjob-content.json</code> definition (source / destination / mappings), run on demand, and watch run history. Read + run + monitor; edits go through the Fabric UI.</p>
+
+<div class="dax-tools">
+    <button class="btn-sm back-btn" @onclick="GoBack" title="Back">← Back</button>
+</div>
+
+<div class="row">
+    <div>
+        <label>Workspace <span class="muted">(@workspaces.Count — type to search)</span></label>
+        <SearchableSelect Items="workspaces" @bind-Value="workspace" OnChange="OnWorkspaceChanged"
+                          Placeholder="type to search a workspace…" />
+        <button class="btn-sm" @onclick="LoadWorkspaces">Load</button>
+    </div>
+</div>
+
+<ErrorBanner Message="@error" />
+
+<FabricItemViewer @ref="viewer"
+                  Workspace="@workspace"
+                  DeepLinkId="@Qid"
+                  ItemKindLabel="Copy Jobs"
+                  ItemGlyph="⇆"
+                  ListAsync="ws => Ui.CopyJobsAsync(ws)"
+                  GetDefinitionAsync="(ws, id) => Ui.CopyJobDefinitionAsync(ws, id)"
+                  RunAsync="(ws, id) => Ui.RunCopyJobAsync(ws, id)"
+                  OnItemSelected="OnItemSelected" />
+
+@code {
+    private List<string> workspaces = new();
+    private string workspace = "";
+    private string? error;
+    private FabricItemViewer? viewer;
+
+    [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "id")] public string? Qid { get; set; }
+    private string? appliedDeepLink;
+
+    /// <summary>Match what MainLayout uses for Parent splitting.</summary>
+    private const char Sep = '';
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (workspaces.Count == 0) await LoadWorkspaces();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Qws)) return;
+        var key = $"{Qws}|{Qid}";
+        if (key == appliedDeepLink) return;
+        appliedDeepLink = key;
+
+        BusyState.Begin();
+        try
+        {
+            if (workspaces.Count == 0) await LoadWorkspaces();
+            workspace = Qws!;
+            Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.CopyJobsContext);
+            // The viewer reads Workspace + DeepLinkId via @bind-Parameter and auto-loads.
+        }
+        finally { BusyState.End(); StateHasChanged(); }
+    }
+
+    private async Task GoBack() => await JS.InvokeVoidAsync("history.back");
+
+    private async Task LoadWorkspaces()
+    {
+        BusyState.Begin(); error = null;
+        try
+        {
+            var r = await Ui.WorkspacesAsync();
+            var idx = -1;
+            for (var i = 0; i < r.Columns.Count; i++)
+                if (string.Equals(r.Columns[i], "name", StringComparison.OrdinalIgnoreCase)) { idx = i; break; }
+            workspaces = idx < 0 ? new() : r.Rows.Select(row => row[idx]?.ToString() ?? "")
+                .Where(s => s.Length > 0).OrderBy(s => s).ToList();
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { BusyState.End(); }
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        if (string.IsNullOrEmpty(workspace)) return;
+        Usage.Record(UsageStore.Workspace, workspace, null, UsageStore.CopyJobsContext);
+        // Workspace param is bound to viewer — its OnParametersSetAsync reloads the list.
+        if (viewer is not null) await viewer.Refresh();
+    }
+
+    /// <summary>Record the picked copy job into the Frequent sidebar (Parent stores ws + id so a
+    /// Frequent click deep-links back to the exact item).</summary>
+    private void OnItemSelected(FabricItemViewer.FabricItem it)
+    {
+        Usage.Record(UsageStore.Dataset, it.DisplayName, $"{workspace}{Sep}{it.Id}", UsageStore.CopyJobsContext);
+    }
+}

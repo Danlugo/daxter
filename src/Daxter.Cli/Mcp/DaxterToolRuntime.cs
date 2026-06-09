@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using Daxter.Core;
@@ -699,6 +700,112 @@ internal static class DaxterToolRuntime
 
     /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
     private static DaxterConfig TenantConfig() => DaxterConfig.FromEnvironment(requireWorkspace: false);
+
+    // ---- Fabric items: Copy Jobs + Notebooks ----
+
+    public static Task<string> CopyJobsAsync(string? workspace, CancellationToken ct)
+        => RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.CopyJobsAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
+    public static Task<string> NotebooksAsync(string? workspace, CancellationToken ct)
+        => RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.NotebooksAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), c), ct);
+
+    /// <summary>Returns the Copy Job's <c>copyjob-content.json</c> as a single text blob so the
+    /// agent can read the source/sink/mapping config in one call (same content Fabric's UI shows
+    /// under "View JSON code"). Multiple parts are joined with a <c># path:</c> marker so they're
+    /// distinguishable.</summary>
+    public static Task<string> CopyJobDefinitionAsync(string? workspace, string copyJobId, CancellationToken ct)
+        => RestTextAsync(workspace, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var parts = await rest.CopyJobDefinitionAsync(groupId, copyJobId, c);
+            return JoinDefinitionParts(parts);
+        }, ct);
+
+    /// <summary>Returns the Notebook's full definition (the cells, in standard Jupyter ipynb format
+    /// by default — pass <paramref name="format"/> = "FabricGitSource" for the language-specific
+    /// source file instead).</summary>
+    public static Task<string> NotebookDefinitionAsync(string? workspace, string notebookId, string? format, CancellationToken ct)
+        => RestTextAsync(workspace, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var parts = await rest.NotebookDefinitionAsync(groupId, notebookId, format ?? "ipynb", c);
+            return JoinDefinitionParts(parts);
+        }, ct);
+
+    /// <summary>Runs an item-job on demand (Copy Job: jobType=Execute · Notebook: jobType=RunNotebook).
+    /// DRY-RUN unless execute=true AND writes enabled. Returns the new instance id on success so the
+    /// agent can poll daxter_item_job_status to track it.</summary>
+    public static Task<string> RunItemJobAsync(
+        string? workspace, string itemId, string jobType, string? executionData, bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(itemId)) throw new DaxterException("itemId is required.");
+            if (string.IsNullOrWhiteSpace(jobType)) throw new DaxterException("jobType is required (Execute | RunNotebook | DefaultJob).");
+            var config = Config(workspace, null);
+            var plan = $"run item {itemId} (jobType={jobType}) in '{config.Workspace}'";
+            if (!execute)
+                return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
+            if (!WritesAllowed())
+                return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to run a job.";
+            if (LooksLikeProd(config) && ProdWritesBlocked())
+                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            var instanceId = await rest.StartItemJobAsync(groupId, itemId, jobType, executionData, ct);
+            return $"Started — instanceId: {instanceId}. Poll daxter_item_job_status (or list with daxter_item_runs) to track it.";
+        });
+
+    public static Task<string> ItemRunsAsync(string? workspace, string itemId, CancellationToken ct)
+        => RestAsync(workspace, null, async (rest, cfg, c) =>
+            await rest.ListItemJobInstancesAsync(await rest.ResolveGroupIdAsync(cfg.Workspace, c), itemId, c), ct);
+
+    public static Task<string> ItemJobStatusAsync(string? workspace, string itemId, string instanceId, CancellationToken ct)
+        => RestTextAsync(workspace, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var instance = await rest.GetItemJobInstanceAsync(groupId, itemId, instanceId, c);
+            return JsonSerializer.Serialize(instance, new JsonSerializerOptions { WriteIndented = true });
+        }, ct);
+
+    /// <summary>Cancels a running item-job instance. DRY-RUN unless execute=true AND writes enabled.</summary>
+    public static Task<string> CancelItemJobAsync(
+        string? workspace, string itemId, string instanceId, bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(instanceId))
+                throw new DaxterException("itemId and instanceId are required.");
+            var config = Config(workspace, null);
+            var plan = $"cancel job instance {instanceId} on item {itemId} in '{config.Workspace}'";
+            if (!execute)
+                return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
+            if (!WritesAllowed())
+                return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to cancel a job.";
+
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            await rest.CancelItemJobInstanceAsync(groupId, itemId, instanceId, ct);
+            return $"Cancellation requested for instance {instanceId}. The next status poll should report 'Cancelled'.";
+        });
+
+    /// <summary>Stitches a Fabric item-definition parts list into one text blob the agent can read
+    /// directly. Multiple parts (rare for Copy Jobs / Notebooks) are joined with a path marker so
+    /// the consumer can split them apart if it needs to.</summary>
+    private static string JoinDefinitionParts(IReadOnlyList<FabricItemPart> parts)
+    {
+        if (parts.Count == 0) return "(empty definition)";
+        if (parts.Count == 1) return parts[0].Content;
+        var sb = new StringBuilder();
+        foreach (var p in parts)
+        {
+            sb.Append("# ----- ").AppendLine(p.Path);
+            sb.AppendLine(p.Content);
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
 
     /// <summary>Starts interactive sign-in and returns a clean, click-first device-code message.
     /// <paramref name="target"/> selects WHICH scope to sign in for: <c>"powerbi"</c> (default —

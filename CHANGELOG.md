@@ -6,6 +6,44 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-06-08
+
+### Added
+- **Fabric Copy Jobs + Notebooks — view, run, monitor.** Two new top-level pages and a uniform set
+  of CLI/MCP tools for the two most-requested Fabric item types after semantic models.
+  - **Web**: new **`/copy-jobs`** and **`/notebooks`** pages, both built on a shared
+    `<FabricItemViewer>` component — left aside lists every item in the picked workspace, right pane
+    has two tabs: **📄 Definition** (the `copyjob-content.json` for Copy Jobs, the `artifact.content.ipynb`
+    for Notebooks) and **▶ Recent runs** (instance id, status, invokeType, start/end, duration,
+    failureReason). **Run on demand** button (writes-gated, confirm modal). Own
+    `CopyJobsContext` / `NotebooksContext` Frequent sidebars, deep-link `?ws=&id=`, Back, busy overlay,
+    copy-definition button.
+  - **CLI**: `daxter fabric copy-jobs ls/show/run/runs/cancel` and `daxter fabric notebooks ls/show/run/runs/cancel`.
+    Run + cancel are dry-run unless `--yes`. Notebook `show` defaults to ipynb format; pass
+    `--format FabricGitSource` for the language-specific source file.
+  - **MCP**: **`daxter_copy_jobs`**, **`daxter_copy_job_definition`**, **`daxter_notebooks`**,
+    **`daxter_notebook_definition`** (all read-only) · **`daxter_run_copy_job`**,
+    **`daxter_run_notebook`**, **`daxter_cancel_item_job`** (writes-gated, dry-run by default) ·
+    **`daxter_item_runs`** + **`daxter_item_job_status`** (read-only, work on ANY Fabric item — Copy
+    Job, Notebook, Pipeline). Agents now have a clean discover → inspect → run → poll loop:
+    `daxter_copy_jobs` → `daxter_copy_job_definition` → `daxter_run_copy_job` (returns instance id) →
+    `daxter_item_job_status` until terminal.
+- **Generic Fabric job-instance plumbing** — `PowerBiRestClient.StartItemJobAsync` extracts the new
+  instance id from the 202 response's `Location` header (falling back to the body when absent) so
+  callers get the id back synchronously, ready to poll. `ListItemJobInstancesAsync` materializes
+  runs into `(instanceId, status, invokeType, startTimeUtc, endTimeUtc, durationSec, failureReason)`
+  — computes `durationSec` server-side so consumers don't have to subtract dates.
+- **Shared `<FabricItemViewer>` Razor component** — list + Definition tab + Recent Runs tab + Run
+  confirm modal + busy overlay. Each item-type page is now ~70 lines of glue. Easy to extend to
+  Pipelines, Spark Job Definitions, and other Fabric item types in future releases.
+
+### Limitations (defer to v1.31.x)
+- No **edit/update definition** path yet — the Fabric REST `PATCH` and `updateDefinition` calls are
+  available but a JSON/ipynb editor is a bigger UI build; we kept v1.30 view-only on purpose.
+- No **create from scratch** or **delete**.
+- No **parameterized notebook runs** from the Web button (CLI/MCP can pass `--execution-data`;
+  Web run uses defaults). UI for cell-parameter overrides is a follow-up.
+
 ## [1.29.0] - 2026-06-08
 
 ### Fixed
