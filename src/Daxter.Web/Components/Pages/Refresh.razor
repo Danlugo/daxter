@@ -64,11 +64,11 @@ else if (!Ui.WritesEnabled)
         <a class="btn" href="configure">Go to Configure →</a>
     </div>
 }
-else if (Ui.IsProductionTarget(workspace, dataset))
+else if (Ui.IsReadOnlyTarget(workspace, dataset))
 {
     <div class="card bad">
-        <p class="bad-text"><strong>Production target — launching refreshes is blocked.</strong></p>
-        <p class="muted">'@workspace' looks like production. You can still view its <strong>History</strong>, but not start a refresh from the console.</p>
+        <p class="bad-text"><strong>Read-only target — launching refreshes is blocked.</strong></p>
+        <p class="muted">'@workspace' is on the read-only list (or outside the write-allowed list). You can still view its <strong>History</strong>, but not start a refresh from the console. Adjust the patterns on the <a href="configure">Configure page</a>.</p>
     </div>
 }
 else
@@ -329,7 +329,7 @@ else
         await LoadHistory();
 
         // Tables are only needed for launching a refresh (writes on, non-prod).
-        if (!Ui.WritesEnabled || Ui.IsProductionTarget(workspace, dataset)) return;
+        if (!Ui.WritesEnabled || Ui.IsReadOnlyTarget(workspace, dataset)) return;
         busy = true; BusyState.Begin(); error = null;
         try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }

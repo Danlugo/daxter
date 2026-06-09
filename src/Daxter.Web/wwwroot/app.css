@@ -223,6 +223,17 @@ input[type="checkbox"], input[type="radio"] { min-width:0; width:auto; padding:0
 .fabric-tools code { font-size:.78rem; background:var(--surface-2); padding:.05rem .25rem; border-radius:3px; }
 /* Wrap long JSON/ipynb content nicely in the read-only viewer. */
 .dax-view.code-wrap { white-space:pre; overflow:auto; max-height:62vh; }
+
+/* ---- Configure page: workspace write-protection fieldset ---- */
+.ws-gate { border:1px solid var(--line); border-radius:8px; padding:.5rem .8rem .7rem; margin:.4rem 0 .6rem; background:var(--surface); }
+.ws-gate legend { padding:0 .4rem; font-weight:600; color:var(--text); font-size:.92rem; }
+.ws-gate p.muted { margin:.2rem 0 .5rem; font-size:.84rem; line-height:1.45; }
+.ws-gate code { background:var(--surface-2); padding:.05rem .25rem; border-radius:3px; font-size:.84rem; }
+.ws-gate label { display:block; margin:.3rem 0; }
+.ws-gate label span:first-child { display:block; font-weight:500; font-size:.86rem; margin-bottom:.1rem; }
+.ws-gate label small { font-weight:400; font-size:.78rem; }
+.gate-preview { margin-top:.4rem !important; font-size:.86rem !important; }
+.ok-text { color:var(--ok); font-weight:600; }
 .grid td.nowrap { white-space:nowrap; }
 .grid td.msg { white-space:normal; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; }
 .grid.logs tr.lvl-Error td, .grid.logs tr.lvl-Critical td { background:var(--bad-bg); }

@@ -55,10 +55,26 @@ public sealed class DaxterConfig
     public string? Environment { get; init; }
 
     /// <summary>
-    /// Workspace names explicitly designated production (from <c>DAXTER_PROD_WORKSPACES</c>).
-    /// Used by the write-safety guard for tenants whose prod workspaces aren't named "...prod".
+    /// Workspace names / glob patterns explicitly designated production (from
+    /// <c>DAXTER_PROD_WORKSPACES</c>). Used by the write-safety guard for tenants whose prod
+    /// workspaces aren't named "...prod". Treated as additional read-only patterns alongside
+    /// <see cref="ReadOnlyWorkspaces"/> for backwards compatibility.
     /// </summary>
     public IReadOnlyCollection<string> ProdWorkspaces { get; init; } = [];
+
+    /// <summary>Glob patterns for workspaces that are READ-ONLY — any matching workspace cannot be
+    /// mutated even when <c>AllowWrites</c> is on. From <c>DAXTER_READONLY_WORKSPACES</c> + the
+    /// Configure-page Read-only field. <c>*</c> matches zero or more characters; matching is
+    /// case-insensitive and anchored to the whole name (write <c>Data*</c> not <c>Data</c> for
+    /// prefix matching). See <see cref="WorkspaceMatcher"/>.</summary>
+    public IReadOnlyCollection<string> ReadOnlyWorkspaces { get; init; } = [];
+
+    /// <summary>Glob patterns for workspaces that ARE writable. When non-empty, this is an
+    /// allow-list — any workspace NOT matching one of these patterns is treated as read-only
+    /// (so a single typo can't accidentally widen the surface). Empty = no allow-list, fall back
+    /// to read-only / prod patterns. From <c>DAXTER_WRITE_WORKSPACES</c> + the Configure-page
+    /// Write-allowed field.</summary>
+    public IReadOnlyCollection<string> WriteWorkspaces { get; init; } = [];
 
     // Environment variable names (single source of truth).
     public const string EnvWorkspace = "DAXTER_WORKSPACE";
@@ -73,6 +89,12 @@ public sealed class DaxterConfig
     public const string EnvAuthMode = "DAXTER_AUTH_MODE";
     public const string EnvEnvironment = "DAXTER_ENV";
     public const string EnvProdWorkspaces = "DAXTER_PROD_WORKSPACES";
+    /// <summary>Glob patterns for workspaces locked to read-only (deny-list — wins over the
+    /// Allow-writes toggle). Comma-separated.</summary>
+    public const string EnvReadOnlyWorkspaces = "DAXTER_READONLY_WORKSPACES";
+    /// <summary>Glob patterns for workspaces explicitly allowed to be written to (allow-list —
+    /// when non-empty, anything not matching is read-only). Comma-separated.</summary>
+    public const string EnvWriteWorkspaces = "DAXTER_WRITE_WORKSPACES";
 
     /// <summary>Microsoft's first-party client id used for delegated Power BI access.</summary>
     public const string DefaultPublicClientId = "ea0616ba-638b-4df5-95b9-636659ae5121";
@@ -153,6 +175,8 @@ public sealed class DaxterConfig
             AuthMode = resolvedAuth,
             Environment = string.IsNullOrWhiteSpace(activeEnv) ? null : activeEnv!.Trim().ToLowerInvariant(),
             ProdWorkspaces = ParseList(Nz(saved.ProdWorkspaces) ?? Env(EnvProdWorkspaces)),
+            ReadOnlyWorkspaces = ParseList(Nz(saved.ReadOnlyWorkspaces) ?? Env(EnvReadOnlyWorkspaces)),
+            WriteWorkspaces = ParseList(Nz(saved.WriteWorkspaces) ?? Env(EnvWriteWorkspaces)),
         };
     }
 
@@ -169,28 +193,68 @@ public sealed class DaxterConfig
         AuthMode = AuthMode,
         Environment = Environment,
         ProdWorkspaces = ProdWorkspaces,
+        ReadOnlyWorkspaces = ReadOnlyWorkspaces,
+        WriteWorkspaces = WriteWorkspaces,
     };
 
-    /// <summary>
-    /// True if the current target is production — used to block writes. Production is
-    /// detected by the active env being "prod", the workspace name containing "prod", or
-    /// the workspace appearing in <c>DAXTER_PROD_WORKSPACES</c> (for unsuffixed prod names).
-    /// </summary>
-    public bool IsProductionTarget()
+    /// <summary>True if the current target is read-only — used to block writes. Resolution order:
+    /// <list type="number">
+    /// <item>If the workspace matches a pattern in <see cref="ReadOnlyWorkspaces"/> or
+    /// <see cref="ProdWorkspaces"/> (legacy deny-list) → read-only. Deny wins, always.</item>
+    /// <item>Else, if <see cref="WriteWorkspaces"/> is non-empty AND the workspace does NOT match
+    /// any of those patterns → read-only. (Allow-list restricts to its members.)</item>
+    /// <item>Else, the legacy heuristics: env is <c>"prod"</c>, or the workspace name contains
+    /// <c>"prod"</c> (kept for backwards-compat — accidentally typing a new prod workspace into
+    /// the writes-allow list won't widen the surface as long as it has "prod" in the name).</item>
+    /// <item>Else → writable (subject to the Allow-writes toggle).</item>
+    /// </list></summary>
+    public bool IsReadOnlyTarget()
     {
-        if (string.Equals(Environment, "prod", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(Workspace)) return false;
+        var ws = Workspace.Trim();
+
+        // 1. Deny-list match (read-only + legacy prod patterns) wins outright.
+        if (WorkspaceMatcher.MatchesAny(ws, ReadOnlyWorkspaces)) return true;
+        if (WorkspaceMatcher.MatchesAny(ws, ProdWorkspaces)) return true;
+
+        // 2. Allow-list (when non-empty) restricts writes to its members.
+        if (WriteWorkspaces.Count > 0)
         {
-            return true;
+            return !WorkspaceMatcher.MatchesAny(ws, WriteWorkspaces);
         }
 
-        if (Workspace.Contains("prod", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        // 3. Legacy heuristics — env=prod and "*prod*" in the name. Kept so existing setups don't
+        // suddenly start allowing writes to a "Reporting Prod" workspace just because the user
+        // hasn't filled in the new fields yet.
+        if (string.Equals(Environment, "prod", StringComparison.OrdinalIgnoreCase)) return true;
+        if (ws.Contains("prod", StringComparison.OrdinalIgnoreCase)) return true;
 
-        var current = Workspace.Trim();
-        return ProdWorkspaces.Any(w => string.Equals(w, current, StringComparison.OrdinalIgnoreCase));
+        return false;
     }
+
+    /// <summary>Returns the actual pattern (or label) that caused the workspace to be locked, so
+    /// refuse messages can say WHY. Returns null when the workspace is writable.</summary>
+    public string? ReadOnlyReason()
+    {
+        if (string.IsNullOrWhiteSpace(Workspace)) return null;
+        var ws = Workspace.Trim();
+        var hit = WorkspaceMatcher.MatchedPattern(ws, ReadOnlyWorkspaces);
+        if (hit is not null) return $"read-only pattern \"{hit}\"";
+        hit = WorkspaceMatcher.MatchedPattern(ws, ProdWorkspaces);
+        if (hit is not null) return $"prod-workspaces entry \"{hit}\"";
+        if (WriteWorkspaces.Count > 0 && !WorkspaceMatcher.MatchesAny(ws, WriteWorkspaces))
+            return "not in the write-allowed patterns";
+        if (string.Equals(Environment, "prod", StringComparison.OrdinalIgnoreCase))
+            return "DAXTER_ENV=prod";
+        if (ws.Contains("prod", StringComparison.OrdinalIgnoreCase))
+            return "workspace name contains \"prod\"";
+        return null;
+    }
+
+    /// <summary>Backwards-compatible alias for <see cref="IsReadOnlyTarget"/>. Old callsites and
+    /// CLI helpers (LooksLikeProd) still work; new code should use the read-only name.</summary>
+    [Obsolete("Use IsReadOnlyTarget — same logic, clearer name (the gate is about read-only-ness, not necessarily \"production\").")]
+    public bool IsProductionTarget() => IsReadOnlyTarget();
 
     private static IReadOnlyCollection<string> ParseList(string? value) =>
         string.IsNullOrWhiteSpace(value)

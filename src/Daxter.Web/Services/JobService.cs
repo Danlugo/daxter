@@ -52,8 +52,13 @@ public sealed class JobService
             throw new DaxterException(
                 "Writes are disabled. Turn on \"Allow writes\" on the Configure page to run refreshes.");
 
-        if (_state.ToConfig(spec.Workspace, spec.Dataset).IsProductionTarget())
-            throw new DaxterException($"Refusing to refresh a production target ('{spec.Workspace}').");
+        var cfg = _state.ToConfig(spec.Workspace, spec.Dataset);
+        if (cfg.IsReadOnlyTarget())
+        {
+            var reason = cfg.ReadOnlyReason() ?? "read-only rule";
+            throw new DaxterException(
+                $"Refusing to refresh a READ-ONLY target ('{spec.Workspace}') — matched {reason}.");
+        }
 
         var job = _store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Web, _history.EstimateSeconds(Sig(spec)));
         _log.LogInformation("Queued job #{Id}: {Title}", job.Id, job.Title);

@@ -1872,7 +1872,7 @@ internal static class Program
         return 0;
     }
 
-    private static bool LooksLikeProd(DaxterConfig config) => config.IsProductionTarget();
+    private static bool LooksLikeProd(DaxterConfig config) => config.IsReadOnlyTarget();
 
     private static PartitionOrder ParseOrder(string? value) => value?.Trim().ToLowerInvariant() switch
     {

@@ -21,7 +21,20 @@ public sealed class ConfigState
     public string? PublicClientId { get; set; }
     public string? Workspace { get; set; }
     public string? Dataset { get; set; }
+    /// <summary>Legacy comma-separated "production workspaces" list. Treated as additional
+    /// read-only patterns for backwards-compat — same gate logic as <see cref="ReadOnlyWorkspaces"/>.</summary>
     public string? ProdWorkspaces { get; set; }
+
+    /// <summary>Comma-separated glob patterns for READ-ONLY workspaces — deny-list. Anything
+    /// matching here is locked from writes even when <see cref="AllowWrites"/> is on.
+    /// <c>*</c> matches any chars; matching is case-insensitive (e.g. <c>*PROD*</c>, <c>Data*Prod</c>).</summary>
+    public string? ReadOnlyWorkspaces { get; set; }
+
+    /// <summary>Comma-separated glob patterns for WRITE-ALLOWED workspaces — allow-list. When
+    /// non-empty, only workspaces matching one of these patterns can be written to; everything else
+    /// becomes read-only. Empty = no allow-list, fall back to the deny-list / legacy heuristics.</summary>
+    public string? WriteWorkspaces { get; set; }
+
     public bool AllowWrites { get; set; }
     public bool AllowModelEdit { get; set; }
 
@@ -49,6 +62,8 @@ public sealed class ConfigState
         Workspace = Env("DAXTER_WORKSPACE");
         Dataset = Env("DAXTER_DATASET");
         ProdWorkspaces = Env("DAXTER_PROD_WORKSPACES");
+        ReadOnlyWorkspaces = Env("DAXTER_READONLY_WORKSPACES");
+        WriteWorkspaces = Env("DAXTER_WRITE_WORKSPACES");
         AllowWrites = string.Equals(Env("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
         AllowModelEdit = string.Equals(Env("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase);
     }
@@ -60,14 +75,19 @@ public sealed class ConfigState
         AuthMode = s.AuthMode ?? AuthMode;
         TenantId = s.TenantId; ClientId = s.ClientId; ClientSecret = s.ClientSecret;
         Workspace = s.Workspace; Dataset = s.Dataset;
-        ProdWorkspaces = s.ProdWorkspaces; AllowWrites = s.AllowWrites; AllowModelEdit = s.AllowModelEdit;
+        ProdWorkspaces = s.ProdWorkspaces;
+        ReadOnlyWorkspaces = s.ReadOnlyWorkspaces;
+        WriteWorkspaces = s.WriteWorkspaces;
+        AllowWrites = s.AllowWrites; AllowModelEdit = s.AllowModelEdit;
         return true;
     }
 
     /// <summary>Persists the current values to the mounted volume (the single source the CLI/MCP also read).</summary>
     public string Save()
     {
-        new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset, ProdWorkspaces, AllowWrites, AllowModelEdit).Save();
+        new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset,
+            ProdWorkspaces, AllowWrites, AllowModelEdit,
+            ReadOnlyWorkspaces, WriteWorkspaces).Save();
         Persisted = true;
         return ConfigPath;
     }
@@ -84,8 +104,8 @@ public sealed class ConfigState
         AuthMode = string.Equals(AuthMode, "service-principal", StringComparison.OrdinalIgnoreCase)
             ? Daxter.Core.Auth.AuthMode.ServicePrincipal
             : Daxter.Core.Auth.AuthMode.DeviceCode,
-        ProdWorkspaces = string.IsNullOrWhiteSpace(ProdWorkspaces)
-            ? Array.Empty<string>()
-            : ProdWorkspaces.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+        ProdWorkspaces = WorkspaceMatcher.Parse(ProdWorkspaces),
+        ReadOnlyWorkspaces = WorkspaceMatcher.Parse(ReadOnlyWorkspaces),
+        WriteWorkspaces = WorkspaceMatcher.Parse(WriteWorkspaces),
     };
 }

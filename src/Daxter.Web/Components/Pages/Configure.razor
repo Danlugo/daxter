@@ -27,7 +27,47 @@
         <label>Client id <input @bind="State.ClientId" placeholder="app GUID" /></label>
         <label>Client secret <input @bind="State.ClientSecret" type="password" placeholder="app secret" /></label>
     }
-    <label>Prod workspaces (comma-separated) <input @bind="State.ProdWorkspaces" placeholder="e.g. Sales Analytics,Marketing" /></label>
+    <fieldset class="ws-gate">
+        <legend>Workspace write protection</legend>
+        <p class="muted">
+            Even with <strong>Allow writes</strong> on, the gate below decides which workspaces can actually be mutated
+            (refresh, cache clear, model edits, bindings, copy-job / notebook runs). Patterns use <code>*</code> as a
+            wildcard (zero or more chars), are case-insensitive, and match the whole workspace name —
+            <code>Data*Dev</code>, <code>*QA</code>, <code>*Prod*</code>.
+            <strong>Deny wins; allow-list restricts further when set.</strong>
+        </p>
+        <label>
+            <span>Read-only workspaces <small class="muted">— deny-list (comma-separated patterns)</small></span>
+            <input @bind="State.ReadOnlyWorkspaces" placeholder="e.g. *Prod*, Data Hub, Reporting*" />
+        </label>
+        <label>
+            <span>Write-allowed workspaces <small class="muted">— allow-list; when set, only these can be mutated</small></span>
+            <input @bind="State.WriteWorkspaces" placeholder="e.g. Data*Dev, *QA, Sandbox*" />
+        </label>
+        @if (!string.IsNullOrWhiteSpace(State.ProdWorkspaces))
+        {
+            <label>
+                <span>Legacy prod workspaces <small class="muted">— treated as additional read-only patterns; phase out into the field above</small></span>
+                <input @bind="State.ProdWorkspaces" placeholder="(legacy)" />
+            </label>
+        }
+        @if (!string.IsNullOrWhiteSpace(State.Workspace))
+        {
+            <p class="muted gate-preview">
+                Default workspace <code>@State.Workspace</code> →
+                @if (CurrentIsReadOnly())
+                {
+                    <strong class="bad-text">READ-ONLY</strong>
+                    <span> · @(CurrentReadOnlyReason() ?? "matched a rule")</span>
+                }
+                else
+                {
+                    <strong class="ok-text">writable</strong>
+                    <span> (subject to <em>Allow writes</em>)</span>
+                }
+            </p>
+        }
+    </fieldset>
     <label class="checkbox"><input type="checkbox" @bind="State.AllowWrites" /> Allow writes (refresh/cache) over MCP</label>
     <label class="checkbox"><input type="checkbox" @bind="State.AllowModelEdit" /> Allow model edits (measures, parameters, roles, columns, sources, tables) — <strong>irreversible for PBIX download</strong></label>
 </div>
@@ -57,6 +97,13 @@
 
     private bool IsSp => string.Equals(State.AuthMode, "service-principal", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Evaluate the gate against the default workspace right now — the live preview tells
+    /// the user whether their current patterns lock or unlock it before they save.</summary>
+    private bool CurrentIsReadOnly() => State.ToConfig(State.Workspace, State.Dataset).IsReadOnlyTarget();
+
+    /// <summary>Which rule caused the current workspace to be read-only (if any).</summary>
+    private string? CurrentReadOnlyReason() => State.ToConfig(State.Workspace, State.Dataset).ReadOnlyReason();
+
     private string EnvFile()
     {
         var lines = new List<string> { $"DAXTER_AUTH_MODE={State.AuthMode}" };
@@ -69,6 +116,8 @@
         if (!string.IsNullOrWhiteSpace(State.Workspace)) lines.Add($"DAXTER_WORKSPACE={State.Workspace}");
         if (!string.IsNullOrWhiteSpace(State.Dataset)) lines.Add($"DAXTER_DATASET={State.Dataset}");
         if (!string.IsNullOrWhiteSpace(State.ProdWorkspaces)) lines.Add($"DAXTER_PROD_WORKSPACES={State.ProdWorkspaces}");
+        if (!string.IsNullOrWhiteSpace(State.ReadOnlyWorkspaces)) lines.Add($"DAXTER_READONLY_WORKSPACES={State.ReadOnlyWorkspaces}");
+        if (!string.IsNullOrWhiteSpace(State.WriteWorkspaces)) lines.Add($"DAXTER_WRITE_WORKSPACES={State.WriteWorkspaces}");
         if (State.AllowWrites) lines.Add("DAXTER_MCP_ALLOW_WRITES=true");
         if (State.AllowModelEdit) lines.Add("DAXTER_MCP_ALLOW_MODEL_EDIT=true");
         return string.Join("\n", lines);

@@ -6,6 +6,45 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.30.1] - 2026-06-08
+
+### Added
+- **Two-list write-protection gate with glob patterns.** Replaces the single "Prod workspaces"
+  field with a precedence-based two-list model:
+  - **Read-only workspaces** (`DAXTER_READONLY_WORKSPACES` / Configure-page input) — deny-list.
+    Anything matching a pattern here is locked from writes, full stop. Wins over the allow-list.
+  - **Write-allowed workspaces** (`DAXTER_WRITE_WORKSPACES` / Configure-page input) — allow-list.
+    When non-empty, ONLY workspaces matching one of its patterns are writable; everything else
+    becomes read-only. Lets you say "I can modify Data*Dev and *QA, nothing else" with one entry.
+  Patterns use `*` as a wildcard (zero or more chars), are case-insensitive, and match the WHOLE
+  workspace name. Examples: `Data*Dev` matches "Data Hub - Dev"; `*QA` matches anything ending in
+  QA; `*Prod*` matches any workspace containing "Prod". `Data Hub - Dev` (no wildcards) is exact.
+- **`DaxterConfig.ReadOnlyReason()`** — refuse messages now tell the user WHICH rule matched
+  (e.g. "Refusing to refresh a READ-ONLY target ('Data Hub') — matched read-only pattern '*Prod*'.")
+  instead of opaque "Refusing on a production target".
+- **Configure-page live preview** — when a default workspace is set, the page shows under the
+  gate fieldset whether it's currently READ-ONLY (and why) or writable.
+- **MCP: explicit user config auto-enforces** — the legacy `DAXTER_MCP_BLOCK_PROD_WRITES`
+  opt-in is no longer required when the user has filled in either of the new lists. Setting
+  `DAXTER_READONLY_WORKSPACES=…` or `DAXTER_WRITE_WORKSPACES=…` is itself the consent to enforce;
+  agents can't bypass it. The env var still works for legacy heuristic-only setups so no
+  existing installation suddenly starts refusing.
+
+### Changed
+- **`DaxterConfig.IsProductionTarget()` → `IsReadOnlyTarget()`** — clearer name (the gate is about
+  read-only-ness, not necessarily "production"). The old method is kept as an `[Obsolete]` alias so
+  external callers (CLI helpers `LooksLikeProd`, old page references) keep compiling.
+- **Refresh page** "Production target" banner → "Read-only target" with a link to Configure.
+- **Configure page** "Prod workspaces" single field replaced by a labeled fieldset with the two
+  new inputs + inline syntax help. The legacy `ProdWorkspaces` field appears only when it has a
+  value to migrate (encourages phasing it into the new field without forcing it).
+
+### Backwards compatible
+- `DAXTER_PROD_WORKSPACES` env var + saved `ProdWorkspaces` field are still honored — merged into
+  the deny-list.
+- Saved configs from earlier versions load cleanly; their old `ProdWorkspaces` keeps working
+  while the new fields default to empty.
+
 ## [1.30.0] - 2026-06-08
 
 ### Added

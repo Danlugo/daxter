@@ -100,8 +100,8 @@ internal static class DaxterToolRuntime
                 return $"DRY RUN — not applied. Would take over '{config.Dataset}' in '{config.Workspace}'. Set execute=true (with writes enabled) to do it.";
             if (!WritesAllowed())
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
-            if (LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
             using var rest = new PowerBiRestClient(Provider(config));
             var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
             var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
@@ -132,8 +132,8 @@ internal static class DaxterToolRuntime
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
             if (!WritesAllowed())
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
-            if (LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
 
             using var rest = new PowerBiRestClient(Provider(config));
             var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
@@ -157,8 +157,8 @@ internal static class DaxterToolRuntime
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
             if (!WritesAllowed())
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
-            if (LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
             using var rest = new PowerBiRestClient(Provider(config));
             var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
             var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
@@ -213,9 +213,9 @@ internal static class DaxterToolRuntime
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + command;
             }
 
-            if (LooksLikeProd(config) && ProdWritesBlocked())
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
             {
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + command;
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).\n" + command;
             }
 
             var notes = new List<string>();
@@ -267,9 +267,9 @@ internal static class DaxterToolRuntime
                        "DAXTER_MCP_ALLOW_MODEL_EDIT=true, then retry." + caveat + "\n" + change;
             }
 
-            if (LooksLikeProd(config) && ProdWritesBlocked())
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
             {
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.\n" + change;
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).\n" + change;
             }
 
             var backup = new ModelBackupService(config, token).Backup();
@@ -310,9 +310,9 @@ internal static class DaxterToolRuntime
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             }
 
-            if (LooksLikeProd(config) && ProdWritesBlocked())
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
             {
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
             }
 
             var store = new RefreshQueueStore();
@@ -342,8 +342,8 @@ internal static class DaxterToolRuntime
                     "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.");
 
             var config = Config(spec.Workspace, spec.Dataset);
-            if (LooksLikeProd(config) && ProdWritesBlocked())
-                return Task.FromResult($"REFUSED — '{spec.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.");
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return Task.FromResult($"REFUSED — '{spec.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).");
 
             var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Mcp);
             return Task.FromResult($"QUEUED as job #{job.Id} ({what}) — {plan}.{WorkerWarning(store)} Track with daxter_refresh_jobs.");
@@ -462,11 +462,26 @@ internal static class DaxterToolRuntime
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase)
            || PersistedSettings.Load().AllowModelEdit;
 
-    /// <summary>Optional guardrail: set DAXTER_MCP_BLOCK_PROD_WRITES=true to re-block prod refresh/cache over MCP.</summary>
+    /// <summary>True when the read-only/prod-block guardrail is active for the MCP server. The
+    /// gate fires automatically when the user has configured EXPLICIT read-only or write-allowed
+    /// patterns (the new model — they told us what's locked), and stays opt-in via
+    /// <c>DAXTER_MCP_BLOCK_PROD_WRITES=true</c> for the legacy heuristic-only setups so existing
+    /// installations don't suddenly start refusing.</summary>
+    internal static bool ProdWritesBlocked(DaxterConfig config)
+    {
+        // Explicit user config → always enforce. This is the new behavior; if the user listed a
+        // workspace as read-only on the Configure page, an MCP agent must respect that.
+        if (config.ReadOnlyWorkspaces.Count > 0 || config.WriteWorkspaces.Count > 0) return true;
+        // Legacy: only the env var or the "*prod*" heuristic — keep opt-in for backwards compat.
+        return string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_BLOCK_PROD_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Backwards-compat shim — callers without a config in hand get the env-var-only check.
+    /// Prefer the typed overload for accurate enforcement of the new read-only/allow-list rules.</summary>
     internal static bool ProdWritesBlocked()
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_BLOCK_PROD_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
 
-    private static bool LooksLikeProd(DaxterConfig config) => config.IsProductionTarget();
+    private static bool LooksLikeProd(DaxterConfig config) => config.IsReadOnlyTarget();
 
     private const int ExportCap = 40_000;
 
@@ -622,8 +637,8 @@ internal static class DaxterToolRuntime
             if (!isRead && !WritesAllowed())
                 return "REFUSED — this statement is not read-only and writes are disabled. " +
                        "Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to export it.";
-            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
 
             var msal = MsalProvider(config);
             using var rest = new PowerBiRestClient(msal);
@@ -675,8 +690,8 @@ internal static class DaxterToolRuntime
             if (!isRead && !WritesAllowed())
                 return "REFUSED — this statement is not read-only and writes are disabled. " +
                        "Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
-            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (!isRead && LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
 
             var msal = MsalProvider(config);
 
@@ -749,8 +764,8 @@ internal static class DaxterToolRuntime
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
             if (!WritesAllowed())
                 return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to run a job.";
-            if (LooksLikeProd(config) && ProdWritesBlocked())
-                return $"REFUSED — '{config.Workspace}' looks like PRODUCTION and DAXTER_MCP_BLOCK_PROD_WRITES=true.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
 
             using var rest = new PowerBiRestClient(Provider(config));
             var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);

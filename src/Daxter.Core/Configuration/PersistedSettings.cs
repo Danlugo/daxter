@@ -17,7 +17,13 @@ public sealed record PersistedSettings(
     string? Dataset = null,
     string? ProdWorkspaces = null,
     bool AllowWrites = false,
-    bool AllowModelEdit = false)
+    bool AllowModelEdit = false,
+    // Comma-separated glob patterns for the new writes-gate. ReadOnlyWorkspaces is a deny-list
+    // (anything matching is locked); WriteWorkspaces is an allow-list (when non-empty, anything
+    // NOT matching is locked). Both null when the user hasn't configured the new model yet —
+    // the legacy ProdWorkspaces is still honored.
+    string? ReadOnlyWorkspaces = null,
+    string? WriteWorkspaces = null)
 {
     /// <summary>Path on the shared volume. Honors HOME (the token volume is mounted at <c>$HOME/.daxter</c>).</summary>
     public static string FilePath => Path.Combine(

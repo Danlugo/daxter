@@ -46,8 +46,14 @@ public sealed class DaxterUi
     /// separate gate than refresh writes (XMLA edits are irreversible for PBIX download).</summary>
     public bool ModelEditEnabled => _state.AllowModelEdit;
 
-    /// <summary>True when the target looks like production (refreshes are refused).</summary>
-    public bool IsProductionTarget(string ws, string ds) => _state.ToConfig(ws, ds).IsProductionTarget();
+    /// <summary>True when the target workspace matches the read-only patterns (deny-list, the
+    /// legacy prod-workspaces list, OR is outside the allow-list when one is configured). Pages
+    /// like Refresh use this to mark the operation as locked in the UI before the user clicks.</summary>
+    public bool IsReadOnlyTarget(string ws, string ds) => _state.ToConfig(ws, ds).IsReadOnlyTarget();
+
+    /// <summary>Backwards-compat alias for <see cref="IsReadOnlyTarget"/> — older pages still call
+    /// it as "production target" but the underlying check is the same read-only gate.</summary>
+    public bool IsProductionTarget(string ws, string ds) => IsReadOnlyTarget(ws, ds);
 
     private static ITokenProvider Provider(DaxterConfig config, bool interactive = false)
         => new MsalTokenProvider(config, deviceCodePrompt: Console.Error.WriteLine, allowInteractive: interactive);
@@ -446,8 +452,14 @@ public sealed class DaxterUi
     {
         if (!_state.AllowWrites)
             throw new DaxterException($"Writes are disabled. Turn on \"Allow writes\" on the Configure page to {what}.");
-        if (cfg.IsProductionTarget())
-            throw new DaxterException($"Refusing to {what} on a production target ('{cfg.Workspace}').");
+        if (cfg.IsReadOnlyTarget())
+        {
+            // The reason tells the user WHICH rule matched — "read-only pattern X", "not in the
+            // write-allowed list", legacy heuristic, etc. Much better than the old opaque message.
+            var reason = cfg.ReadOnlyReason() ?? "read-only rule";
+            throw new DaxterException(
+                $"Refusing to {what} on a READ-ONLY target ('{cfg.Workspace}') — matched {reason}.");
+        }
     }
 
     // ---- Fabric items: Copy Jobs + Notebooks (list, definition, run, monitor) ----
@@ -782,8 +794,11 @@ public sealed class DaxterUi
             {
                 if (!_state.AllowModelEdit)
                     throw new DaxterException("Model editing is disabled. Turn on \"Allow model edits\" on the Configure page first.");
-                if (cfg.IsProductionTarget())
-                    throw new DaxterException($"Refusing to edit a production target ('{ws}').");
+                if (cfg.IsReadOnlyTarget())
+                {
+                    var reason = cfg.ReadOnlyReason() ?? "read-only rule";
+                    throw new DaxterException($"Refusing to edit a READ-ONLY target ('{ws}') — matched {reason}.");
+                }
             }
 
             var token = await Provider(cfg).GetTokenAsync(ct);
