@@ -5,11 +5,16 @@ Context for AI agents (and humans) developing **DAXter**. For *using* the tool, 
 
 ## What it is
 
-A cross-platform CLI + MCP server for the **Power BI Service**: query (DAX/MDX/DMV),
-inspect model metadata, run maintenance (refresh/cache), and read workspace inventory —
-over **XMLA** (ADOMD/TOM) and the **Power BI REST API**. Shipped as a single Docker image.
-Auth is an Entra ID token (MSAL) injected into the connection — the supported way to reach
-Power BI from macOS/Linux (interactive ADOMD login is Windows-only).
+A Docker-only **Power BI + Fabric** client with three surfaces — a CLI, an **MCP server**
+(76 tools), and a **Blazor web console** (12 pages) — all sharing one engine (`Daxter.Core`).
+Capabilities: DAX/MDX/DMV queries, model metadata, model editing (TOM), refresh (Enhanced
+Refresh by default · file-backed queue · one shared worker), workspace inventory + REST
+operations (lineage, gateways, permissions, take-over, bindConnection), pipelines (rules
+inferred from per-stage parameter diffs + audit), Fabric SQL endpoints (object explorer
++ T-SQL + streaming CSV export), Fabric Copy Jobs and Notebooks (view + run + monitor),
+RLS viewer with syntax-highlighted DAX, and a two-list workspace writes-gate with glob
+patterns. Two MSAL tokens (Power BI scope + Fabric SQL scope) — one signed-in account
+covers both audiences silently after the first call.
 
 ## Golden rules
 
@@ -64,31 +69,59 @@ isn't installed.
 
 ```
 src/Daxter.Core/    # UI-free engine
-  Auth/             # MSAL token provider, XmlaAccessToken, ITokenProvider
+  Auth/             # MsalTokenProvider (TWO client ids: Power BI scope + Fabric SQL scope),
+                    #   ITokenProvider + IFabricSqlTokenProvider, XmlaAccessToken
   Configuration/    # DaxterConfig.FromEnvironment — single config source: explicit arg >
                     #   PersistedSettings (~/.daxter/console-config.json, written by the web
                     #   console) > env var > default. CLI + MCP + Web all resolve through it.
+                    #   WorkspaceMatcher (glob: *, case-insensitive, anchored) feeds the
+                    #   two-list writes-gate (ReadOnly deny / WriteWorkspaces allow).
   Connection/       # XmlaConnectionString, Adomd session + factory (roles/EUN for RLS)
   Query/  Metadata/ # QueryResult; ModelMetadataService, ModelDiffService
+  Editing/          # ModelEditService — TOM staging, .bim backup, dry-run preview, apply
   Maintenance/      # MaintenanceService (TMSL refresh / ClearCache)
   Export/           # ModelExportService (TOM → .bim)
   Audit/            # SavedAuditCheckStore (saved param-checks, shared by CLI/MCP/Web)
-  Rest/             # PowerBiRestClient (workspaces, datasets, reports, lineage,
-                    #   permissions, gateways, datasources, pipelines, refresh) +
-                    #   PipelineRulesService (deployment rules inferred from stage param diffs)
-  Formatting/       # table (Spectre) / csv / json formatters
-src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server + tools
-tests/              # xUnit (94); fakes for IXmlaSession; env tests serialized
-Dockerfile          # multi-stage: sdk build+test → slim non-root runtime
+  Rest/             # PowerBiRestClient — Power BI REST (groups/datasets/reports/lineage/
+                    #   permissions/gateways/pipelines/refresh) + Fabric REST
+                    #   (sqlEndpoints/copyJobs/notebooks/items+jobs/instances/
+                    #    semanticModels:bindConnection/getDefinition).
+                    #   PipelineRulesService (rules inferred from stage param diffs).
+  Sql/              # FabricSqlClient — Microsoft.Data.SqlClient over SqlConnection.AccessToken
+                    #   (database.windows.net audience). StreamCsvAsync writes RFC-4180 or
+                    #   quote-all+CRLF straight to a TextWriter (no in-memory rows).
+                    #   SqlWriteGate (read-only by default, opt-in writes).
+  Scheduling/       # RefreshQueueStore (file-backed), EnhancedRefresh, RefreshScheduler.
+  Formatting/       # table (Spectre) / csv / json formatters + CsvStyle for streaming exports
+src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server + 76 tools
+src/Daxter.Web/     # Blazor Server console — 12 pages (Home/Status, Explore, Query, Refresh,
+                    #   Jobs, Gateways, Pipelines, Audit, Model Edit, Connections, SQL, RLS,
+                    #   Copy Jobs, Notebooks, Configure, Logs). Components/ has shared widgets
+                    #   (SearchableSelect, ResultGrid, FabricItemViewer, ErrorBanner).
+                    #   Services/DaxterUi.cs is the bridge — every page calls it; it calls Core.
+                    #   Endpoints/SqlExportEndpoint.cs streams CSV bypassing SignalR.
+                    #   RefreshWorkerHostedService drains the shared queue.
+tests/              # xUnit (270+); fakes for IXmlaSession + HTTP stubs for REST;
+                    # env-mutating tests serialized via a collection. Covers WorkspaceMatcher,
+                    # the read-only precedence ladder, capabilities classification (so a
+                    # ReadOnly = true tool can't drift into the destructive bucket), CsvStyle,
+                    # SqlWriteGate, scheduler resume, MCP login prompt formatting, every
+                    # REST JSON parsing path (Fabric items, job instances, sqlEndpoints).
+Dockerfile          # multi-stage: sdk build+test → slim non-root runtime with libicu72
+                    # + tzdata (Microsoft.Data.SqlClient needs ICU; InvariantGlobalization=false)
 .github/workflows/  # CI: test → docker build → publish MULTI-ARCH (amd64+arm64, buildx) to GHCR on v* tags
 ```
 
 ## How the pieces connect
 
 `Daxter.Cli` is a thin shell over `Daxter.Core`. The MCP server (`Mcp/DaxterTools.cs`,
-discovered via `[McpServerTool]`) is **another shell over the same Core** — keep CLI and MCP
-at parity (49 MCP tools today). Shared logic (prod detection, token provider, the refresh
-scheduler/queue) lives in Core or shared CLI helpers, not duplicated.
+discovered via `[McpServerTool]` reflection) is **another shell over the same Core** —
+**76 MCP tools** today (50 read, 26 gated writes). The Blazor Web project (`Daxter.Web`)
+is a **third** shell — its `Services/DaxterUi.cs` bridge wraps the same Core methods for
+the Razor pages. Keep all three at parity (the `daxter-capability` skill walks this) —
+shared logic (read-only gate, token provider, scheduler queue) lives in Core or shared
+helpers, not duplicated. `daxter_capabilities` reflects the tool list at runtime so agents
+discover new features without out-of-band docs.
 
 ## Conventions
 

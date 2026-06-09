@@ -5,11 +5,15 @@
 ![.NET 8](https://img.shields.io/badge/.NET-8.0%20LTS-512BD4)
 ![Docker](https://img.shields.io/badge/Docker-multi--stage-2496ED)
 
-**Ask Claude about your Power BI models — or query them from your terminal.** DAXter is a
-Docker-only **CLI and MCP server** for the Power BI Service: run DAX/MDX/DMV, inspect model
-metadata, refresh, and browse workspaces/reports — over XMLA + REST, from any machine with
-Docker (macOS, Linux, Windows). No Windows-only tooling, no .NET install. Think *psql for a
-Power BI model*, in a single container image.
+**Ask Claude to operate your Power BI + Fabric — or do it from your terminal / browser.**
+DAXter is a Docker-only **Power BI + Fabric** client with three surfaces — a **CLI**, an
+**MCP server** (76 tools), and a **Blazor web console** — sharing one .NET engine. Covers
+**XMLA** (DAX/MDX/DMV), **Power BI REST**, **Fabric REST** (Copy Jobs · Notebooks ·
+sqlEndpoints · bindConnection · pipelines · semantic-model getDefinition), and **T-SQL on
+Fabric Warehouses / Lakehouse SQL endpoints**. Plus a TOM-backed **model editor**, a
+**refresh scheduler** (file-backed queue · one shared worker · runs survive client drop),
+and a writes-gate with **glob-pattern allow/deny lists**. No Windows-only tooling, no .NET
+install — `docker run` it on macOS, Linux, or Windows.
 
 ## Use it in Claude Desktop
 
