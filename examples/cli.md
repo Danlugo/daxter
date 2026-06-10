@@ -427,3 +427,57 @@ docker run \
 - The Web home page shows a quiet banner when `DAXTER_LABEL` is set (hidden otherwise).
 - `curl http://localhost:8080/api/health` returns one JSON envelope with tenant id, label,
   version, uptime, and artifact/context store stats — designed for fleet dashboards.
+
+## Structured JSON errors (v1.37.0) — for fleet / orchestrator consumers
+
+When a `ws ls` / `ws datasets` (and every other `RunRestQueryAsync`-backed) command is
+invoked with `--output json`, **failures come back as a structured envelope on stderr**
+instead of the human-readable "daxter: ..." line. Designed so consumers like
+[Semantix](https://github.com/Level60/semantix) (the L60 control plane that wraps DAXter)
+can match on a stable `error_code` instead of scraping `AADSTS*` text.
+
+```bash
+$ ./bin/daxter ws ls --output json 2>err.json
+# stdout (1>) — the data (JSON array of workspaces) when it succeeds
+# stderr (2>) — empty on success; structured envelope on failure:
+
+$ cat err.json
+{
+  "error": {
+    "error_code": "BAD_CLIENT_SECRET",
+    "message": "The client secret is wrong or expired. Re-paste it from the Azure portal — note that 'secret value' (the long string) is required, not 'secret ID' (the GUID).",
+    "aad_code": "AADSTS7000215",
+    "trace_id": "abc123de-1234-...",
+    "details": "AADSTS7000215: Invalid client secret provided. ..."
+  }
+}
+```
+
+### Stable error codes
+
+These are the contract — Semantix and any other automated consumer parses them. New codes
+go at the bottom of the list; existing codes never get repurposed.
+
+| `error_code` | Maps to | Operator hint |
+|---|---|---|
+| `BAD_CLIENT_SECRET` | AADSTS7000215 | Re-paste the secret value (not the secret ID) |
+| `BAD_CLIENT_ID` | AADSTS700016 | App registration missing or in wrong tenant |
+| `BAD_TENANT_ID` | AADSTS90002, AADSTS900023, AADSTS50020 | Tenant id wrong / SP not in that tenant |
+| `INSUFFICIENT_PERMISSIONS` | AADSTS65001, AADSTS50105 | Grant + admin-consent the API permissions |
+| `NOT_SIGNED_IN` | DaxterException "Not signed in" | Run `daxter login` or set SP env vars |
+| `WORKSPACE_NOT_FOUND` | DaxterException workspace failures | Wrong name, or SP can't see it |
+| `ITEM_NOT_FOUND` | DaxterException dataset/report failures, HTTP 404 | Resource doesn't exist or isn't visible |
+| `FORBIDDEN` | HTTP 403 | Authenticated but no role for the operation |
+| `NETWORK_FAILURE` | Timeouts, non-403/404 HTTP errors | Connectivity issue |
+| `UNKNOWN` | Anything else | Mapping not yet defined; `details` carries the raw message |
+
+Exit code is **1** for any classified failure (i.e. anything except `UNKNOWN`), **2** for
+`UNKNOWN`. So a consumer that just wants pass/fail-with-a-known-class can read the exit
+code without parsing the JSON.
+
+### When to use it
+
+- **Automation / fleet code** (Semantix, CI scripts) → use `--output json` and check
+  `error_code`.
+- **Humans at a terminal** → omit `--output json` (or use `table` / `csv`) and read the
+  one-line "daxter: ..." message as usual. Unchanged behaviour from v1.36.0 down.

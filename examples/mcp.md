@@ -449,3 +449,11 @@ curl -s http://daxter-tenant-inspire:8080/api/health | jq
 No auth required (the endpoint never returns secrets — no signed-in identity, no Power BI
 data, no tokens). Put a reverse proxy in front of Semantics if per-tenant access control
 matters.
+
+## Structured CLI errors for consumer agents (v1.37.0)
+
+DAXter's CLI now emits **structured JSON error envelopes** on stderr when invoked with
+`--output json`. Designed so wrappers like **Semantix** (the L60 control plane that
+shell-execs into the gateway container for credential validation) can match on a stable
+`error_code` instead of parsing AADSTS strings. See `examples/cli.md` for the full code
+table and the exit-code semantics. Pure CLI feature — no MCP-tool surface change.

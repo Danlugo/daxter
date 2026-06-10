@@ -4,6 +4,7 @@ using Daxter.Core;
 using Daxter.Core.Artifacts;
 using Daxter.Core.Auth;
 using Daxter.Core.Context;
+using Daxter.Core.Diagnostics;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
 using Daxter.Core.Editing;
@@ -1118,10 +1119,15 @@ internal static class Program
         Func<PowerBiRestClient, DaxterConfig, CancellationToken, Task<QueryResult>> op,
         CancellationToken ct)
     {
+        // Capture the requested output mode UP FRONT so we know how to emit failures: if the
+        // caller asked for --output json (Semantix does this on every credential-validation
+        // call), errors come out as the structured stderr envelope CliErrorClassifier defines.
+        // Other formats (table / csv) keep the human-readable "daxter: ..." stderr message.
+        var outputName = outputFactory();
         try
         {
             var config = configFactory();
-            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputName));
             using var rest = new PowerBiRestClient(BuildTokenProvider(config));
             var result = await op(rest, config, ct);
 
@@ -1131,7 +1137,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            return Fail(ex);
+            return Fail(ex, outputName);
         }
     }
 
@@ -1937,8 +1943,26 @@ internal static class Program
 
     private static void WriteToStdErr(string message) => Console.Error.WriteLine(message);
 
-    private static int Fail(Exception ex)
+    private static int Fail(Exception ex) => Fail(ex, outputName: null);
+
+    /// <summary>Failure path. When <paramref name="outputName"/> resolves to "json" (the
+    /// caller asked for <c>--output json</c>), we emit the structured CliError envelope to
+    /// stderr so Semantix and any other automated consumer can parse a stable
+    /// <c>error_code</c> instead of scraping AADSTS text. Everything else keeps the human
+    /// "daxter: ..." line. stdout stays untouched in both paths (the stdout=data /
+    /// stderr=status discipline is the contract Semantix relies on too).</summary>
+    private static int Fail(Exception ex, string? outputName)
     {
+        if (string.Equals(outputName, "json", StringComparison.OrdinalIgnoreCase))
+        {
+            var cliError = CliErrorClassifier.Classify(ex);
+            Console.Error.WriteLine(CliErrorClassifier.ToJsonEnvelope(cliError));
+            // Use 1 for known/classified failures, 2 for UNKNOWN — Semantix can distinguish
+            // "definitely auth/permission/etc." from "we don't have a mapping yet" by exit code
+            // too, so it doesn't have to peek at the JSON when it just wants pass/fail.
+            return cliError.ErrorCode == CliErrorCodes.UNKNOWN ? 2 : 1;
+        }
+
         if (ex is DaxterException or ArgumentException)
         {
             Console.Error.WriteLine($"daxter: {ex.Message}");

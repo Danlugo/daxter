@@ -6,6 +6,66 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-06-10
+
+### Added — Structured CLI errors for consumer agents (Semantix wishlist #3)
+[[project-semantix]] today shells into the gateway container with `daxter ws ls` /
+`ws datasets` to validate per-client service-principal credentials, then parses the
+human-readable `AADSTS*` error text to figure out which knob the operator typed wrong.
+String-scraping is fragile: any Microsoft wording change or DAXter exception-wrap tweak
+silently breaks Semantix. This release turns that into a contract.
+
+- **`Daxter.Core.Diagnostics.CliErrorClassifier`** — maps any exception (DaxterException
+  patterns, AADSTS codes, `HttpRequestException` status, timeouts) to a stable
+  `CliError { error_code, message, aad_code?, trace_id?, details }` record. AAD-code
+  pattern matching is regex-based; `AADSTS7000215` / `700016` / `90002` / `900023` /
+  `50020` / `65001` / `50105` have dedicated mappings. Unrecognised codes fall through
+  to `UNKNOWN` but the AAD code is still surfaced in `aad_code`.
+- **`--output json` now wraps failures in the envelope** for every CLI command routed
+  through `RunRestQueryAsync` (`ws ls`, `ws datasets`, `ws reports`, `ws lineage`,
+  pipeline ls/stages/operations, fabric copy-jobs/notebooks runs, sql endpoints):
+  ```json
+  {
+    "error": {
+      "error_code": "BAD_CLIENT_SECRET",
+      "message":    "The client secret is wrong or expired. Re-paste it ...",
+      "aad_code":   "AADSTS7000215",
+      "trace_id":   "abc123de-...",
+      "details":    "AADSTS7000215: Invalid client secret provided. ..."
+    }
+  }
+  ```
+  Envelope goes on **stderr** (preserving the stdout=data / stderr=status discipline);
+  `Console.Out` is untouched for both success and failure. Null optional fields are
+  **omitted** (same wire-shape rule `/api/health` follows — field present iff value
+  non-null).
+- **Exit code semantics:** `1` for any classified failure (i.e. anything except
+  `UNKNOWN`), `2` for `UNKNOWN`. Consumers that only need pass/fail-with-a-known-class
+  can read the exit code without parsing the JSON.
+- **Stable error code catalogue:** `BAD_CLIENT_SECRET`, `BAD_CLIENT_ID`, `BAD_TENANT_ID`,
+  `INSUFFICIENT_PERMISSIONS`, `NOT_SIGNED_IN`, `WORKSPACE_NOT_FOUND`, `ITEM_NOT_FOUND`,
+  `FORBIDDEN`, `NETWORK_FAILURE`, `UNKNOWN`. These are now part of the consumer contract
+  — adding new codes is fine; renaming or removing one is a breaking change.
+
+### Why
+Quoting Semantix-for-DAXter §6 wishlist item #3: *"Structured JSON errors for `ws ls` /
+`ws datasets` (machine-readable auth/workspace failure codes) so validation messaging is
+less reliant on parsing AADSTS text."* This delivers exactly that. Semantix's onboarding
+validation now becomes "the SP returned `BAD_CLIENT_SECRET`" instead of an `if
+(text.Contains("AADSTS7000215"))` branch.
+
+### Unchanged
+- Human path (no `--output json`, or `--output table` / `--output csv`) prints the
+  same one-line "daxter: ..." stderr it always has. Local users see no behaviour change.
+- Every existing env var, command name, and MCP tool stays put — Semantix's §4 contract
+  is preserved.
+
+### Tests
+- 21 new `CliErrorClassifierTests` pin every AADSTS mapping, the trace-ID extraction,
+  DaxterException pattern matching, HTTP status classification, the truncation behaviour
+  for huge raw messages, and the omit-null wire-shape rule.
+- **Total: 351 tests passing** (was 330 in v1.36.0).
+
 ## [1.36.0] - 2026-06-10
 
 ### Added — Semantics-friendly fleet hooks
