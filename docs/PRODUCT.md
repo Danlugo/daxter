@@ -38,7 +38,7 @@ cross-platform, and Claude-able."*
         ┌───────┴──────┐       ┌───────┴───────┐      ┌──────┴──────┐
         │ Daxter.Cli   │       │ Daxter.Cli/Mcp │      │ Daxter.Web  │
         │  shell       │       │  MCP server    │      │  Blazor     │
-        │  (System.    │       │  (76 tools)    │      │  console    │
+        │  (System.    │       │  (self-disc.)  │      │  console    │
         │  CommandLine)│       │                │      │ (12 pages)  │
         └──────────────┘       └────────────────┘      └─────────────┘
             terminal               Claude / any           browser
@@ -84,7 +84,7 @@ one set of tests.
   → `/refresh` · `/jobs` · `/copy-jobs` · `/notebooks` · `/audit` · `daxter refresh*` + cron.
 - **Agentic operator (Claude as a copilot):** "Ask Claude in plain language to do any of the
   above — sign in, list models, draft a measure, run a SQL export, run a notebook, monitor it."
-  → MCP server, 76 tools, `daxter_capabilities` lists them all with read/write classification.
+  → MCP server with a self-introspecting catalogue: `daxter_capabilities` lists every tool with read/write classification, `daxter_version` returns just the running version when that's all you need.
 - **Platform / Governance:** "What exists, who has access, which gateway, which workspaces are
   writable, what pipeline rules per stage."
   → `/explore` · `/connections` · `/configure` (writes gate) · `pipeline rules` · `pipeline audit`.

@@ -6,6 +6,39 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-06-10
+
+### Added
+- **`daxter_version` MCP tool** — small, cheap identity card for the running DAXter
+  instance. Returns version (stamped at build time via `DAXTER_VERSION`), GHCR image tag,
+  GitHub repo URL, .NET runtime, OS / architecture. Pass `checkLatest=true` for ONE
+  additional outbound GitHub API call that returns the latest published release tag plus
+  an `update_available` boolean. Same envelope shape as the existing
+  `Daxter.Web.Services.VersionService` uses on the home page — agents can match on field
+  names without surprise. Useful across sessions to confirm which build the agent is
+  talking to (especially for hosted / shared DAXter deployments) and to feature-gate
+  against capabilities introduced in a specific release.
+- **`daxter version` CLI verb** — same JSON envelope as the MCP tool. Accepts
+  `--check-latest` for the GitHub update probe. Pipe to `jq` for scripting.
+
+### Why
+The version was already discoverable through `daxter_capabilities`, but that returns the
+full tool catalogue — overkill when an agent just needs "which build am I on?". A
+dedicated cheap tool keeps the discovery path orthogonal and lets agents check
+compatibility cheaply on session start.
+
+### Changed
+- **Stale "76 tools" count scrubbed** from `README.md`, `CLAUDE.md`,
+  `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, and `examples/mcp.md`. The catalogue is
+  self-discoverable via `daxter_capabilities` at runtime, so the docs no longer hard-code
+  a number that drifts every release. (The GitHub repo description on the public-face
+  side still mentions a specific count and will be refreshed separately when convenient.)
+
+### Tests
+- 3 new tests (`VersionToolTests`) — required-field envelope shape, `dev` label when
+  `DAXTER_VERSION` is unset, and `DAXTER_REPO` honored for forked deployments.
+- **Total: 323 tests passing** (was 320 in v1.34.0).
+
 ## [1.34.0] - 2026-06-09
 
 ### Added — the shared-knowledge plane

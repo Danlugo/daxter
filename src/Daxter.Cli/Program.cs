@@ -110,6 +110,13 @@ internal static class Program
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
 
+        // daxter version — identity card. Mirrors the daxter_version MCP tool.
+        var checkLatestOpt = new Option<bool>("--check-latest")
+            { Description = "Check GitHub for the latest published release (one outbound API call)." };
+        var versionCommand = new Command("version", "Show the running DAXter version, image tag, runtime info, and (optionally) GitHub update check.")
+            { checkLatestOpt };
+        versionCommand.SetAction((pr, ct) => RunVersionAsync(pr.GetValue(checkLatestOpt), ct));
+
         var webPort = new Option<int>("--port") { Description = "Port for the web console.", DefaultValueFactory = _ => 8080 };
         var webCommand = new Command("web", "Run the DAXter web console (status, configure, explore).") { webPort };
         webCommand.SetAction((pr, ct) => RunWebAsync(pr.GetValue(webPort), ct));
@@ -119,7 +126,7 @@ internal static class Program
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
             refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand, fabricCommand,
-            artifactCommand, contextCommand, mcpCommand, webCommand,
+            artifactCommand, contextCommand, mcpCommand, webCommand, versionCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -2304,6 +2311,20 @@ internal static class Program
             var format = ResultFormatterFactory.Parse(outputFactory());
             Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
             Console.Error.WriteLine($"({result.RowCount} hit{(result.RowCount == 1 ? "" : "s")})");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    /// <summary>Runs the same logic that <c>daxter_version</c> exposes via MCP — version
+    /// stamped at build time, image tag, runtime info, optional GitHub update check. Output is
+    /// the same JSON envelope; piping to <c>jq</c> works.</summary>
+    private static async Task<int> RunVersionAsync(bool checkLatest, CancellationToken ct)
+    {
+        try
+        {
+            var json = await Mcp.DaxterToolRuntime.VersionAsync(checkLatest, ct);
+            Console.Out.WriteLine(json);
             return 0;
         }
         catch (Exception ex) { return Fail(ex); }

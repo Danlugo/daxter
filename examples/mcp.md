@@ -17,12 +17,13 @@ the environment, e.g. `Marketing - QA`; an unsuffixed name like `Sales Analytics
 ## Discover what's available
 
 Before anything else, ask Claude **"what can DAXter do?"** — it calls `daxter_capabilities`,
-which reflects the live tool set at runtime (76 tools today: 50 read · 26 gated writes).
+which reflects the live tool set at runtime (each entry tagged read / write-gated / write-gated-destructive).
 Every release auto-surfaces its new tools here; no out-of-band docs to keep in sync.
 
 | You say | Tool |
 |---|---|
 | "What DAXter tools are available?" | `daxter_capabilities` (returns version + every tool's name, title, kind, description) |
+| "Which DAXter version am I talking to?" | `daxter_version` — small + cheap: version, GHCR image tag, .NET runtime, OS / arch. Pass `checkLatest=true` for an extra GitHub API call that returns the latest published release + `update_available` boolean. |
 
 ## Sign in (device-code default)
 

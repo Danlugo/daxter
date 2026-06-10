@@ -390,3 +390,24 @@ Per-workspace cards under `workspaces/<ws>/` are auto-attached to `daxter_query`
 responses (CLI `daxter query` returns rows as a table; auto-attach is a JSON-footer
 feature meant for the MCP path). Per-endpoint cards under `endpoints/<ws>/<ep>/` work
 the same way for `daxter_sql_query`.
+
+## Which version am I running?
+
+```bash
+./bin/daxter version
+# → {
+#     "version": "v1.35.0",
+#     "image":   "ghcr.io/danlugo/daxter:v1.35.0",
+#     "repo_url": "https://github.com/Danlugo/daxter",
+#     "releases_url": "https://github.com/Danlugo/daxter/releases",
+#     "dotnet_version": "8.0.x",
+#     "platform": "Linux ...",
+#     "architecture": "X64"
+#   }
+
+# Also check GitHub for the latest published release (one outbound API call):
+./bin/daxter version --check-latest
+# → ... + "latest_published": "v1.35.0", "update_available": false
+```
+
+Same JSON envelope the MCP `daxter_version` tool returns — pipe to `jq` for scripting.

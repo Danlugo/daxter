@@ -7,7 +7,7 @@
 
 **Ask Claude to operate your Power BI + Fabric — or do it from your terminal / browser.**
 DAXter is a Docker-only **Power BI + Fabric** client with three surfaces — a **CLI**, an
-**MCP server** (76 tools), and a **Blazor web console** — sharing one .NET engine. Covers
+**MCP server** (catalogue discoverable via `daxter_capabilities`), and a **Blazor web console** — sharing one .NET engine. Covers
 **XMLA** (DAX/MDX/DMV), **Power BI REST**, **Fabric REST** (Copy Jobs · Notebooks ·
 sqlEndpoints · bindConnection · pipelines · semantic-model getDefinition), and **T-SQL on
 Fabric Warehouses / Lakehouse SQL endpoints**. Plus a TOM-backed **model editor**, a

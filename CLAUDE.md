@@ -6,7 +6,7 @@ Context for AI agents (and humans) developing **DAXter**. For *using* the tool, 
 ## What it is
 
 A Docker-only **Power BI + Fabric** client with three surfaces — a CLI, an **MCP server**
-(76 tools), and a **Blazor web console** (12 pages) — all sharing one engine (`Daxter.Core`).
+(self-introspecting catalogue via `daxter_capabilities`), and a **Blazor web console** — all sharing one engine (`Daxter.Core`).
 Capabilities: DAX/MDX/DMV queries, model metadata, model editing (TOM), refresh (Enhanced
 Refresh by default · file-backed queue · one shared worker), workspace inventory + REST
 operations (lineage, gateways, permissions, take-over, bindConnection), pipelines (rules
@@ -93,7 +93,7 @@ src/Daxter.Core/    # UI-free engine
                     #   SqlWriteGate (read-only by default, opt-in writes).
   Scheduling/       # RefreshQueueStore (file-backed), EnhancedRefresh, RefreshScheduler.
   Formatting/       # table (Spectre) / csv / json formatters + CsvStyle for streaming exports
-src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server + 76 tools
+src/Daxter.Cli/     # System.CommandLine entry point; Mcp/ = MCP server (catalogue self-discovered via daxter_capabilities)
 src/Daxter.Web/     # Blazor Server console — 12 pages (Home/Status, Explore, Query, Refresh,
                     #   Jobs, Gateways, Pipelines, Audit, Model Edit, Connections, SQL, RLS,
                     #   Copy Jobs, Notebooks, Configure, Logs). Components/ has shared widgets

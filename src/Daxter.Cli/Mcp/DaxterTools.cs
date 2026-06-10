@@ -26,6 +26,18 @@ public static class DaxterTools
         "features here. Use it whenever you're unsure what DAXter can do.")]
     public static string Capabilities() => DaxterToolRuntime.CapabilitiesJson();
 
+    [McpServerTool(Name = "daxter_version", ReadOnly = true, Title = "Show the running DAXter version (+ optional update check)"),
+     Description("Return identity info for the DAXter instance the agent is talking to: version stamped at build time, " +
+                 "GHCR image tag, GitHub repo URL, .NET runtime, OS / architecture. Pass `checkLatest=true` to ALSO " +
+                 "hit GitHub for the latest published release and a `update_available` boolean (one outbound API call, " +
+                 "no auth). Cheaper than daxter_capabilities when you only need the version. Use to confirm which build " +
+                 "you're on (especially across sessions or shared/hosted DAXters), to feature-gate against capabilities " +
+                 "that landed in a specific release, or to suggest an update.")]
+    public static Task<string> Version(
+        [Description("Check GitHub for the latest published release (one outbound API call). Default false.")] bool checkLatest = false,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.VersionAsync(checkLatest, ct);
+
     [McpServerTool(Name = "daxter_login", Title = "Sign in to Power BI (and optionally Fabric SQL)"),
      Description("Sign in interactively (device code). Returns a URL and a code to enter in your browser; once you complete it, the other tools run as you. " +
                  "Call this if a tool reports 'Not signed in'. " +

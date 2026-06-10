@@ -429,6 +429,80 @@ internal static class DaxterToolRuntime
     /// plus the running version. Built by <b>reflecting the registered tools at runtime</b>, so it is always
     /// complete and never drifts: every release automatically surfaces its new features here. This is how an
     /// agent discovers everything DAXter can do in one call.</summary>
+    /// <summary>Identity card for the running DAXter — version stamped at build time, image tag,
+    /// .NET runtime, OS / arch, plus repository URLs. Optional GitHub update check (one outbound
+    /// API call) returns latest published tag + whether an upgrade is available. Useful when an
+    /// agent across sessions needs to know which version it's talking to (e.g. for feature gating
+    /// against capabilities the agent has memorised).</summary>
+    public static async Task<string> VersionAsync(bool checkLatest, CancellationToken ct)
+    {
+        var current = Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev";
+        var repo = Environment.GetEnvironmentVariable("DAXTER_REPO") ?? "Danlugo/daxter";
+        var info = new Dictionary<string, object?>
+        {
+            ["version"] = current,
+            // Reconstruct the GHCR image tag for the running build. Lowercased per OCI rules
+            // (Repo defaults to "Danlugo/daxter"; GHCR namespaces are case-insensitive but the
+            // canonical pull URL is lowercase).
+            ["image"] = $"ghcr.io/{repo.ToLowerInvariant()}:{current}",
+            ["repo_url"] = $"https://github.com/{repo}",
+            ["releases_url"] = $"https://github.com/{repo}/releases",
+            ["latest_release_url"] = $"https://github.com/{repo}/releases/latest",
+            ["dotnet_version"] = Environment.Version.ToString(),
+            ["platform"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            ["architecture"] = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+        };
+
+        if (checkLatest)
+        {
+            // One-shot GitHub API call. Same shape as VersionService.CheckLatestAsync (Web) but
+            // without the dependency injection — we instantiate a short-lived HttpClient because
+            // this code path runs from CLI + MCP, neither of which has a DI container.
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("DAXter-MCP");
+                http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                using var resp = await http.GetAsync(
+                    $"https://api.github.com/repos/{repo}/releases/latest", ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync(ct);
+                    using var doc = JsonDocument.Parse(body);
+                    var tag = doc.RootElement.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+                    var url = doc.RootElement.TryGetProperty("html_url", out var u) ? u.GetString() : null;
+                    info["latest_published"] = tag;
+                    info["latest_published_url"] = url;
+                    info["update_available"] = IsNewer(tag, current);
+                }
+                else
+                {
+                    info["update_check_error"] = $"GitHub returned {(int)resp.StatusCode}.";
+                }
+            }
+            catch (Exception ex)
+            {
+                info["update_check_error"] = ex.Message;
+            }
+        }
+        return JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>Semver-aware "is latest > current" check. Tolerates the <c>v</c> prefix on either
+    /// side and "dev" for local builds (always reports "update available" so a dev image gets a
+    /// nudge toward the published one).</summary>
+    private static bool IsNewer(string? latest, string current)
+    {
+        if (string.IsNullOrWhiteSpace(latest)) return false;
+        if (string.Equals(current, "dev", StringComparison.OrdinalIgnoreCase)) return true;
+        var l = latest!.TrimStart('v', 'V');
+        var c = current.TrimStart('v', 'V');
+        if (Version.TryParse(l, out var lv) && Version.TryParse(c, out var cv))
+            return lv > cv;
+        // Fallback: ordinal compare so unparsed-but-different tags surface as "new".
+        return !string.Equals(l, c, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string CapabilitiesJson()
     {
         var tools = typeof(DaxterTools).Assembly.GetTypes()
