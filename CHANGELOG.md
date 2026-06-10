@@ -6,6 +6,60 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-06-09
+
+### Added — the shared-knowledge plane
+- **`Daxter.Core.Context.ContextService`** — text-first layer over `IArtifactStore`. Lives
+  under the reserved `context/` key prefix; one bucket, two surfaces — agents reach for
+  `daxter_artifact_*` for byte transfer and `daxter_context_*` for shared facts. Methods:
+  `ListAsync(namespace)`, `GetAsync(key)`, `PutAsync(key, content, sourceTool, ttlHours)`,
+  `DeleteAsync`, `SearchAsync(query)` (case-insensitive across both keys + bodies, ranked
+  by match count, with snippets), `NamespacesAsync()` (groups top-level paths for
+  discovery). **14 new unit tests** pin every invariant.
+- **Five MCP tools** — `daxter_context_list`, `_get`, `_put`, `_search`, `_delete`.
+  Text-not-base64 envelope; agents read content directly. `_get` returns
+  `too_large_for_inline=true` + a fetch-via-HTTP hint when the body exceeds 1 MB.
+  `_delete` is `Destructive = true` (etiquette: confirm with user first).
+- **Five CLI verbs** — `daxter context list / get / put / search / rm`. `put` accepts
+  inline `--content` or `--from-file <path>` for multi-line markdown.
+- **`daxter_capabilities` extended** — the discovery JSON now includes a
+  `context_namespaces` array (`{namespace, key_count, last_updated}`) AND a
+  `context_hint` string. A brand-new agent's *first* tool call now sees the team's
+  shared knowledge plane without any prompting.
+- **Auto-attach in `daxter_query` and `daxter_sql_query`** — when a tool runs against
+  workspace `X` (and optionally dataset `Y` / endpoint `Z`), the response footer
+  automatically carries every context entry under:
+  - `context/workspaces/{X}/` — for both `daxter_query` and `daxter_sql_query`
+  - `context/datasets/{X}/{Y}/` — for `daxter_query`
+  - `context/endpoints/{X}/{Z}/` — for `daxter_sql_query`
+  The footer arrives as a trailing comment block the agent reads as part of the response
+  text. Bounded (entries > 64 KB are skipped); failures swallow silently so a
+  context-store hiccup never tanks the primary tool call. **No extra round-trip on the
+  agent's side** — curated facts arrive WITH the data.
+
+### Why
+The artifact store was a generic byte plane. This adds the *knowledge* plane on top —
+ergonomic for the use case where the team wants to share facts (client glossaries, DAX
+patterns, conventions, troubleshooting playbooks, incident notes) across every MCP
+session connected to this DAXter. With a shared Docker volume / hosted DAXter, this
+becomes the team knowledge plane. With a personal install, it's a per-machine notebook
+that survives container restarts.
+
+### Conventional namespaces (documented, not enforced)
+- `context/clients/<client>/` — per-client glossary + conventions
+- `context/workspaces/<ws>/` — auto-attached to `daxter_query` against that workspace
+- `context/endpoints/<ws>/<ep>/` — auto-attached to `daxter_sql_query`
+- `context/skills/<topic>/` — reusable knowledge (DAX, SQL, Power Query)
+- `context/conventions/` — global team rules
+- `context/incidents/<ticket>/` — active investigation notes (usually with `ttl_hours`)
+
+### Notes
+- Phase 5 (`v1.35.0`) lands a `/context` Razor curation page + MCP `prompts/list` +
+  `prompts/get` surfacing `context/prompts/*` in Claude Desktop's slash menu.
+- The context plane uses the same `~/.daxter/artifacts/` storage as the file plane. To
+  share across machines, point both surfaces at a network mount via
+  `DAXTER_ARTIFACTS_ROOT=/mnt/team-daxter/`.
+
 ## [1.33.0] - 2026-06-09
 
 ### Added

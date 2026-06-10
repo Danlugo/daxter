@@ -36,13 +36,17 @@ public static class DaxterTools
         CancellationToken ct = default)
         => DaxterToolRuntime.LoginAsync(ct, target);
 
-    [McpServerTool(Name = "daxter_query", ReadOnly = true, Title = "Run DAX/MDX query"), Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON.")]
+    [McpServerTool(Name = "daxter_query", ReadOnly = true, Title = "Run DAX/MDX query"),
+     Description("Run a DAX or MDX query against a Power BI semantic model. Returns rows as JSON. " +
+                 "AUTO-ATTACHES shared-knowledge context cards under `context/workspaces/{ws}/` and " +
+                 "`context/datasets/{ws}/{ds}/` to the response footer — curated glossaries / conventions / " +
+                 "client-specific facts arrive WITH the data, no extra call needed. Curate via daxter_context_put.")]
     public static Task<string> Query(
         [Description("The DAX or MDX query, e.g. EVALUATE TOPN(10, Sales)")] string query,
         [Description("Workspace name or id/GUID (optional; defaults to server config)")] string? workspace = null,
         [Description("Dataset / model name or id/GUID (optional; defaults to server config). Pass names with apostrophes as-is.")] string? dataset = null,
         CancellationToken ct = default)
-        => DaxterToolRuntime.XmlaAsync(workspace, dataset, s => s.Execute(query), ct);
+        => DaxterToolRuntime.XmlaAsync(workspace, dataset, s => s.Execute(query), ct, attachContext: true);
 
     [McpServerTool(Name = "daxter_dmv", ReadOnly = true, Title = "Run DMV query"), Description("Run a DMV ($SYSTEM) query, e.g. SELECT * FROM $SYSTEM.TMSCHEMA_TABLES.")]
     public static Task<string> Dmv(
@@ -970,6 +974,79 @@ public static class DaxterTools
         CancellationToken ct = default)
         => DaxterToolRuntime.UpdateItemDefinitionAsync(workspace, copy_job_id,
             PowerBiRestClient.FabricItemKinds.CopyJob, artifact_key_prefix, execute, ct);
+
+    // ── Context (shared knowledge plane — Phase 4) ────────────────────────────────────────────
+    // Sits on top of the artifact store under the `context/` prefix. Text-not-base64 by design —
+    // these payloads are markdown / prose / prompts, never .pbix bytes. Conventional namespaces:
+    //   clients/<client>/      — per-client glossary + conventions
+    //   workspaces/<ws>/       — per-workspace context (auto-attached to daxter_query)
+    //   endpoints/<ws>/<ep>/   — per-Fabric-SQL-endpoint cards (auto-attached to daxter_sql_query)
+    //   skills/<topic>/        — reusable knowledge snippets (DAX patterns, SQL cheatsheets)
+    //   conventions/           — global rules
+    //   incidents/<ticket>/    — active investigations
+    //
+    // Multi-session use case: agent A writes the team glossary → agent B (later, same DAXter
+    // instance) reads it via daxter_context_get or sees it auto-attached on the next workspace
+    // query. With a shared volume / hosted DAXter, this becomes the team knowledge plane.
+
+    [McpServerTool(Name = "daxter_context_list", ReadOnly = true, Title = "List shared-knowledge context entries"),
+     Description("List context entries — curated team knowledge (glossaries, conventions, prompts, " +
+                 "skills, troubleshooting playbooks) shared across all MCP sessions connected to this " +
+                 "DAXter. Optional `namespace_path` narrows the scan (e.g. 'clients/acme/' or 'skills/dax/'). " +
+                 "Returns metadata only — call daxter_context_get for the body. Common namespaces: " +
+                 "clients/<name>/, workspaces/<ws>/, endpoints/<ws>/<ep>/, skills/<topic>/, conventions/, " +
+                 "incidents/<ticket>/. Cards under workspaces/<ws>/ and endpoints/<ws>/<ep>/ are " +
+                 "auto-attached to daxter_query / daxter_sql_query against that target.")]
+    public static Task<string> ContextList(
+        [Description("Optional sub-namespace (e.g. 'clients/acme' or 'skills').")] string? namespace_path = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ContextListAsync(namespace_path, ct);
+
+    [McpServerTool(Name = "daxter_context_get", ReadOnly = true, Title = "Read a shared-knowledge context entry"),
+     Description("Fetch a single context entry's full text. Returns content directly (not base64) for " +
+                 "entries up to 1 MB. Above that, `too_large_for_inline=true` and the agent should fetch " +
+                 "via GET /api/artifacts/context/{key} on the DAXter web host. Use daxter_context_list " +
+                 "to discover available keys; daxter_context_search to find content by keyword.")]
+    public static Task<string> ContextGet(
+        [Description("Context key WITHOUT the 'context/' prefix (e.g. 'clients/acme/glossary.md').")] string key,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ContextGetAsync(key, ct);
+
+    [McpServerTool(Name = "daxter_context_put", Title = "Create or update a shared-knowledge context entry"),
+     Description("Write text content into the shared-knowledge plane — visible to every MCP session " +
+                 "connected to this DAXter. Use for team glossaries, client conventions, DAX/SQL pattern " +
+                 "libraries, troubleshooting playbooks, prompts. ALWAYS confirm with the user before " +
+                 "writing — once published, every future session reads it. Optional `source_tool` stamps " +
+                 "provenance ('team-curator', 'powerbi_alignment_fix'); optional `ttl_hours` attaches an " +
+                 "expiry (e.g. for incident-specific notes that should self-expire after the ticket closes).")]
+    public static Task<string> ContextPut(
+        [Description("Context key WITHOUT the 'context/' prefix (e.g. 'clients/acme/glossary.md').")] string key,
+        [Description("Text content (markdown / prose / prompt template). Use daxter_artifact_put for binary bytes.")] string content,
+        [Description("Optional provenance label (e.g. 'team-curator', 'dgonzalez').")] string? source_tool = null,
+        [Description("Optional TTL in hours — nightly purge sweeps the entry after this.")] double? ttl_hours = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ContextPutAsync(key, content, source_tool, ttl_hours, ct);
+
+    [McpServerTool(Name = "daxter_context_search", ReadOnly = true, Title = "Search the shared-knowledge plane"),
+     Description("Case-insensitive substring search across both keys and bodies of every context entry. " +
+                 "Returns matched keys + a snippet of the matched line in context + a match count for " +
+                 "ranking. Use to discover relevant facts before answering a question — e.g. 'TLA' to find " +
+                 "any glossary entry mentioning that acronym. Pathological-size bodies (>256 KB) are skipped " +
+                 "during body scan; their keys still match.")]
+    public static Task<string> ContextSearch(
+        [Description("Substring to search for (case-insensitive).")] string query,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ContextSearchAsync(query, ct);
+
+    [McpServerTool(Name = "daxter_context_delete", Destructive = true, Title = "Delete a shared-knowledge context entry"),
+     Description("Delete a context entry, or every entry under a sub-namespace (recursive). Like " +
+                 "daxter_artifact_delete this is NOT gated on Allow-writes (user's own curated text). " +
+                 "ALWAYS confirm with the user first — once gone, every future session loses access to " +
+                 "the fact. Use the dry-run path: daxter_context_list with the same prefix to preview.")]
+    public static Task<string> ContextDelete(
+        [Description("Context key OR sub-namespace (deletes recursively, WITHOUT the 'context/' prefix).")] string key_or_namespace,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ContextDeleteAsync(key_or_namespace, ct);
 
     [McpServerTool(Name = "daxter_artifact_extract", Title = "Unzip an archive into the artifact store"),
      Description("Unzip a zip archive INTO the artifact store under a key prefix — every entry becomes a separate " +

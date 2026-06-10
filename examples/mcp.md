@@ -339,3 +339,71 @@ Claude: → same tool with execute:true → "Updated — 17 part(s) published su
 
 No `docker cp`, no Power BI Desktop, no bind-mount. The entire loop rides the artifact
 store + the Fabric REST `updateDefinition` LRO.
+
+## Shared-knowledge plane (Phase 4 — `daxter_context_*`)
+
+Sits on top of the artifact store under the reserved `context/` prefix. Text-not-base64
+by design — these payloads are markdown, prose, prompts; not file bytes. **Visible to
+every MCP session connected to this DAXter** — write once from any session, every future
+session reads it. Five tools:
+
+| Ask | Tool |
+|---|---|
+| "What shared knowledge has the team curated?" | `daxter_capabilities` (now lists `context_namespaces` too) |
+| "List everything under clients/acme" | `daxter_context_list` with `namespace_path: "clients/acme"` |
+| "Show me the ACME glossary" | `daxter_context_get` with `key: "clients/acme/glossary.md"` |
+| "Write this client glossary so every session can see it" | `daxter_context_put` with `key: "clients/acme/glossary.md"`, `content: "<markdown>"`, `source_tool: "team-curator"` |
+| "Find every context entry mentioning TLA" | `daxter_context_search` with `query: "TLA"` (matches keys + bodies, ranked by hit count) |
+| "Delete the stale incident notes" | `daxter_context_delete` with `key_or_namespace: "incidents/INC123"` |
+
+### Auto-attach — context arrives WITH the data
+
+`daxter_query` and `daxter_sql_query` automatically append matching context cards to
+their response footer. **No extra call needed**:
+
+- `daxter_query workspace:"Data Hub - Prod" dataset:"Sales Model" ...` →
+  attaches every entry under `context/workspaces/Data Hub - Prod/` AND `context/datasets/Data Hub - Prod/Sales Model/`.
+- `daxter_sql_query workspace:"Data Hub - Prod" endpoint:"Sales WH" ...` →
+  attaches `context/workspaces/Data Hub - Prod/` AND `context/endpoints/Data Hub - Prod/Sales WH/`.
+
+The footer looks like this on the wire:
+
+```text
+{ ...primary JSON result... }
+
+/* ────── attached context (curated team knowledge for this target) ────── */
+
+/* context: workspaces/Data Hub - Prod/conventions.md  (source: team-curator, 1,247 B) */
+Never write to Prod without explicit approval from the owner...
+
+/* context: datasets/Data Hub - Prod/Sales Model/glossary.md  (source: dgonzalez, 892 B) */
+TLA = trailing last audit (not "three letter acronym"). RegionN = stores 100-199...
+```
+
+The agent reads it as part of the response text and applies it to the question.
+
+### Conventional namespaces (we document these; nothing's enforced)
+
+| Namespace | What goes there | Who reads |
+|---|---|---|
+| `clients/<client>/` | per-client glossary + conventions | every agent answering questions for that client |
+| `workspaces/<ws>/` | per-workspace context cards | auto-attached to `daxter_query` against that workspace |
+| `endpoints/<ws>/<ep>/` | per-Fabric-SQL-endpoint cards | auto-attached to `daxter_sql_query` |
+| `skills/<topic>/` | reusable knowledge snippets (DAX patterns, SQL cheatsheets) | any agent working on the topic |
+| `conventions/` | global team rules | every agent (read at session start via daxter_capabilities) |
+| `incidents/<ticket>/` | active investigation notes (often with `ttl_hours`) | anyone joining the ticket |
+
+### Multi-session use case (the killer story)
+
+```text
+Session 1 (Diego, Monday):
+  daxter_context_put
+    key: "clients/acme/glossary.md"
+    content: "ACME's stores numbered 100-499. Brand IDs: ARB=Arby's, SON=Sonic..."
+    source_tool: "diego"
+
+Session 2 (you, Tuesday — different Claude Desktop on a different machine but same DAXter):
+  daxter_query workspace:"ACME - Prod" "EVALUATE TOPN(10, Sales)"
+  ↳ JSON result + AUTO-ATTACHED context with Diego's glossary as the footer.
+  ↳ You didn't know the glossary existed; the agent applied it anyway.
+```

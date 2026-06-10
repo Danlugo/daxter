@@ -360,3 +360,33 @@ The Web host runs an `ArtifactPurgeHostedService` every 6 hours by default
 Direct CLI access to `updateDefinition` LROs isn't exposed (gated writes prefer the MCP
 path so the dry-run / execute / writes-allowed checks land in one place). Use the MCP
 tools above, or operate on the REST API directly via `gh api` if scripting.
+
+## Shared-knowledge plane (Phase 4 — `daxter context`)
+
+Text-first layer over the artifact store. Five verbs mirror the MCP surface:
+
+```bash
+# Curate a client glossary that every future session will see:
+./bin/daxter context put clients/acme/glossary.md \
+  --from-file ./acme-glossary.md \
+  --source-tool team-curator
+
+# Browse what's been curated:
+./bin/daxter context list                         # everything
+./bin/daxter context list clients                 # under clients/
+./bin/daxter context list clients/acme            # under clients/acme/
+
+# Read a single entry:
+./bin/daxter context get clients/acme/glossary.md
+
+# Search across keys + bodies (case-insensitive, ranked by hit count):
+./bin/daxter context search TLA
+
+# Delete (confirms first unless --yes):
+./bin/daxter context rm incidents/INC1445816 --yes
+```
+
+Per-workspace cards under `workspaces/<ws>/` are auto-attached to `daxter_query` / MCP
+responses (CLI `daxter query` returns rows as a table; auto-attach is a JSON-footer
+feature meant for the MCP path). Per-endpoint cards under `endpoints/<ws>/<ep>/` work
+the same way for `daxter_sql_query`.

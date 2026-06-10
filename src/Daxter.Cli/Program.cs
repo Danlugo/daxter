@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Daxter.Core;
 using Daxter.Core.Artifacts;
 using Daxter.Core.Auth;
+using Daxter.Core.Context;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
 using Daxter.Core.Editing;
@@ -104,6 +105,7 @@ internal static class Program
         var sqlCommand = BuildSqlCommand(connectionOptions, outputOption, fileOption);
         var fabricCommand = BuildFabricCommand(connectionOptions, outputOption);
         var artifactCommand = BuildArtifactCommand(outputOption);
+        var contextCommand = BuildContextCommand(outputOption);
 
         var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
         mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
@@ -117,7 +119,7 @@ internal static class Program
         {
             queryCommand, dmvCommand, lsCommand, loginCommand, modelCommand, envCommand,
             refreshCommand, cacheCommand, wsCommand, testRlsCommand, pipelineCommand, sqlCommand, fabricCommand,
-            artifactCommand, mcpCommand, webCommand,
+            artifactCommand, contextCommand, mcpCommand, webCommand,
         };
 
         return await root.Parse(args).InvokeAsync();
@@ -2170,6 +2172,164 @@ internal static class Program
             var store = new LocalArtifactStore();
             var bytes = await store.PurgeExpiredAsync(ct);
             Console.Error.WriteLine($"Purge freed {bytes:N0} bytes.");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    // ── Context CLI verbs (Phase 4) ───────────────────────────────────────────────────────────
+    // Same subcommand pattern as `daxter artifact`. The context plane sits on top of the
+    // artifact store under `context/`; these verbs let humans curate without the MCP route.
+    // Five verbs: list / get / put / search / rm. `put` accepts content inline via --content,
+    // OR from a file via --from-file (more practical for multi-line markdown).
+
+    private static Command BuildContextCommand(Option<string> outputOption)
+    {
+        var nsArg = new Argument<string?>("namespace")
+            { Description = "Optional sub-namespace to narrow (e.g. 'clients/acme' or 'skills').", Arity = ArgumentArity.ZeroOrOne };
+        var ls = new Command("list", "List shared-knowledge context entries.") { nsArg, outputOption };
+        ls.SetAction((pr, ct) => RunContextListAsync(pr.GetValue(nsArg), () => pr.GetValue(outputOption), ct));
+
+        var keyArg = new Argument<string>("key") { Description = "Context key WITHOUT the 'context/' prefix." };
+        var get = new Command("get", "Show a single context entry's full text.") { keyArg };
+        get.SetAction((pr, ct) => RunContextGetAsync(pr.GetValue(keyArg)!, ct));
+
+        var putKeyArg = new Argument<string>("key") { Description = "Context key WITHOUT the 'context/' prefix." };
+        var contentOpt = new Option<string?>("--content") { Description = "Inline text content (for single-line entries)." };
+        var fromFileOpt = new Option<string?>("--from-file") { Description = "Read content from this file (preferred for markdown / multi-line)." };
+        var sourceOpt = new Option<string?>("--source-tool") { Description = "Provenance label (e.g. 'team-curator', your email)." };
+        var ttlOpt = new Option<double?>("--ttl-hours") { Description = "Attach a TTL — entry expires after this many hours." };
+        var put = new Command("put", "Create or update a context entry.") { putKeyArg, contentOpt, fromFileOpt, sourceOpt, ttlOpt };
+        put.SetAction((pr, ct) => RunContextPutAsync(
+            pr.GetValue(putKeyArg)!,
+            pr.GetValue(contentOpt),
+            pr.GetValue(fromFileOpt),
+            pr.GetValue(sourceOpt),
+            pr.GetValue(ttlOpt),
+            ct));
+
+        var queryArg = new Argument<string>("query") { Description = "Substring to search for (case-insensitive)." };
+        var search = new Command("search", "Search keys + bodies across every context entry.") { queryArg, outputOption };
+        search.SetAction((pr, ct) => RunContextSearchAsync(pr.GetValue(queryArg)!, () => pr.GetValue(outputOption), ct));
+
+        var rmArg = new Argument<string>("key") { Description = "Context key OR sub-namespace (deletes recursively)." };
+        var rmYesOpt = new Option<bool>("--yes") { Description = "Skip the confirmation prompt." };
+        var rm = new Command("rm", "Delete a context entry or a sub-namespace.") { rmArg, rmYesOpt };
+        rm.SetAction((pr, ct) => RunContextRmAsync(pr.GetValue(rmArg)!, pr.GetValue(rmYesOpt), ct));
+
+        return new Command("context",
+            "Shared-knowledge plane — curated team facts, glossaries, prompts, skills. " +
+            "Lives under `context/` in the artifact store; visible to every MCP session connected to this DAXter. " +
+            "Verbs: list / get / put / search / rm.")
+        { ls, get, put, search, rm };
+    }
+
+    private static async Task<int> RunContextListAsync(string? ns, Func<string?> outputFactory, CancellationToken ct)
+    {
+        try
+        {
+            var svc = new ContextService(new LocalArtifactStore());
+            var entries = await svc.ListAsync(ns, ct);
+            var cols = new List<string> { "key", "namespace", "bytes", "created_utc", "expires_utc", "source_tool" };
+            var rows = entries.Select(e => new object?[]
+            {
+                e.Key, e.Namespace, e.Bytes,
+                e.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                e.ExpiresAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                e.SourceTool ?? "",
+            }).ToList();
+            var result = new QueryResult(cols, rows);
+            var format = ResultFormatterFactory.Parse(outputFactory());
+            Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
+            Console.Error.WriteLine($"({result.RowCount} entr{(result.RowCount == 1 ? "y" : "ies")})");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunContextGetAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            var svc = new ContextService(new LocalArtifactStore());
+            var (content, entry, tooBig) = await svc.GetAsync(key, ct);
+            Console.Error.WriteLine($"# {entry.Key}  ({entry.Bytes:N0} B, source: {entry.SourceTool ?? "—"})");
+            if (tooBig)
+            {
+                Console.Error.WriteLine($"# (body exceeds 1 MB inline limit — read directly from ~/.daxter/artifacts/{ContextService.RootPrefix}{key})");
+                return 0;
+            }
+            Console.Out.WriteLine(content);
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunContextPutAsync(
+        string key, string? inlineContent, string? fromFile, string? sourceTool, double? ttlHours, CancellationToken ct)
+    {
+        try
+        {
+            string content;
+            if (!string.IsNullOrWhiteSpace(fromFile))
+            {
+                if (!File.Exists(fromFile)) throw new DaxterException($"File not found: {fromFile}");
+                content = await File.ReadAllTextAsync(fromFile, ct);
+            }
+            else if (!string.IsNullOrEmpty(inlineContent))
+            {
+                content = inlineContent;
+            }
+            else
+            {
+                throw new DaxterException("Pass --content (inline) OR --from-file (path).");
+            }
+            var svc = new ContextService(new LocalArtifactStore());
+            var entry = await svc.PutAsync(key, content, sourceTool ?? "daxter_cli", ttlHours, ct);
+            Console.Error.WriteLine($"Stored '{entry.Key}' ({entry.Bytes:N0} B, source: {entry.SourceTool}).");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunContextSearchAsync(string query, Func<string?> outputFactory, CancellationToken ct)
+    {
+        try
+        {
+            var svc = new ContextService(new LocalArtifactStore());
+            var hits = await svc.SearchAsync(query, ct);
+            var cols = new List<string> { "key", "namespace", "match_count", "snippet" };
+            var rows = hits.Select(h => new object?[] { h.Key, h.Namespace, h.MatchCount, h.Snippet }).ToList();
+            var result = new QueryResult(cols, rows);
+            var format = ResultFormatterFactory.Parse(outputFactory());
+            Console.Out.Write(ResultFormatterFactory.Create(format).Format(result));
+            Console.Error.WriteLine($"({result.RowCount} hit{(result.RowCount == 1 ? "" : "s")})");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunContextRmAsync(string key, bool yes, CancellationToken ct)
+    {
+        try
+        {
+            var svc = new ContextService(new LocalArtifactStore());
+            if (!yes)
+            {
+                var hits = await svc.ListAsync(key, ct);
+                if (hits.Count == 0) { Console.Error.WriteLine($"Nothing matches '{key}'."); return 0; }
+                Console.Error.WriteLine($"About to delete {hits.Count} entr{(hits.Count == 1 ? "y" : "ies")} under '{key}':");
+                foreach (var h in hits.Take(20)) Console.Error.WriteLine($"  {h.Key}");
+                if (hits.Count > 20) Console.Error.WriteLine($"  ... and {hits.Count - 20} more");
+                Console.Error.Write("Proceed? [y/N] ");
+                var line = Console.ReadLine();
+                if (line is null || !line.Trim().Equals("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("Aborted."); return 1;
+                }
+            }
+            var removed = await svc.DeleteAsync(key, ct);
+            Console.Error.WriteLine($"Removed {removed} entr{(removed == 1 ? "y" : "ies")}.");
             return 0;
         }
         catch (Exception ex) { return Fail(ex); }

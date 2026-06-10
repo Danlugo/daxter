@@ -9,6 +9,7 @@ using Daxter.Core.Audit;
 using Daxter.Core.Auth;
 using Daxter.Core.Configuration;
 using Daxter.Core.Connection;
+using Daxter.Core.Context;
 using Daxter.Core.Editing;
 using Daxter.Core.Export;
 using Daxter.Core.Formatting;
@@ -55,13 +56,26 @@ internal static class DaxterToolRuntime
     }
 
     public static Task<string> XmlaAsync(
-        string? workspace, string? dataset, Func<IXmlaSession, QueryResult> op, CancellationToken ct)
+        string? workspace, string? dataset, Func<IXmlaSession, QueryResult> op, CancellationToken ct,
+        bool attachContext = false)
         => Guard(async () =>
         {
             var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
             var factory = new AdomdXmlaSessionFactory(config, Provider(config));
             using var session = await factory.CreateAsync(ct);
-            return Format(op(session));
+            var primary = Format(op(session));
+
+            // Phase 4 — when the tool opted in (daxter_query does), append every relevant context
+            // card so the agent reads it as part of the response. Match `workspaces/{ws}/` and the
+            // narrower `datasets/{ws}/{ds}/` if a dataset was resolved. Cheap; bounded; no extra
+            // round-trip on the agent's side.
+            if (!attachContext) return primary;
+            var footer = await ContextAutoAttachFooterAsync(ct,
+                string.IsNullOrWhiteSpace(config.Workspace) ? null : $"workspaces/{config.Workspace}",
+                string.IsNullOrWhiteSpace(config.Workspace) || string.IsNullOrWhiteSpace(config.Dataset)
+                    ? null
+                    : $"datasets/{config.Workspace}/{config.Dataset}");
+            return primary + footer;
         });
 
     public static Task<string> MetaAsync(
@@ -437,9 +451,45 @@ internal static class DaxterToolRuntime
             .OrderBy(t => t.name, StringComparer.Ordinal)
             .ToList();
 
+        // Phase 4 — surface every top-level CONTEXT namespace so a brand-new agent sees the
+        // shared-knowledge plane on its very first discovery call. Best-effort: a failure to
+        // enumerate (e.g. read-only filesystem on a one-off CLI invocation) shouldn't break
+        // the rest of the capabilities response. Synchronously call into the singleton service
+        // — capabilities is itself a sync method, so we GetAwaiter().GetResult() the async API.
+        List<object> contextNamespaces;
+        try
+        {
+            var ns = Context.NamespacesAsync().GetAwaiter().GetResult();
+            contextNamespaces = ns.Select(n => (object)new
+            {
+                @namespace = n.Namespace,
+                key_count = n.KeyCount,
+                last_updated = n.LastUpdated?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            }).ToList();
+        }
+        catch
+        {
+            contextNamespaces = new List<object>();
+        }
+
         var version = Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev";
         return JsonSerializer.Serialize(
-            new { version, tool_count = tools.Count, tools },
+            new
+            {
+                version,
+                tool_count = tools.Count,
+                tools,
+                // Phase 4 additions: discoverable shared knowledge. Agents that read this on
+                // session start can pre-load relevant context (e.g. clients/{current-client}/
+                // glossary) before the user's first real question. Empty array when nothing
+                // has been curated yet — the field is always present so consumers can rely on
+                // its shape.
+                context_namespaces = contextNamespaces,
+                context_hint =
+                    "Shared-knowledge plane lives under context/ (read via daxter_context_get / _list / _search). " +
+                    "When asking a question about a workspace or Fabric SQL endpoint, the relevant context cards " +
+                    "are auto-attached to the response of daxter_query / daxter_sql_query — no extra call needed.",
+            },
             new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -727,7 +777,15 @@ internal static class DaxterToolRuntime
             var database = match[2]?.ToString() ?? "";
             var client = new FabricSqlClient(msal);
             var result = await client.ExecuteAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), ct);
-            return Format(result);
+            var primary = Format(result);
+
+            // Phase 4 — auto-attach: pull any context cards under workspaces/{ws}/ and
+            // endpoints/{ws}/{endpoint}/. Falls through silently on any failure (the SQL result
+            // is what the agent needs; context is a bonus).
+            var footer = await ContextAutoAttachFooterAsync(ct,
+                string.IsNullOrWhiteSpace(config.Workspace) ? null : $"workspaces/{config.Workspace}",
+                $"endpoints/{config.Workspace}/{endpointName}");
+            return primary + footer;
         });
 
     /// <summary>Config for tenant-level ops (list workspaces, gateways, sign-in) — no workspace needed.</summary>
@@ -1068,6 +1126,12 @@ internal static class DaxterToolRuntime
     private static readonly Lazy<LocalArtifactStore> ArtifactsLazy = new(() => new LocalArtifactStore());
     public static IArtifactStore Artifacts => ArtifactsLazy.Value;
 
+    // Phase 4 — the shared-knowledge layer. Wraps the same artifact store; conventionally lives
+    // under `context/`. The Lazy<> ensures the long-lived MCP server uses one ContextService
+    // instance (matching the artifact singleton), while one-shot CLI invocations get their own.
+    private static readonly Lazy<ContextService> ContextLazy = new(() => new ContextService(ArtifactsLazy.Value));
+    public static ContextService Context => ContextLazy.Value;
+
     /// <summary>List artifacts as a JSON envelope the agent can iterate. Returns up to
     /// <see cref="RowCap"/> entries (then truncates) so a large store can't blow the context.</summary>
     public static Task<string> ArtifactListAsync(string? prefix, CancellationToken ct)
@@ -1397,4 +1461,145 @@ internal static class DaxterToolRuntime
                 throw new DaxterException("zipBase64 is not valid base64.");
             }
         });
+
+    // ── Context (shared knowledge plane) — Phase 4 ────────────────────────────────────────────
+    // Thin MCP envelopes over ContextService. Same Guard-pattern as everything else; results
+    // are JSON envelopes the agent can read directly. _put is NOT marked Destructive (these
+    // are user-curated facts, not Power BI mutations) but the description tells agents to
+    // confirm with the user before writing — same etiquette as artifact_delete.
+
+    public static Task<string> ContextListAsync(string? namespacePath, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var entries = await Context.ListAsync(namespacePath, ct);
+            return JsonSerializer.Serialize(new
+            {
+                requested_namespace = namespacePath,
+                count = entries.Count,
+                entries = entries.Select(e => new
+                {
+                    key = e.Key,
+                    @namespace = e.Namespace,
+                    bytes = e.Bytes,
+                    created_utc = e.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    expires_utc = e.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    source_tool = e.SourceTool,
+                }),
+            }, new JsonSerializerOptions { WriteIndented = true });
+        });
+
+    public static Task<string> ContextGetAsync(string key, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var (content, entry, tooBig) = await Context.GetAsync(key, ct);
+            return JsonSerializer.Serialize(new
+            {
+                key = entry.Key,
+                @namespace = entry.Namespace,
+                bytes = entry.Bytes,
+                created_utc = entry.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                expires_utc = entry.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                source_tool = entry.SourceTool,
+                too_large_for_inline = tooBig,
+                content,
+                hint = tooBig
+                    ? "Body exceeds inline limit (1 MB) — fetch via GET /api/artifacts/context/{key} on the DAXter web host."
+                    : null,
+            }, new JsonSerializerOptions { WriteIndented = true });
+        });
+
+    public static Task<string> ContextPutAsync(
+        string key, string content, string? sourceTool, double? ttlHours, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrEmpty(content))
+                throw new DaxterException("content is required — context entries store TEXT (not files; use daxter_artifact_put for bytes).");
+            var entry = await Context.PutAsync(key, content, sourceTool, ttlHours, ct);
+            return JsonSerializer.Serialize(new
+            {
+                key = entry.Key,
+                @namespace = entry.Namespace,
+                bytes = entry.Bytes,
+                created_utc = entry.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                expires_utc = entry.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                source_tool = entry.SourceTool,
+            }, new JsonSerializerOptions { WriteIndented = true });
+        });
+
+    public static Task<string> ContextSearchAsync(string query, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var hits = await Context.SearchAsync(query, ct);
+            return JsonSerializer.Serialize(new
+            {
+                query,
+                hit_count = hits.Count,
+                hits = hits.Select(h => new
+                {
+                    key = h.Key,
+                    @namespace = h.Namespace,
+                    match_count = h.MatchCount,
+                    snippet = h.Snippet,
+                }),
+            }, new JsonSerializerOptions { WriteIndented = true });
+        });
+
+    public static Task<string> ContextDeleteAsync(string keyOrNamespace, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var removed = await Context.DeleteAsync(keyOrNamespace, ct);
+            return removed == 0
+                ? $"Nothing matched '{keyOrNamespace}'."
+                : $"Removed {removed} context entr{(removed == 1 ? "y" : "ies")} under '{keyOrNamespace}'.";
+        });
+
+    // ── Auto-attach helper — Phase 4 ──────────────────────────────────────────────────────────
+    // The "kill move" — when the agent calls daxter_query on workspace X, the response carries
+    // any relevant context cards for that workspace, no extra round-trip. Cheap: a single
+    // ListAsync hit per call (cached at the file-system level), then a bounded read per match.
+    //
+    // Returns a footer string to APPEND to the tool's primary response. Empty string when there's
+    // no matching context. The tools that opt in do:
+    //     var result = await op();
+    //     return result + await ContextAutoAttachFooterAsync("workspaces/{ws}", "datasets/{ws}/{ds}");
+    //
+    // We never INSERT into the structured result (which is JSON the agent parses) — context
+    // arrives as a trailing comment block the agent reads as part of the response text.
+
+    internal static async Task<string> ContextAutoAttachFooterAsync(
+        CancellationToken ct, params string?[] namespaces)
+    {
+        var live = namespaces.Where(s => !string.IsNullOrWhiteSpace(s)).Cast<string>().ToArray();
+        if (live.Length == 0) return "";
+        var sb = new StringBuilder();
+        try
+        {
+            foreach (var ns in live)
+            {
+                var entries = await Context.ListAsync(ns, ct);
+                if (entries.Count == 0) continue;
+                foreach (var e in entries)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    // Bounded fetch — a 5MB markdown shouldn't tail-bomb a query response.
+                    if (e.Bytes > 64 * 1024) continue;
+                    var (content, _, tooBig) = await Context.GetAsync(e.Key, ct);
+                    if (tooBig || string.IsNullOrEmpty(content)) continue;
+                    if (sb.Length == 0)
+                    {
+                        sb.AppendLine().AppendLine();
+                        sb.AppendLine("/* ────── attached context (curated team knowledge for this target) ────── */");
+                    }
+                    sb.AppendLine().AppendLine($"/* context: {e.Key}  (source: {e.SourceTool ?? "—"}, {e.Bytes:N0} B) */");
+                    sb.AppendLine(content.TrimEnd());
+                }
+            }
+        }
+        catch
+        {
+            // Auto-attach is a nice-to-have. NEVER let a context-store hiccup tank the agent's
+            // primary tool call. Swallow + return whatever we had so far.
+        }
+        return sb.ToString();
+    }
 }
