@@ -6,6 +6,55 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-06-09
+
+### Added
+- **Artifact-store write path.** Round-trip is now bidirectional — Phase 1's read path is
+  paired with put + extract + on-demand purge across every surface.
+- **Two new MCP tools:**
+  - **`daxter_artifact_put`** — store one file at a key. Dual-mode payload: inline
+    `contentBase64` (small) OR `fetchUrl` the daemon GETs (large, no MCP-message budget
+    impact). Optional `ttlHours` attaches an expiry; `sourceTool` stamps provenance.
+    Quota refusal becomes a clean `REFUSED — …` message naming the budget.
+  - **`daxter_artifact_extract`** — unzip an archive into a key prefix. Every entry
+    becomes a separate artifact at `<keyPrefix>/<entry.path>`. Same dual-mode + TTL +
+    source-tool plumbing as `_put`. Closes the upload side of Diego's alignment loop —
+    `powerbi-alignment-fix` zips a corrected PBIR, calls `daxter_artifact_extract`, and
+    Phase 3's `daxter_update_report_definition` will publish from there.
+- **Three new CLI verbs** under `daxter artifact`:
+  - `put <key> <file> [--ttl-hours N] [--source-tool LABEL]`
+  - `extract <prefix> <zip> [--ttl-hours N] [--source-tool LABEL]`
+  - `purge-expired` — on-demand TTL sweep
+- **`POST /api/artifacts/{*key}` streaming upload endpoint** (web host). Accepts the raw
+  request body; `?extract=1` routes through `ExtractAsync`; `?ttl_hours=N` attaches a TTL;
+  `X-Daxter-Source-Tool` header sets provenance. Returns the JSON `ArtifactRef`. Status
+  codes are surface-correct: `400` for bad key, `413 Payload Too Large` for quota refusal,
+  `500` for everything else.
+- **`DELETE /api/artifacts/{*key}` endpoint** — REST-symmetric counterpart to the GET. The
+  Razor page still uses the bridge directly; this is here for external agents.
+- **`ArtifactPurgeHostedService`** — background tick that sweeps expired artifacts every
+  6 hours (default; override via `DAXTER_ARTIFACTS_PURGE_HOURS`, set to `0` to disable).
+  Logs bytes freed; non-fatal on failure (retries next tick). Without this, TTL-tagged
+  artifacts only purged on user-initiated `/artifacts` clicks — fine for a laptop, bad
+  for a long-running deployment.
+
+### Tests
+- **7 new MCP-runtime tests** (`ArtifactMcpRuntimeTests`) — inline base64 round-trip,
+  zip-extract round-trip, dual-mode validation (refuses both content+url; refuses neither),
+  invalid base64, invalid key escape. All routed through the same singleton
+  `DaxterToolRuntime.Artifacts` the real MCP server uses.
+- **Total: 301 tests passing** (was 294 in v1.31.0).
+
+### Notes
+- Phase 3 (`v1.33.0`) lands the Fabric write-backs —
+  `daxter_update_report_definition`, `_notebook_definition`, `_copy_job_definition` —
+  which together with the now-complete artifact-store round-trip close Diego's
+  alignment-fix loop end-to-end (export → fix locally → upload corrected to Fabric, no
+  Power BI Desktop).
+- Per-source-tool stamps now flow through every put (CLI `--source-tool`, MCP
+  `sourceTool`, HTTP `X-Daxter-Source-Tool`). The `/artifacts` page surfaces it so the
+  user can see which tool produced each entry.
+
 ## [1.31.0] - 2026-06-09
 
 ### Added

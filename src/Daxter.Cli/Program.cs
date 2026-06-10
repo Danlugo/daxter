@@ -1981,11 +1981,40 @@ internal static class Program
         var rm = new Command("rm", "Delete one artifact or an entire prefix.") { rmKeyArg, rmYesOpt };
         rm.SetAction((pr, ct) => RunArtifactRmAsync(pr.GetValue(rmKeyArg)!, pr.GetValue(rmYesOpt), ct));
 
+        // put — Phase 2. Streams a local file INTO the store at <key>. Optional --ttl-hours
+        // attaches an expiry so the nightly purge sweeps it; --source-tool stamps provenance.
+        var putKeyArg = new Argument<string>("key") { Description = "Artifact key to write to (forward-slash path)." };
+        var putFileArg = new Argument<string>("file") { Description = "Local file path whose contents become the artifact." };
+        var putTtlOpt = new Option<double?>("--ttl-hours") { Description = "Attach a TTL — artifact expires after this many hours; the nightly purge will sweep it." };
+        var putSourceOpt = new Option<string?>("--source-tool") { Description = "Source-tool label that shows up on /artifacts." };
+        var put = new Command("put", "Upload one local file into the artifact store.") { putKeyArg, putFileArg, putTtlOpt, putSourceOpt };
+        put.SetAction((pr, ct) => RunArtifactPutAsync(
+            pr.GetValue(putKeyArg)!, pr.GetValue(putFileArg)!,
+            pr.GetValue(putTtlOpt), pr.GetValue(putSourceOpt), ct));
+
+        // extract — Phase 2. Unzips a local zip file INTO the store under a key prefix; each
+        // entry becomes a separate artifact at <prefix>/<entry-path>. Same TTL/source-tool
+        // plumbing as put.
+        var extPrefixArg = new Argument<string>("prefix") { Description = "Key prefix to unzip into (e.g. 'alignment/sales-dashboard-fixed')." };
+        var extZipArg = new Argument<string>("zip") { Description = "Local zip file." };
+        var extTtlOpt = new Option<double?>("--ttl-hours") { Description = "Every entry inherits this TTL." };
+        var extSourceOpt = new Option<string?>("--source-tool") { Description = "Source-tool label." };
+        var extract = new Command("extract", "Unzip a local archive INTO the store under a key prefix.")
+            { extPrefixArg, extZipArg, extTtlOpt, extSourceOpt };
+        extract.SetAction((pr, ct) => RunArtifactExtractAsync(
+            pr.GetValue(extPrefixArg)!, pr.GetValue(extZipArg)!,
+            pr.GetValue(extTtlOpt), pr.GetValue(extSourceOpt), ct));
+
+        // purge-expired — Phase 2. On-demand sweep of every TTL-expired entry. Mirrors the
+        // /artifacts page button + the nightly hosted-service tick.
+        var purge = new Command("purge-expired", "Delete every artifact whose TTL is in the past. Returns bytes freed.");
+        purge.SetAction((_, ct) => RunArtifactPurgeAsync(ct));
+
         return new Command("artifact",
-            "Local artifact store — list / download / zip-bundle / inspect / delete. The transport-agnostic " +
-            "file plane DAXter uses to ferry bytes between itself and the agent (PBIR exports, SQL CSVs, " +
-            "future definition uploads). Phase 1 = read + delete; Phase 2 adds put + extract.")
-        { ls, get, bundle, meta, rm };
+            "Local artifact store — list / get / bundle / meta / put / extract / rm / purge-expired. " +
+            "The transport-agnostic file plane DAXter uses to ferry bytes between itself and the agent " +
+            "(PBIR exports, SQL CSVs, definition uploads). Phase 1 added read + delete; Phase 2 adds put + extract + purge.")
+        { ls, get, bundle, meta, rm, put, extract, purge };
     }
 
     private static async Task<int> RunArtifactListAsync(string? prefix, Func<string?> outputFactory, CancellationToken ct)
@@ -2083,6 +2112,64 @@ internal static class Program
             }
             var removed = await store.DeleteAsync(prefix, ct);
             Console.Error.WriteLine($"Removed {removed} artifact(s).");
+            return 0;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactPutAsync(string key, string file, double? ttlHours, string? sourceTool, CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(file)) throw new DaxterException($"File not found: {file}");
+            var store = new LocalArtifactStore();
+            var meta = new ArtifactMeta(
+                ExpiresAt: ttlHours is { } h && h > 0 ? DateTime.UtcNow.AddHours(h) : null,
+                SourceTool: sourceTool ?? "daxter_cli");
+            await using var fs = File.OpenRead(file);
+            var aref = await store.PutAsync(key, fs, meta, ct);
+            Console.Error.WriteLine($"Stored '{aref.Key}' ({aref.Bytes:N0} bytes" +
+                (aref.ExpiresAt is { } e ? $", expires {e:yyyy-MM-dd HH:mm:ss}Z" : "") +
+                $", source_tool={aref.SourceTool}).");
+            return 0;
+        }
+        catch (ArtifactQuotaExceededException ex)
+        {
+            Console.Error.WriteLine($"daxter: {ex.Message}");
+            return 1;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactExtractAsync(string prefix, string zip, double? ttlHours, string? sourceTool, CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(zip)) throw new DaxterException($"Zip not found: {zip}");
+            var store = new LocalArtifactStore();
+            var meta = new ArtifactMeta(
+                ExpiresAt: ttlHours is { } h && h > 0 ? DateTime.UtcNow.AddHours(h) : null,
+                SourceTool: sourceTool ?? "daxter_cli");
+            await using var fs = File.OpenRead(zip);
+            var written = await store.ExtractAsync(prefix, fs, meta, ct);
+            Console.Error.WriteLine($"Extracted {written.Count} entries ({written.Sum(w => w.Bytes):N0} bytes) under '{prefix}'.");
+            return 0;
+        }
+        catch (ArtifactQuotaExceededException ex)
+        {
+            Console.Error.WriteLine($"daxter: {ex.Message}");
+            return 1;
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    private static async Task<int> RunArtifactPurgeAsync(CancellationToken ct)
+    {
+        try
+        {
+            var store = new LocalArtifactStore();
+            var bytes = await store.PurgeExpiredAsync(ct);
+            Console.Error.WriteLine($"Purge freed {bytes:N0} bytes.");
             return 0;
         }
         catch (Exception ex) { return Fail(ex); }

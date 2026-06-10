@@ -16,6 +16,9 @@ builder.Services.AddScoped<ExploreActions>();
 // ~/.daxter/artifacts/ (override via DAXTER_ARTIFACTS_ROOT) with a 5GB default cap (override
 // via DAXTER_ARTIFACTS_QUOTA_MB).
 builder.Services.AddSingleton<IArtifactStore>(_ => new LocalArtifactStore());
+// TTL purge — sweeps expired artifacts every 6 hours by default
+// (DAXTER_ARTIFACTS_PURGE_HOURS to override; 0 to disable). Phase 2 addition.
+builder.Services.AddHostedService<ArtifactPurgeHostedService>();
 
 // Update check (GitHub releases) — GitHub requires a User-Agent.
 builder.Services.AddHttpClient("github", c =>

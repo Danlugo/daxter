@@ -336,3 +336,21 @@ Quota + root are env-controlled — defaults are 5 GB at `~/.daxter/artifacts/`:
 # Override on the docker run (the daxter-tokens volume already mounts ~/.daxter):
 docker run -e DAXTER_ARTIFACTS_QUOTA_MB=20480 -e DAXTER_ARTIFACTS_ROOT=/data/daxter-artifacts ...
 ```
+
+### Phase 2 — write path (`put` / `extract` / `purge-expired`)
+
+```bash
+# Put one file into the store with an optional TTL + source-tool stamp:
+./bin/daxter artifact put reports/fixed/page.json ./corrected-page.json \
+  --ttl-hours 48 --source-tool powerbi_alignment_fix
+
+# Unzip a corrected PBIR archive INTO the store under a prefix:
+./bin/daxter artifact extract alignment/sales-dashboard-fixed ./corrected.zip \
+  --ttl-hours 24 --source-tool powerbi_alignment_fix
+
+# On-demand sweep of every expired entry (mirrors the nightly purge):
+./bin/daxter artifact purge-expired
+```
+
+The Web host runs an `ArtifactPurgeHostedService` every 6 hours by default
+(`DAXTER_ARTIFACTS_PURGE_HOURS` env, set to `0` to disable).

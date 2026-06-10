@@ -1201,4 +1201,121 @@ internal static class DaxterToolRuntime
             var removed = await Artifacts.DeleteAsync(keyPrefix, ct);
             return $"Removed {removed} artifact(s) ({hits.Sum(h => h.Bytes):N0} bytes) under '{keyPrefix}'.";
         });
+
+    /// <summary>Put bytes into the store. Accepts EITHER inline base64 content (small payloads,
+    /// avoids a second HTTP round-trip) OR a URL the daemon fetches (large payloads, agent
+    /// uploads to HTTPS and just passes the URL). Source-tool stamp + optional TTL flow through
+    /// to the metadata index. Quota refusal becomes a typed error the agent can show as a
+    /// "delete some artifacts first" hint.</summary>
+    public static Task<string> ArtifactPutAsync(
+        string key, string? contentBase64, string? fetchUrl, double? ttlHours, string? sourceTool,
+        CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new DaxterException("key is required (forward-slash path, e.g. 'reports/fixed/page.json').");
+            // Exactly one of content / url must be set — otherwise the tool's behaviour is
+            // ambiguous. Empty body would mean "create a 0-byte file" which is rarely useful.
+            var hasContent = !string.IsNullOrEmpty(contentBase64);
+            var hasUrl = !string.IsNullOrEmpty(fetchUrl);
+            if (hasContent == hasUrl)
+                throw new DaxterException("Pass exactly one of contentBase64 (inline) OR fetchUrl (daemon fetches).");
+
+            var meta = new ArtifactMeta(
+                ExpiresAt: ttlHours is { } h && h > 0 ? DateTime.UtcNow.AddHours(h) : null,
+                SourceTool: sourceTool ?? "daxter_artifact_put");
+
+            try
+            {
+                ArtifactRef aref;
+                if (hasContent)
+                {
+                    var bytes = Convert.FromBase64String(contentBase64!);
+                    aref = await Artifacts.PutAsync(key, new MemoryStream(bytes), meta, ct);
+                }
+                else
+                {
+                    // Url-fetch path — for payloads too big to drop into MCP messages. Note
+                    // that this is the DAEMON's outbound fetch, not the agent's; the URL must
+                    // be reachable from inside the DAXter container.
+                    using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                    await using var stream = await http.GetStreamAsync(fetchUrl, ct);
+                    aref = await Artifacts.PutAsync(key, stream, meta, ct);
+                }
+                return System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    key = aref.Key,
+                    bytes = aref.Bytes,
+                    created_utc = aref.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    expires_utc = aref.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    source_tool = aref.SourceTool,
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (ArtifactQuotaExceededException ex)
+            {
+                return $"REFUSED — {ex.Message} Run daxter_artifact_list to see what's eating the budget; daxter_artifact_delete to free space.";
+            }
+            catch (InvalidArtifactKeyException ex)
+            {
+                throw new DaxterException(ex.Message);
+            }
+            catch (FormatException)
+            {
+                throw new DaxterException("contentBase64 is not valid base64.");
+            }
+        });
+
+    /// <summary>Unzip a zip payload into the store under a key prefix. Accepts inline base64
+    /// (small archives) OR a URL (large archives). Returns the count + per-entry summary so the
+    /// agent can confirm what landed. Same TTL + source-tool plumbing as Put.</summary>
+    public static Task<string> ArtifactExtractAsync(
+        string keyPrefix, string? zipBase64, string? fetchUrl, double? ttlHours, string? sourceTool,
+        CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(keyPrefix))
+                throw new DaxterException("keyPrefix is required (e.g. 'alignment/sales-dashboard-fixed').");
+            var hasContent = !string.IsNullOrEmpty(zipBase64);
+            var hasUrl = !string.IsNullOrEmpty(fetchUrl);
+            if (hasContent == hasUrl)
+                throw new DaxterException("Pass exactly one of zipBase64 (inline) OR fetchUrl (daemon fetches).");
+
+            var meta = new ArtifactMeta(
+                ExpiresAt: ttlHours is { } h && h > 0 ? DateTime.UtcNow.AddHours(h) : null,
+                SourceTool: sourceTool ?? "daxter_artifact_extract");
+            try
+            {
+                IReadOnlyList<ArtifactRef> written;
+                if (hasContent)
+                {
+                    var bytes = Convert.FromBase64String(zipBase64!);
+                    written = await Artifacts.ExtractAsync(keyPrefix, new MemoryStream(bytes), meta, ct);
+                }
+                else
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                    await using var stream = await http.GetStreamAsync(fetchUrl, ct);
+                    written = await Artifacts.ExtractAsync(keyPrefix, stream, meta, ct);
+                }
+                return System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    prefix = keyPrefix,
+                    extracted = written.Count,
+                    total_bytes = written.Sum(w => w.Bytes),
+                    keys = written.Select(w => w.Key),
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (ArtifactQuotaExceededException ex)
+            {
+                return $"REFUSED — {ex.Message} Run daxter_artifact_list to see what's eating the budget; daxter_artifact_delete to free space.";
+            }
+            catch (InvalidArtifactKeyException ex)
+            {
+                throw new DaxterException(ex.Message);
+            }
+            catch (FormatException)
+            {
+                throw new DaxterException("zipBase64 is not valid base64.");
+            }
+        });
 }

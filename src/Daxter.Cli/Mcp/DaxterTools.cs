@@ -899,4 +899,37 @@ public static class DaxterTools
         [Description("Artifact key OR key prefix (deletes everything under it).")] string keyPrefix,
         CancellationToken ct = default)
         => DaxterToolRuntime.ArtifactDeleteAsync(keyPrefix, ct);
+
+    [McpServerTool(Name = "daxter_artifact_put", Title = "Upload one file into the artifact store"),
+     Description("Upload bytes INTO the artifact store. Pass EITHER `contentBase64` (inline — best for small payloads " +
+                 "≤ a few MB) OR `fetchUrl` (the DAXter daemon fetches the URL itself — best for big files; the URL " +
+                 "must be reachable from inside the DAXter container). Optional `ttlHours` attaches a TTL so the " +
+                 "nightly purge sweeps it; omit for an immortal artifact. Source-tool stamp defaults to 'daxter_artifact_put' " +
+                 "— override via `sourceTool` (e.g. 'powerbi_alignment_fix') so the /artifacts page shows provenance. " +
+                 "Returns the stored ArtifactRef (key, bytes, created_utc, expires_utc, source_tool). " +
+                 "Quota refusal is returned as a REFUSED message — list/delete to free space, then retry.")]
+    public static Task<string> ArtifactPut(
+        [Description("Artifact key — forward-slash path, e.g. 'reports/sales/page.json'.")] string key,
+        [Description("Inline payload as base64 (pick this for small content). Mutually exclusive with fetchUrl.")] string? contentBase64 = null,
+        [Description("URL the DAXter daemon will GET to obtain the payload (pick this for large content). Mutually exclusive with contentBase64.")] string? fetchUrl = null,
+        [Description("Optional TTL in hours — artifact expires and is swept by the nightly purge.")] double? ttlHours = null,
+        [Description("Optional source-tool label, e.g. 'powerbi_alignment_fix'.")] string? sourceTool = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactPutAsync(key, contentBase64, fetchUrl, ttlHours, sourceTool, ct);
+
+    [McpServerTool(Name = "daxter_artifact_extract", Title = "Unzip an archive into the artifact store"),
+     Description("Unzip a zip archive INTO the artifact store under a key prefix — every entry becomes a separate " +
+                 "artifact at `<keyPrefix>/<entry.path>`. Same dual-mode payload as daxter_artifact_put: pass " +
+                 "EITHER `zipBase64` (inline) OR `fetchUrl` (daemon fetches). The typical flow for the Power BI " +
+                 "alignment workflow: powerbi-alignment-fix produces a corrected PBIR folder → zip it → " +
+                 "extract here under 'alignment/sales-dashboard-fixed' → Phase 3 daxter_update_report_definition " +
+                 "pushes it back to Fabric. Same TTL + source-tool plumbing as Put.")]
+    public static Task<string> ArtifactExtract(
+        [Description("Key prefix to unzip into, e.g. 'alignment/sales-dashboard-fixed'.")] string keyPrefix,
+        [Description("Inline zip payload as base64. Mutually exclusive with fetchUrl.")] string? zipBase64 = null,
+        [Description("URL the DAXter daemon will GET to obtain the zip. Mutually exclusive with zipBase64.")] string? fetchUrl = null,
+        [Description("Optional TTL in hours — every extracted entry inherits this expiry.")] double? ttlHours = null,
+        [Description("Optional source-tool label, e.g. 'powerbi_alignment_fix'.")] string? sourceTool = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.ArtifactExtractAsync(keyPrefix, zipBase64, fetchUrl, ttlHours, sourceTool, ct);
 }

@@ -22,8 +22,19 @@ public static class ArtifactsEndpoint
 
         // Stream a single artifact OR a zip bundle of a prefix when ?bundle=1.
         // The {key} route value captures the full slash-separated path — that's why the route
-        // template has the catch-all {*key}, mirroring how S3 / Azure Blob key paths work.
+        // template has the catch-all {**key}, mirroring how S3 / Azure Blob key paths work.
         app.MapGet("/api/artifacts/{**key}", GetAsync).DisableAntiforgery();
+
+        // PUT-as-POST upload (browsers can't multipart from <form> easily; this accepts the raw
+        // request body). ?extract=1 routes it through ArtifactStore.ExtractAsync — unzipping the
+        // body into the key prefix instead of storing it as a single file. Optional ?ttl_hours=
+        // attaches a TTL so the nightly purge sweeps it.
+        app.MapPost("/api/artifacts/{**key}", PutAsync).DisableAntiforgery();
+
+        // Explicit DELETE — paired with the GET so the URL surface is REST-symmetric. The
+        // Web /artifacts page already does this via the bridge; the HTTP path is here for
+        // external agents that prefer a uniform REST API.
+        app.MapDelete("/api/artifacts/{**key}", DeleteAsync).DisableAntiforgery();
     }
 
     /// <summary>List endpoint. Returns the same ArtifactRef shape the bridge exposes, as JSON.
@@ -129,6 +140,116 @@ public static class ArtifactsEndpoint
             // to a 5xx. Best effort: log + let the response close short. The HTTP client sees a
             // truncated body.
             log.LogWarning(ex, "Artifact stream failed mid-flight: {Key}", key);
+        }
+    }
+
+    /// <summary>Streaming upload — the body becomes the artifact's bytes (or a zip whose entries
+    /// become artifacts under the key prefix when <c>?extract=1</c>). Source-tool stamp comes
+    /// from the <c>X-Daxter-Source-Tool</c> header so the /artifacts page can label provenance.
+    /// </summary>
+    private static async Task PutAsync(
+        string key,
+        bool? extract,
+        double? ttl_hours,
+        DaxterUi ui,
+        HttpRequest request,
+        HttpResponse response,
+        ILogger<Marker> log,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsync("key is required.", ct);
+            return;
+        }
+
+        var sourceTool = request.Headers.TryGetValue("X-Daxter-Source-Tool", out var v)
+            ? v.ToString() : "http_post";
+        var meta = new ArtifactMeta(
+            ExpiresAt: ttl_hours is { } h && h > 0 ? DateTime.UtcNow.AddHours(h) : null,
+            SourceTool: sourceTool);
+
+        try
+        {
+            if (extract == true)
+            {
+                // Zip-extract path — every entry inside the body lands under the key prefix.
+                var written = await ui.ArtifactStore.ExtractAsync(key, request.Body, meta, ct);
+                response.ContentType = "application/json; charset=utf-8";
+                await System.Text.Json.JsonSerializer.SerializeAsync(response.Body, new
+                {
+                    extracted = written.Count,
+                    total_bytes = written.Sum(w => w.Bytes),
+                    prefix = key,
+                }, cancellationToken: ct);
+                log.LogInformation("Artifact extracted: prefix={Key}, files={Count}", key, written.Count);
+                return;
+            }
+
+            // Single-file put — stream the body straight to the store.
+            var aref = await ui.ArtifactStore.PutAsync(key, request.Body, meta, ct);
+            response.ContentType = "application/json; charset=utf-8";
+            await System.Text.Json.JsonSerializer.SerializeAsync(response.Body, new
+            {
+                key = aref.Key,
+                bytes = aref.Bytes,
+                created_utc = aref.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                expires_utc = aref.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                source_tool = aref.SourceTool,
+            }, cancellationToken: ct);
+            log.LogInformation("Artifact put: key={Key}, bytes={Bytes}", aref.Key, aref.Bytes);
+        }
+        catch (InvalidArtifactKeyException ex)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsync(ex.Message, ct);
+        }
+        catch (ArtifactQuotaExceededException ex)
+        {
+            response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            await response.WriteAsync(ex.Message, ct);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Artifact put failed: {Key}", key);
+            response.StatusCode = StatusCodes.Status500InternalServerError;
+            await response.WriteAsync($"Put failed: {ex.Message}", ct);
+        }
+    }
+
+    /// <summary>DELETE counterpart to GET — same key/prefix semantics. The Razor page uses the
+    /// bridge directly; this exists for external agents that prefer pure REST.</summary>
+    private static async Task DeleteAsync(
+        string key,
+        DaxterUi ui,
+        HttpResponse response,
+        ILogger<Marker> log,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsync("key is required.", ct);
+            return;
+        }
+        try
+        {
+            var removed = await ui.ArtifactsDeleteAsync(key, ct);
+            response.ContentType = "application/json; charset=utf-8";
+            await System.Text.Json.JsonSerializer.SerializeAsync(response.Body, new { removed, key }, cancellationToken: ct);
+            log.LogInformation("Artifact deleted: key={Key}, removed={Removed}", key, removed);
+        }
+        catch (InvalidArtifactKeyException ex)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsync(ex.Message, ct);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Artifact delete failed: {Key}", key);
+            response.StatusCode = StatusCodes.Status500InternalServerError;
+            await response.WriteAsync($"Delete failed: {ex.Message}", ct);
         }
     }
 

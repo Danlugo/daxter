@@ -277,3 +277,29 @@ Claude: → daxter_artifact_bundle  prefix: "alignment/sales-dashboard"
 Claude runs powerbi-alignment-check on the unzipped folder (Diego's skill).
 Phase 3 (future): `daxter_update_report_definition` to upload corrected files back.
 ```
+
+### Phase 2 — write path (`daxter_artifact_put` / `_extract`)
+
+Both tools take EITHER inline `contentBase64` / `zipBase64` (small) OR a `fetchUrl` the
+DAXter daemon will GET (large; the URL must be reachable from inside the container).
+Optional `ttlHours` + `sourceTool` flow through to the metadata index.
+
+| Ask | Tool |
+|---|---|
+| "Upload my corrected page.json under reports/fixed/page.json" | `daxter_artifact_put` with `key: …`, `contentBase64: …`, `sourceTool: "powerbi_alignment_fix"` |
+| "Take this zip of a corrected PBIR folder and put it under alignment/sales-dashboard-fixed" | `daxter_artifact_extract` with `keyPrefix: …`, `zipBase64: …` |
+| "Fetch this 200 MB .pbix from https://… into the store" | `daxter_artifact_put` with `fetchUrl: …` (no MCP payload size limit) |
+
+Quota refusal returns a clean **REFUSED** message naming the byte budget — pair with
+`daxter_artifact_list` + `_delete` to free space, then retry.
+
+### End-to-end with Phase 2: Diego's full alignment loop except the last step
+
+```text
+You:    "Pull the Sales Dashboard PBIR, run alignment-fix, then upload the corrected folder."
+Claude: → daxter_export_report  artifact_key:"alignment/sales-dashboard"
+        → daxter_artifact_bundle prefix:"alignment/sales-dashboard"
+        ↳ unzipped to a temp folder; powerbi-alignment-fix runs on it
+        → daxter_artifact_extract keyPrefix:"alignment/sales-dashboard-fixed", zipBase64:<corrected>
+        ↳ ready for Phase 3's daxter_update_report_definition to push back to Fabric.
+```
