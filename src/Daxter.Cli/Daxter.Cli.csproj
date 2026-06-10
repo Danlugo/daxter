@@ -12,7 +12,20 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
     <PackageReference Include="ModelContextProtocol" Version="1.3.0" />
+    <!-- v1.38.0 — Streamable HTTP MCP transport (delivers Semantix wishlist #1).
+         Provides .WithHttpTransport() on IMcpServerBuilder and .MapMcp(path) on
+         IEndpointRouteBuilder, hosted on the same Kestrel app as our /healthz endpoint. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.3.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.8" />
+  </ItemGroup>
+
+  <!-- v1.38.0 — pull in ASP.NET Core so HttpMcpServer can host Kestrel + the MCP HTTP
+       transport from inside the CLI process. Stays an executable console app
+       (Microsoft.NET.Sdk), not a web app — just gains access to WebApplication, Kestrel,
+       middleware, HttpContext. The aspnet runtime is already present in our runtime image
+       (mcr.microsoft.com/dotnet/aspnet:8.0) so this adds no extra image size. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <PropertyGroup>

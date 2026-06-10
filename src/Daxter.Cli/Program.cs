@@ -108,8 +108,44 @@ internal static class Program
         var artifactCommand = BuildArtifactCommand(outputOption);
         var contextCommand = BuildContextCommand(outputOption);
 
-        var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol (stdio) server.");
-        mcpCommand.SetAction((_, ct) => Mcp.McpServer.RunAsync(ct));
+        // mcp — by default the stdio MCP server (existing v1.x behaviour, untouched).
+        // v1.38.0 added optional --http for native Streamable-HTTP transport with bearer auth:
+        //   daxter mcp --http --port 8000 --http-path /mcp/clienta
+        // Plus a subcommand `daxter mcp rotate-token` to regenerate the self-generated fallback
+        // token (Semantix-managed tokens use the env-var path; rotation = restart with new env).
+        var mcpHttpOpt = new Option<bool>("--http")
+            { Description = "Serve MCP over HTTP (Streamable-HTTP transport) instead of stdio. Off by default (stdio mode preserves the v1.x behaviour Semantix relies on)." };
+        var mcpPortOpt = new Option<int>("--port")
+            { Description = "HTTP port to bind when --http is set.", DefaultValueFactory = _ =>
+                int.TryParse(Environment.GetEnvironmentVariable("DAXTER_MCP_HTTP_PORT"), out var p) ? p : Mcp.HttpMcpServer.DefaultPort };
+        var mcpPathOpt = new Option<string>("--http-path")
+            { Description = "URL path the MCP transport mounts at (e.g. /mcp/clienta for Semantix-style routing).",
+              DefaultValueFactory = _ => Environment.GetEnvironmentVariable("DAXTER_MCP_HTTP_PATH") ?? Mcp.HttpMcpServer.DefaultPath };
+        var mcpNoAuthOpt = new Option<bool>("--no-auth")
+            { Description = "DEV ONLY — skip the bearer-token check on --http mode. Never use in a hosted/multi-tenant deployment." };
+
+        var mcpCommand = new Command("mcp", "Run DAXter as a Model Context Protocol server (stdio by default; --http for native HTTP transport).")
+            { mcpHttpOpt, mcpPortOpt, mcpPathOpt, mcpNoAuthOpt };
+        mcpCommand.SetAction((pr, ct) =>
+            pr.GetValue(mcpHttpOpt)
+                ? Mcp.HttpMcpServer.RunAsync(pr.GetValue(mcpPortOpt), pr.GetValue(mcpPathOpt)!, pr.GetValue(mcpNoAuthOpt), ct)
+                : Mcp.McpServer.RunAsync(ct));
+
+        // daxter mcp rotate-token — regenerate the self-generated fallback token. No-op
+        // semantically when DAXTER_MCP_BEARER_TOKEN is set (Semantix-managed); the file gets
+        // refreshed but the running container still validates against the env var.
+        var rotateCmd = new Command("rotate-token",
+            "Regenerate the self-generated bearer token at ~/.daxter/mcp-bearer-token. " +
+            "No-op for Semantix-managed deployments (which set DAXTER_MCP_BEARER_TOKEN — " +
+            "the rotation there is `update .env, restart container`).");
+        rotateCmd.SetAction((_, _) =>
+        {
+            var fresh = Mcp.McpBearerToken.Rotate();
+            Console.Error.WriteLine($"Rotated. New token written to {Mcp.McpBearerToken.DefaultPersistPath}.");
+            Console.Out.WriteLine(fresh);   // stdout = the token, so a script can capture it
+            return Task.FromResult(0);
+        });
+        mcpCommand.Subcommands.Add(rotateCmd);
 
         // daxter version — identity card. Mirrors the daxter_version MCP tool.
         var checkLatestOpt = new Option<bool>("--check-latest")

@@ -457,3 +457,19 @@ DAXter's CLI now emits **structured JSON error envelopes** on stderr when invoke
 shell-execs into the gateway container for credential validation) can match on a stable
 `error_code` instead of parsing AADSTS strings. See `examples/cli.md` for the full code
 table and the exit-code semantics. Pure CLI feature — no MCP-tool surface change.
+
+## Native HTTP MCP transport (v1.38.0) — for fleet / hosted deployments
+
+In addition to the default stdio transport (unchanged), `daxter mcp` can serve over native
+Streamable HTTP with bearer-token auth — designed for hosted multi-tenant deployments like
+**Semantix**. See `examples/cli.md` for the full flag table; the short version:
+
+```bash
+DAXTER_MCP_BEARER_TOKEN=sk_… daxter mcp --http --port 8000 --http-path /mcp/<key>
+```
+
+Health probe (always unauthenticated): `GET http://<host>:<port>/healthz` → `200 "ok"`.
+
+The §4.1 "healthy chain" definition from Semantix-for-DAXter.md — an MCP `initialize` over
+the route returning `serverInfo.name = "daxter"` — works natively. No supergateway or
+intermediate stdio bridge needed.

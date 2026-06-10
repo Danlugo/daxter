@@ -6,6 +6,83 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-06-10
+
+### Added — Native Streamable-HTTP MCP transport (Semantix wishlist #1)
+Delivers the biggest item from the Semantix consumer wishlist: `daxter mcp` can now
+serve MCP natively over HTTP with bearer-token auth, eliminating the need for the
+supergateway translator and Caddy's auth shim in front of every per-client container.
+
+- **`daxter mcp --http`** — new flag. Opt-in HTTP mode. Off by default — stdio mode is
+  unchanged, so every existing Claude Desktop install and every existing Semantix gateway
+  container keeps working with zero changes.
+- **CLI flags:** `--port` (default `8000`, matches Semantix's `GATEWAY_PORT`; also read
+  from `DAXTER_MCP_HTTP_PORT`), `--http-path` (default `/mcp`; read from
+  `DAXTER_MCP_HTTP_PATH`), `--no-auth` (dev-only opt-out; the host refuses to start HTTP
+  mode without either a token or this flag).
+- **`daxter mcp rotate-token`** — new subcommand. Regenerates the self-generated
+  fallback token at `~/.daxter/mcp-bearer-token`. No-op for Semantix-managed deployments
+  (rotation there is "update `.env`, restart container").
+- **Bearer-token auth** (`Daxter.Cli.Mcp.McpBearerAuthMiddleware`) — `Authorization:
+  Bearer <token>` parse (RFC 6750, case-insensitive scheme), constant-time compare
+  (`CryptographicOperations.FixedTimeEquals`), **`401 "Unauthorized"`** rejection body
+  **byte-identical to Caddy's `respond "Unauthorized" 401`** so swapping Caddy's auth
+  shim for DAXter's is invisible to clients. `WWW-Authenticate: Bearer realm="daxter-mcp"`
+  on every 401.
+- **Token sourcing** (`Daxter.Cli.Mcp.McpBearerToken`) — priority order:
+  1. `DAXTER_MCP_BEARER_TOKEN` env var (the path Semantix uses)
+  2. `~/.daxter/mcp-bearer-token` persisted file (the solo `daxter mcp --http` fallback;
+     auto-generated on first start, persists across container restarts via the existing
+     token volume, restrictive POSIX perms via `chmod 600`)
+  3. `--no-auth` explicit opt-out (refused otherwise — safety rule)
+- **Token format**: `sk_` + 24 random bytes hex (48 hex chars, ~192 bits entropy).
+  **Matches Semantix's existing `sk_<hex>` shape** so tokens are interoperable. The
+  format is enforced only for self-generation; the validator accepts any non-empty string
+  from the env var, so existing Semantix-minted tokens keep working as-is.
+- **Token redaction** — never log full tokens. The `Redact()` helper truncates to
+  `sk_abc12***` (8-char prefix + `***`) so operators can correlate logs with what they
+  pasted into Semantix without leaking the secret to log aggregators.
+- **`GET /healthz`** — unauthenticated liveness probe, returns `200 "ok"`. Matches
+  supergateway's existing `/healthz` so a Semantix Caddyfile / Container Apps liveness
+  check works without modification.
+- **15 new `McpBearerAuthTests`** pin every contract: 401 body byte-identical to Caddy,
+  WWW-Authenticate header shape, case-insensitive scheme, wrong-scheme rejection,
+  `/healthz` bypass, sub-path protection (`/mcp/clienta/sse`), env > file > generated
+  resolve precedence, token format, redaction behaviour. **Total: 366 tests passing**
+  (was 351 in v1.37.0).
+- **Live HTTP smoke verified end-to-end before release:** `GET /healthz` → `200 "ok"`;
+  no bearer → `401 "Unauthorized"` + `WWW-Authenticate`; wrong bearer → same; correct
+  bearer + MCP `initialize` → `200` with `serverInfo.name = "daxter"` (the §4.1
+  healthy-chain definition from Semantix-for-DAXter.md, proven on the wire).
+
+### What this lets Semantix delete (when migrating to v1.38.0)
+
+| File / behaviour today | Change |
+|---|---|
+| `gateway.Dockerfile` | Shrinks from ~40 lines to **1 line** (`FROM ghcr.io/danlugo/daxter:latest`) — or delete the file entirely and use the DAXter image directly in `docker-compose.gen.yml`. Node 20 install + `npm install -g supergateway` gone. |
+| Gateway image size | Drops ~150 MB per tenant (Node.js + supergateway). |
+| `generate.mjs` Caddyfile per-client `handle ${path}*` block | Replace the bearer-auth check with plain `reverse_proxy ${key}:8000` — Caddy keeps routing; DAXter enforces the token. |
+| `generate.mjs` services-block env injection | Add `DAXTER_MCP_BEARER_TOKEN: ${${P}_TOKEN}` and `command: ["mcp", "--http", "--port", "8000", "--http-path", "${path}"]` to each gateway service. |
+| `generate.mjs` Caddy `<KEY>_TOKEN` env block | Delete — Caddy no longer needs the tokens. |
+| `envfile.mjs`, `clients.json` shape, admin console UI, `POST /api/token` token generation | **Unchanged.** Tokens stay `sk_<hex>`; rotation flow stays "edit `.env`, restart container". |
+
+### Tech notes
+- ASP.NET Core (Kestrel + middleware) hosted from inside the existing CLI executable via
+  `<FrameworkReference Include="Microsoft.AspNetCore.App" />` — no new runtime dependency;
+  the aspnet runtime is already in the image because the Web project uses it.
+- New package: `ModelContextProtocol.AspNetCore` 1.3.0 — the MCP SDK's HTTP transport
+  extension (`.WithHttpTransport()` + `app.MapMcp(path)`). Stdio path is unchanged.
+
+### §4 contract preservation
+- Image at `ghcr.io/danlugo/daxter:latest` — user `daxter`, app `/app/daxter.dll`. ✓
+- `daxter mcp` stdio entry — **unchanged**. Every existing Semantix container that pulls
+  `:latest` keeps working without `--http`. ✓
+- Every existing env var. ✓
+- CLI verbs Semantix shells into. ✓
+- On-disk store at `/home/daxter/.daxter/` (the new `mcp-bearer-token` file lives here
+  too). ✓
+- stdout / stderr discipline. ✓
+
 ## [1.37.0] - 2026-06-10
 
 ### Added — Structured CLI errors for consumer agents (Semantix wishlist #3)
