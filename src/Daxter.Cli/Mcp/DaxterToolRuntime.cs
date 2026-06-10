@@ -1265,6 +1265,85 @@ internal static class DaxterToolRuntime
             }
         });
 
+    /// <summary>Phase 3 — push a Fabric item's definition back from the artifact store. Reads every
+    /// artifact under <paramref name="artifactKeyPrefix"/>, builds a FabricItemPart list with each
+    /// key trimmed to its relative path, and calls
+    /// <see cref="PowerBiRestClient.UpdateItemDefinitionAsync"/>. Gated like every other write:
+    /// dry-run unless <paramref name="execute"/> AND writes-allowed AND the workspace isn't on the
+    /// read-only list. Returns a status line the agent reads back to the user.</summary>
+    public static Task<string> UpdateItemDefinitionAsync(
+        string? workspace, string itemRef, string kind, string artifactKeyPrefix,
+        bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(itemRef))
+                throw new DaxterException($"{kind}: item name or id is required.");
+            if (string.IsNullOrWhiteSpace(artifactKeyPrefix))
+                throw new DaxterException("artifactKeyPrefix is required (e.g. 'alignment/sales-dashboard-fixed').");
+
+            var config = Config(workspace, null);
+            if (string.IsNullOrWhiteSpace(config.Workspace))
+                throw new DaxterException("workspace is required (server has no default).");
+
+            // Build the parts list from the artifact store — same shape FabricItemPart already has.
+            var members = await Artifacts.ListAsync(artifactKeyPrefix, ct);
+            if (members.Count == 0)
+                throw new DaxterException(
+                    $"No artifacts under prefix '{artifactKeyPrefix}'. Run daxter_artifact_extract first.");
+
+            var prefix = artifactKeyPrefix.TrimEnd('/');
+            var parts = new List<FabricItemPart>(members.Count);
+            foreach (var m in members)
+            {
+                ct.ThrowIfCancellationRequested();
+                // Strip the prefix so the FabricItemPart path is what Fabric expects (relative to
+                // the item root): e.g. "report.json", "definition/pages/01/visual.json".
+                var rel = m.Key == prefix
+                    ? Path.GetFileName(m.Key)
+                    : m.Key.StartsWith(prefix + "/", StringComparison.Ordinal)
+                        ? m.Key.Substring(prefix.Length + 1)
+                        : m.Key;
+                await using var stream = await Artifacts.OpenReadAsync(m.Key, ct);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                var content = await reader.ReadToEndAsync(ct);
+                parts.Add(new FabricItemPart(rel, content));
+            }
+
+            var plan = $"push {parts.Count} part(s) from artifact prefix '{artifactKeyPrefix}' to {kind}/{itemRef} in workspace '{config.Workspace}'";
+            if (!execute)
+                return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
+            if (!WritesAllowed())
+                return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true), then retry.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
+
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
+            // Resolve the item id: for reports we have a name-resolver; for notebooks + copy jobs
+            // we accept either the name or the id. If it looks like a GUID, treat as id; else
+            // resolve via the workspace listing.
+            string itemId;
+            if (Guid.TryParse(itemRef, out _))
+            {
+                itemId = itemRef;
+            }
+            else if (kind == PowerBiRestClient.FabricItemKinds.Report)
+            {
+                itemId = await rest.ResolveReportIdAsync(groupId, itemRef, ct);
+            }
+            else
+            {
+                // For notebooks + copy jobs we'd need a similar resolver; for now insist on GUID.
+                // The Phase 3 tool descriptions document this requirement.
+                throw new DaxterException(
+                    $"For {kind}, pass the item id (GUID) — name-resolution is not yet supported. " +
+                    $"Use daxter_{(kind == PowerBiRestClient.FabricItemKinds.Notebook ? "notebooks" : "copy_jobs")} to find the id.");
+            }
+
+            await rest.UpdateItemDefinitionAsync(groupId, itemId, kind, parts, ct);
+            return $"Updated — {plan}. {parts.Count} part(s) published successfully.";
+        });
+
     /// <summary>Unzip a zip payload into the store under a key prefix. Accepts inline base64
     /// (small archives) OR a URL (large archives). Returns the count + per-entry summary so the
     /// agent can confirm what landed. Same TTL + source-tool plumbing as Put.</summary>

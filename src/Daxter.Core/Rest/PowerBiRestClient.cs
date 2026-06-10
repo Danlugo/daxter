@@ -597,6 +597,77 @@ public sealed class PowerBiRestClient : IDisposable
         await EnsureSuccessAsync(response, ct);   // 200 or 202
     }
 
+    /// <summary>The Fabric item kinds for which DAXter exposes <c>updateDefinition</c>. The string
+    /// values match the URL segments the Fabric API uses.</summary>
+    public static class FabricItemKinds
+    {
+        public const string Report   = "reports";
+        public const string Notebook = "notebooks";
+        public const string CopyJob  = "copyJobs";
+    }
+
+    /// <summary>Generic Fabric updateDefinition. Pushes a list of definition parts (path + UTF-8 text
+    /// content) to the item via <c>POST /v1/workspaces/{ws}/{kind}/{itemId}/updateDefinition</c>,
+    /// base64-encoding each payload inline. The API returns 202 with a Location header pointing at
+    /// the long-running operation; we poll until the LRO succeeds (or fails / times out).
+    ///
+    /// PHASE 3 — closes the round-trip the artifact store opened in phases 1+2: PBIR parts (or
+    /// IPYNB cells, or copy-job JSON) flow agent → artifact store → here → Fabric. Same shape for
+    /// reports, notebooks, and copy jobs — the Fabric API normalised them under one verb.
+    ///
+    /// CALLER OWNS THE PARTS. The list typically comes from reading an artifact prefix via
+    /// <see cref="LocalArtifactStore.ListAsync"/> + OpenReadAsync; the caller has already
+    /// sanitised + bundled the content. We don't try to validate the shape — Fabric does.</summary>
+    public async Task UpdateItemDefinitionAsync(
+        string workspaceId, string itemId, string kind, IReadOnlyList<FabricItemPart> parts,
+        CancellationToken ct = default)
+    {
+        if (parts.Count == 0)
+            throw new DaxterException("updateDefinition requires at least one part — the artifact prefix appears empty.");
+
+        var url = $"https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/{kind}/{itemId}/updateDefinition";
+        // Build the body. Each part: { path, payload (base64 utf-8), payloadType: "InlineBase64" }.
+        // We send text content base64'd; Fabric also accepts binary parts the same way.
+        var sb = new StringBuilder();
+        sb.Append("{\"definition\":{\"parts\":[");
+        for (var i = 0; i < parts.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            var p = parts[i];
+            var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(p.Content));
+            sb.Append('{');
+            sb.Append("\"path\":").Append(System.Text.Json.JsonSerializer.Serialize(p.Path)).Append(',');
+            sb.Append("\"payload\":\"").Append(b64).Append("\",");
+            sb.Append("\"payloadType\":\"InlineBase64\"");
+            sb.Append('}');
+        }
+        sb.Append("]}}");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(sb.ToString(), Encoding.UTF8, "application/json"),
+        };
+        await Authorize(request, ct);
+        using var response = await _http.SendAsync(request, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Accepted)
+        {
+            // Block until the LRO finishes. UpdateDefinition has no useful result payload — we
+            // just need success/failure. PollOperationResultAsync throws on Failed; on Succeeded
+            // it tries to fetch /result, which may 404 for updateDefinition. Swallow that — the
+            // status poll already proved success.
+            try { await PollOperationResultAsync(response, ct); }
+            catch (DaxterException ex) when (ex.Message.Contains("getDefinition operation failed"))
+            {
+                // Re-message — the helper hard-codes "getDefinition" in its failure text.
+                throw new DaxterException("updateDefinition operation failed on the service.");
+            }
+            catch (HttpRequestException) { /* /result 404 is fine for updateDefinition */ }
+            return;
+        }
+        await EnsureSuccessAsync(response, ct);   // 200 success path (rare; most are 202)
+    }
+
     // ---- shared helpers for Fabric items (Copy Jobs + Notebooks share the shape) ----
 
     private async Task<QueryResult> FetchFabricItemsAsync(string url, CancellationToken ct)

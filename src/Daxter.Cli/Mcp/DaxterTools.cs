@@ -3,6 +3,7 @@ using System.Text;
 using Daxter.Core;
 using Daxter.Core.Editing;
 using Daxter.Core.Maintenance;
+using Daxter.Core.Rest;
 using Daxter.Core.Scheduling;
 using ModelContextProtocol.Server;
 
@@ -916,6 +917,59 @@ public static class DaxterTools
         [Description("Optional source-tool label, e.g. 'powerbi_alignment_fix'.")] string? sourceTool = null,
         CancellationToken ct = default)
         => DaxterToolRuntime.ArtifactPutAsync(key, contentBase64, fetchUrl, ttlHours, sourceTool, ct);
+
+    // ── Fabric write-backs (Phase 3) ──────────────────────────────────────────────────────────
+    // Close the round-trip: agent prepares a corrected item definition in the artifact store,
+    // these tools publish it to Fabric. Each is gated like every other DAXter write — dry-run
+    // unless execute=true AND writes are enabled AND the workspace isn't read-only.
+
+    [McpServerTool(Name = "daxter_update_report_definition", Destructive = true, Title = "Update a report's PBIR definition"),
+     Description("Publish a corrected PBIR definition from the artifact store back to a Fabric Report. " +
+                 "READS every artifact under `artifact_key_prefix` (forward-slash path; e.g. " +
+                 "'alignment/sales-dashboard-fixed') — each artifact's relative path becomes a PBIR part path. " +
+                 "POSTs to /v1/workspaces/{ws}/reports/{id}/updateDefinition. Use the artifact-store flow: " +
+                 "1) daxter_export_report with artifact_key= → grab original. 2) powerbi-alignment-fix (or " +
+                 "your own edit) → write corrected to artifact prefix via daxter_artifact_extract / _put. " +
+                 "3) THIS TOOL with execute=true. Gated: dry-run unless execute=true AND writes are enabled " +
+                 "(Configure → Allow writes / DAXTER_MCP_ALLOW_WRITES=true) AND the workspace isn't read-only.")]
+    public static Task<string> UpdateReportDefinition(
+        [Description("Report name or id (GUID). For names, the workspace listing resolves the id.")] string report,
+        [Description("Artifact key prefix — every artifact under it becomes a PBIR part.")] string artifact_key_prefix,
+        [Description("Actually publish (default false = dry run).")] bool execute = false,
+        [Description("Workspace name or id (optional; defaults to server config).")] string? workspace = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.UpdateItemDefinitionAsync(workspace, report,
+            PowerBiRestClient.FabricItemKinds.Report, artifact_key_prefix, execute, ct);
+
+    [McpServerTool(Name = "daxter_update_notebook_definition", Destructive = true, Title = "Update a notebook's definition"),
+     Description("Publish a corrected Notebook definition (ipynb cells + .platform) from the artifact store " +
+                 "back to a Fabric Notebook. Reads every artifact under `artifact_key_prefix` (e.g. " +
+                 "'notebooks/etl/fixed') and POSTs to /v1/workspaces/{ws}/notebooks/{id}/updateDefinition. " +
+                 "REQUIRES the notebook id (GUID) — use daxter_notebooks to find it. Same writes gate as " +
+                 "daxter_update_report_definition: dry-run unless execute=true + Allow writes + workspace " +
+                 "not read-only.")]
+    public static Task<string> UpdateNotebookDefinition(
+        [Description("Notebook id (GUID — from daxter_notebooks).")] string notebook_id,
+        [Description("Artifact key prefix carrying the new notebook parts.")] string artifact_key_prefix,
+        [Description("Actually publish (default false = dry run).")] bool execute = false,
+        [Description("Workspace name or id.")] string? workspace = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.UpdateItemDefinitionAsync(workspace, notebook_id,
+            PowerBiRestClient.FabricItemKinds.Notebook, artifact_key_prefix, execute, ct);
+
+    [McpServerTool(Name = "daxter_update_copy_job_definition", Destructive = true, Title = "Update a Copy Job's definition"),
+     Description("Publish a corrected Copy Job definition (copyjob-content.json + .platform) from the " +
+                 "artifact store back to a Fabric Copy Job. Reads every artifact under `artifact_key_prefix` " +
+                 "and POSTs to /v1/workspaces/{ws}/copyJobs/{id}/updateDefinition. REQUIRES the copy-job id " +
+                 "(GUID — from daxter_copy_jobs). Same writes gate as the report/notebook variants.")]
+    public static Task<string> UpdateCopyJobDefinition(
+        [Description("Copy Job id (GUID — from daxter_copy_jobs).")] string copy_job_id,
+        [Description("Artifact key prefix carrying the new copy-job parts.")] string artifact_key_prefix,
+        [Description("Actually publish (default false = dry run).")] bool execute = false,
+        [Description("Workspace name or id.")] string? workspace = null,
+        CancellationToken ct = default)
+        => DaxterToolRuntime.UpdateItemDefinitionAsync(workspace, copy_job_id,
+            PowerBiRestClient.FabricItemKinds.CopyJob, artifact_key_prefix, execute, ct);
 
     [McpServerTool(Name = "daxter_artifact_extract", Title = "Unzip an archive into the artifact store"),
      Description("Unzip a zip archive INTO the artifact store under a key prefix — every entry becomes a separate " +

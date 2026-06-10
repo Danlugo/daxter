@@ -354,3 +354,9 @@ docker run -e DAXTER_ARTIFACTS_QUOTA_MB=20480 -e DAXTER_ARTIFACTS_ROOT=/data/dax
 
 The Web host runs an `ArtifactPurgeHostedService` every 6 hours by default
 (`DAXTER_ARTIFACTS_PURGE_HOURS` env, set to `0` to disable).
+
+## Phase 3 — Fabric write-backs
+
+Direct CLI access to `updateDefinition` LROs isn't exposed (gated writes prefer the MCP
+path so the dry-run / execute / writes-allowed checks land in one place). Use the MCP
+tools above, or operate on the REST API directly via `gh api` if scripting.

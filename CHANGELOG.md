@@ -6,6 +6,58 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-06-09
+
+### Added
+- **Fabric `updateDefinition` write-back across three item kinds.** Closes the round-trip
+  the artifact store opened in v1.31.0 + v1.32.0 — agent prepares a corrected definition
+  in the store, these tools publish it to Fabric.
+  - **`daxter_update_report_definition`** (gated, destructive) — publish a corrected PBIR.
+    Reads every artifact under `artifact_key_prefix`, trims the prefix to produce relative
+    PBIR part paths, POSTs the whole bundle to
+    `/v1/workspaces/{ws}/reports/{id}/updateDefinition`, blocks on the LRO. Accepts the
+    report **name or id** (name resolved against the workspace listing).
+  - **`daxter_update_notebook_definition`** (gated, destructive) — same shape for notebooks
+    (`.../notebooks/{id}/updateDefinition`). Requires the notebook **id (GUID)** — list
+    them via `daxter_notebooks` to find it.
+  - **`daxter_update_copy_job_definition`** (gated, destructive) — same shape for copy jobs
+    (`.../copyJobs/{id}/updateDefinition`). Requires the copy-job **id (GUID)** — list them
+    via `daxter_copy_jobs` to find it.
+  All three are dry-run unless `execute=true` **AND** writes are enabled (Configure → Allow
+  writes / `DAXTER_MCP_ALLOW_WRITES=true`) **AND** the workspace isn't on the read-only
+  list — same writes-gate as `daxter_take_over` / `daxter_bind_connection`.
+- **`PowerBiRestClient.UpdateItemDefinitionAsync`** — generic Core helper. Takes a kind
+  (`reports` / `notebooks` / `copyJobs`), an item id, and a list of `FabricItemPart`,
+  builds the JSON body with `payloadType: "InlineBase64"`, POSTs, blocks on the LRO.
+  Path-string is `JsonSerializer.Serialize`-escaped so quotes / unusual chars in part
+  paths don't corrupt the body.
+- **`PowerBiRestClient.FabricItemKinds`** — strongly-typed kind constants used by the
+  three MCP tools.
+
+### Tests
+- **5 new REST-wire tests** (`FabricItemsRestTests` additions) — confirms the POST URL
+  for each kind, the InlineBase64 body shape with base64'd payloads, refusal of an empty
+  parts list, and JSON escaping of unusual path chars.
+- **Total: 306 tests passing** (was 301 in v1.32.0).
+
+### Why
+- Diego's `powerbi-alignment-fix` skill produces a corrected PBIR folder locally. Before
+  v1.33.0 it had to be published back via Power BI Desktop manually. Now the whole loop
+  rides DAXter: `daxter_export_report` → bundle → fix locally → `daxter_artifact_extract`
+  → `daxter_update_report_definition`. Zero `docker cp`, zero Desktop hand-off.
+- Same plumbing works for notebooks + copy jobs the moment an agent has a use case —
+  the tools are already wired and gated.
+
+### Notes
+- Name-resolution for notebooks + copy jobs is not surfaced yet — pass the GUID. Reports
+  resolve names via the existing `ResolveReportIdAsync`.
+- The `updateDefinition` LRO has no useful result body; we just poll until status =
+  `Succeeded` (raises a clean error message on `Failed`).
+- This closes the **three-phase artifact-store arc** (v1.31.0 read + retrofit;
+  v1.32.0 write path + nightly purge; v1.33.0 Fabric write-backs). Future Phase 4 ideas:
+  per-tenant artifact stores (multi-user hosted DAXter), encrypt-at-rest, S3 backend
+  swap for hosted deployments.
+
 ## [1.32.0] - 2026-06-09
 
 ### Added

@@ -303,3 +303,39 @@ Claude: → daxter_export_report  artifact_key:"alignment/sales-dashboard"
         → daxter_artifact_extract keyPrefix:"alignment/sales-dashboard-fixed", zipBase64:<corrected>
         ↳ ready for Phase 3's daxter_update_report_definition to push back to Fabric.
 ```
+
+## Phase 3 — Fabric write-backs (gated)
+
+Closes the round-trip the artifact store opened. The agent puts a corrected definition
+into the store (Phase 2's `daxter_artifact_extract` or `_put`), then these three tools
+publish it to Fabric. Gated like every other DAXter write — dry-run unless `execute=true`
+**and** the writes gate is on **and** the workspace isn't on the read-only list.
+
+| Ask | Tool |
+|---|---|
+| "Push my corrected PBIR back to Sales Dashboard (dry-run first)" | `daxter_update_report_definition` with `report: "Sales Dashboard"`, `artifact_key_prefix: "alignment/sales-dashboard-fixed"` |
+| "Now actually publish it" | same tool with `execute: true` (writes must be enabled) |
+| "Publish a corrected notebook over notebook id `…`" | `daxter_update_notebook_definition` with `notebook_id: "<guid>"`, `artifact_key_prefix: "…"` |
+| "Publish a corrected copy-job over copy-job id `…`" | `daxter_update_copy_job_definition` with `copy_job_id: "<guid>"`, `artifact_key_prefix: "…"` |
+
+The MCP tool reads every artifact under `artifact_key_prefix`, trims the prefix from each
+key to produce the relative PBIR part path, and POSTs the whole bundle as a single
+`updateDefinition` LRO — Fabric runs it, status polled until done.
+
+### Diego's full alignment loop, end-to-end (now works one-shot)
+
+```text
+You:    "Pull Sales Dashboard, run alignment-check + fix, then publish the corrected PBIR back."
+Claude: → daxter_export_report  report:"Sales Dashboard"  artifact_key:"alignment/sales-dashboard"
+        → daxter_artifact_bundle prefix:"alignment/sales-dashboard"
+        ↳ unzip; powerbi-alignment-check + _fix run locally
+        → daxter_artifact_extract keyPrefix:"alignment/sales-dashboard-fixed", zipBase64:<corrected>
+        → daxter_update_report_definition  report:"Sales Dashboard"
+            artifact_key_prefix:"alignment/sales-dashboard-fixed"  (dry-run)
+        ↳ "DRY RUN — would push 17 part(s) from artifact prefix '…' to reports/Sales Dashboard …"
+You:    "Apply"
+Claude: → same tool with execute:true → "Updated — 17 part(s) published successfully."
+```
+
+No `docker cp`, no Power BI Desktop, no bind-mount. The entire loop rides the artifact
+store + the Fabric REST `updateDefinition` LRO.

@@ -164,4 +164,101 @@ public class FabricItemsRestTests
         Assert.Equal("Failed", inst.Status);
         Assert.Equal("Source connection refused", inst.FailureReason);
     }
+
+    // ── UpdateItemDefinitionAsync — Phase 3, the Fabric write-back ────────────────────────────
+    // Pins the wire-shape: POST URL for each item kind, body shape (parts → InlineBase64),
+    // and the empty-parts refusal. The 202+poll path isn't covered here — that's exercised
+    // by the existing GetItemDefinitionAsync tests (same PollOperationResultAsync helper).
+
+    [Fact]
+    public async Task UpdateItemDefinitionAsync_posts_to_reports_endpoint_for_report_kind()
+    {
+        string? capturedUrl = null;
+        string? capturedBody = null;
+        var client = Client(req =>
+        {
+            capturedUrl = req.RequestUri!.ToString();
+            capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);    // 200 short-circuits the poll
+        });
+
+        var parts = new[]
+        {
+            new FabricItemPart("report.json", "{\"x\":1}"),
+            new FabricItemPart("definition/pages/01/visual.json", "{\"y\":2}"),
+        };
+        await client.UpdateItemDefinitionAsync("ws-7", "rpt-9",
+            PowerBiRestClient.FabricItemKinds.Report, parts);
+
+        Assert.NotNull(capturedUrl);
+        Assert.Contains("/v1/workspaces/ws-7/reports/rpt-9/updateDefinition", capturedUrl);
+        Assert.NotNull(capturedBody);
+        var b64first = Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"x\":1}"));
+        Assert.Contains($"\"path\":\"report.json\",\"payload\":\"{b64first}\",\"payloadType\":\"InlineBase64\"", capturedBody);
+        var b64second = Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"y\":2}"));
+        Assert.Contains("\"path\":\"definition/pages/01/visual.json\"", capturedBody);
+        Assert.Contains(b64second, capturedBody);
+    }
+
+    [Fact]
+    public async Task UpdateItemDefinitionAsync_uses_notebooks_url_for_notebook_kind()
+    {
+        string? capturedUrl = null;
+        var client = Client(req =>
+        {
+            capturedUrl = req.RequestUri!.ToString();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        await client.UpdateItemDefinitionAsync("ws-7", "nb-1",
+            PowerBiRestClient.FabricItemKinds.Notebook,
+            new[] { new FabricItemPart("notebook-content.py", "print('hi')") });
+        Assert.Contains("/v1/workspaces/ws-7/notebooks/nb-1/updateDefinition", capturedUrl);
+    }
+
+    [Fact]
+    public async Task UpdateItemDefinitionAsync_uses_copyJobs_url_for_copy_job_kind()
+    {
+        string? capturedUrl = null;
+        var client = Client(req =>
+        {
+            capturedUrl = req.RequestUri!.ToString();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        await client.UpdateItemDefinitionAsync("ws-7", "cj-1",
+            PowerBiRestClient.FabricItemKinds.CopyJob,
+            new[] { new FabricItemPart("copyjob-content.json", "{}") });
+        Assert.Contains("/v1/workspaces/ws-7/copyJobs/cj-1/updateDefinition", capturedUrl);
+    }
+
+    [Fact]
+    public async Task UpdateItemDefinitionAsync_refuses_empty_parts_list()
+    {
+        // Catches the "agent extracted into the wrong prefix" footgun before we POST a nonsense
+        // body to Fabric. The runtime tool turns this into a clean "run extract first" message.
+        var client = Client(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        await Assert.ThrowsAsync<Daxter.Core.DaxterException>(() =>
+            client.UpdateItemDefinitionAsync("ws", "rpt",
+                PowerBiRestClient.FabricItemKinds.Report,
+                Array.Empty<FabricItemPart>()));
+    }
+
+    [Fact]
+    public async Task UpdateItemDefinitionAsync_escapes_paths_containing_quotes_in_json()
+    {
+        // Paths theoretically can carry unusual chars — the JSON serializer escapes them; if we
+        // accidentally use string concat instead, the body becomes malformed and Fabric rejects.
+        string? capturedBody = null;
+        var client = Client(req =>
+        {
+            capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        await client.UpdateItemDefinitionAsync("ws", "rpt",
+            PowerBiRestClient.FabricItemKinds.Report,
+            new[] { new FabricItemPart("weird\"path/file.json", "{}") });
+        Assert.NotNull(capturedBody);
+        using var doc = System.Text.Json.JsonDocument.Parse(capturedBody!);
+        var first = doc.RootElement.GetProperty("definition").GetProperty("parts")[0];
+        Assert.Equal("weird\"path/file.json", first.GetProperty("path").GetString());
+    }
 }
