@@ -438,20 +438,23 @@ internal static class DaxterToolRuntime
     {
         var current = Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev";
         var repo = Environment.GetEnvironmentVariable("DAXTER_REPO") ?? "Danlugo/daxter";
-        var info = new Dictionary<string, object?>
-        {
-            ["version"] = current,
-            // Reconstruct the GHCR image tag for the running build. Lowercased per OCI rules
-            // (Repo defaults to "Danlugo/daxter"; GHCR namespaces are case-insensitive but the
-            // canonical pull URL is lowercase).
-            ["image"] = $"ghcr.io/{repo.ToLowerInvariant()}:{current}",
-            ["repo_url"] = $"https://github.com/{repo}",
-            ["releases_url"] = $"https://github.com/{repo}/releases",
-            ["latest_release_url"] = $"https://github.com/{repo}/releases/latest",
-            ["dotnet_version"] = Environment.Version.ToString(),
-            ["platform"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
-            ["architecture"] = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
-        };
+        var info = new Dictionary<string, object?>();
+
+        // v1.36.0 — tenant identity stamp. Surfaces first so a Semantics fleet dashboard
+        // grepping the response sees tenant_id / label near the top. Omitted when unset
+        // (local-laptop users don't see fleet metadata).
+        TenantInfo.MergeInto(info);
+
+        info["version"] = current;
+        // Reconstruct the GHCR image tag for the running build. Lowercased per OCI rules
+        // (GHCR namespaces are case-insensitive but the canonical pull URL is lowercase).
+        info["image"] = $"ghcr.io/{repo.ToLowerInvariant()}:{current}";
+        info["repo_url"] = $"https://github.com/{repo}";
+        info["releases_url"] = $"https://github.com/{repo}/releases";
+        info["latest_release_url"] = $"https://github.com/{repo}/releases/latest";
+        info["dotnet_version"] = Environment.Version.ToString();
+        info["platform"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+        info["architecture"] = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString();
 
         if (checkLatest)
         {
@@ -547,23 +550,27 @@ internal static class DaxterToolRuntime
         }
 
         var version = Environment.GetEnvironmentVariable("DAXTER_VERSION") ?? "dev";
-        return JsonSerializer.Serialize(
-            new
-            {
-                version,
-                tool_count = tools.Count,
-                tools,
-                // Phase 4 additions: discoverable shared knowledge. Agents that read this on
-                // session start can pre-load relevant context (e.g. clients/{current-client}/
-                // glossary) before the user's first real question. Empty array when nothing
-                // has been curated yet — the field is always present so consumers can rely on
-                // its shape.
-                context_namespaces = contextNamespaces,
-                context_hint =
-                    "Shared-knowledge plane lives under context/ (read via daxter_context_get / _list / _search). " +
-                    "When asking a question about a workspace or Fabric SQL endpoint, the relevant context cards " +
-                    "are auto-attached to the response of daxter_query / daxter_sql_query — no extra call needed.",
-            },
+
+        // v1.36.0 — tenant stamp on the catalogue too, for the same reason daxter_version
+        // carries it. Lets Semantics build a fleet capability matrix ("which tenants are on
+        // a version that supports daxter_update_report_definition?") with a single per-tenant
+        // call. We use a dictionary here (rather than the inline anonymous type) so the
+        // tenant_id / label keys can sit at the top, optional.
+        var envelope = new Dictionary<string, object?>();
+        TenantInfo.MergeInto(envelope);
+        envelope["version"] = version;
+        envelope["tool_count"] = tools.Count;
+        envelope["tools"] = tools;
+        // Phase 4 additions: discoverable shared knowledge. Agents that read this on session
+        // start can pre-load relevant context (e.g. clients/{current-client}/glossary) before
+        // the user's first real question. Empty array when nothing has been curated yet —
+        // the field is always present so consumers can rely on its shape.
+        envelope["context_namespaces"] = contextNamespaces;
+        envelope["context_hint"] =
+            "Shared-knowledge plane lives under context/ (read via daxter_context_get / _list / _search). " +
+            "When asking a question about a workspace or Fabric SQL endpoint, the relevant context cards " +
+            "are auto-attached to the response of daxter_query / daxter_sql_query — no extra call needed.";
+        return JsonSerializer.Serialize(envelope,
             new JsonSerializerOptions { WriteIndented = true });
     }
 

@@ -1,10 +1,26 @@
 @page "/"
+@using Daxter.Core
 @inject DaxterUi Ui
 @inject IJSRuntime JS
 @inject VersionService Version
 @inject UiBusy BusyState
 
-<PageTitle>DAXter — Status</PageTitle>
+<PageTitle>DAXter — @(TenantInfo.Label ?? "Status")</PageTitle>
+
+@* v1.36.0 — tenant label banner. Shows ONLY when DAXTER_LABEL is set (Semantics spins each
+   tenant container with the client name + env in the label). Local-laptop users never see
+   it; the home page stays identical to pre-v1.36.0. *@
+@if (TenantInfo.IsConfigured)
+{
+    <div class="tenant-banner" title="@(TenantInfo.TenantId is { } id ? $"tenant_id: {id}" : null)">
+        <span class="tenant-dot"></span>
+        <strong>@(TenantInfo.Label ?? TenantInfo.TenantId)</strong>
+        @if (TenantInfo.Label is not null && TenantInfo.TenantId is not null)
+        {
+            <span class="muted">· @TenantInfo.TenantId</span>
+        }
+    </div>
+}
 
 <h1>Status &amp; health</h1>
 <p class="muted">Is this server ready to query Power BI / serve as an MCP server?</p>

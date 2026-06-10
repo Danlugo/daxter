@@ -411,3 +411,19 @@ the same way for `daxter_sql_query`.
 ```
 
 Same JSON envelope the MCP `daxter_version` tool returns — pipe to `jq` for scripting.
+
+## Fleet identity (Semantics-friendly hooks — v1.36.0)
+
+Two env vars stamp the container's identity into every "who am I" response (CLI / MCP / Web):
+
+```bash
+docker run \
+  -e DAXTER_TENANT_ID=inspire \
+  -e DAXTER_LABEL='Inspire Brands — Prod' \
+  ... ghcr.io/danlugo/daxter:latest web
+```
+
+- `daxter version` now includes `tenant_id` + `label` at the top of the JSON when set.
+- The Web home page shows a quiet banner when `DAXTER_LABEL` is set (hidden otherwise).
+- `curl http://localhost:8080/api/health` returns one JSON envelope with tenant id, label,
+  version, uptime, and artifact/context store stats — designed for fleet dashboards.

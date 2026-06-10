@@ -413,3 +413,19 @@ select, input, textarea { font:inherit; padding:.4rem; border:1px solid var(--li
 select:focus, input:focus, textarea:focus, .combo:focus {
     outline: none; border-color: var(--accent); box-shadow: var(--ring);
 }
+
+/* v1.36.0 — tenant identity banner. Only rendered when DAXTER_LABEL or DAXTER_TENANT_ID is
+   set (Semantics-managed containers); local-laptop UX is unchanged. Quiet styling — pinned
+   below the topbar, above the page title, low-contrast accent so it's a sticker not a hero. */
+.tenant-banner {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin: 8px 0 16px; padding: 6px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+    font-size: 0.95rem;
+}
+.tenant-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 100, 255, 0.15);
+}

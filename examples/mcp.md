@@ -408,3 +408,44 @@ Session 2 (you, Tuesday — different Claude Desktop on a different machine but 
   ↳ JSON result + AUTO-ATTACHED context with Diego's glossary as the footer.
   ↳ You didn't know the glossary existed; the agent applied it anyway.
 ```
+
+## Fleet identity (Semantics-friendly hooks — v1.36.0)
+
+When DAXter runs under a fleet orchestrator (the L60 **Semantics** platform spins up one
+DAXter container per client), two env vars stamp the container's identity into every
+"who am I" response:
+
+| Env var | Purpose | Surfaced in |
+|---|---|---|
+| `DAXTER_TENANT_ID` | opaque short id (e.g. `inspire`, `acme`) | `daxter_version`, `daxter_capabilities`, `GET /api/health` |
+| `DAXTER_LABEL` | human-readable label (e.g. `Inspire Brands — Prod`) | same three, plus the Web home-page banner |
+
+Both are optional — local-laptop users won't set either and see the same UX as before.
+
+Agents that need to know which tenant they're connected to:
+
+| You say | Tool |
+|---|---|
+| "Which tenant am I on?" | `daxter_version` — fields `tenant_id` + `label` appear at the top of the JSON when set |
+| "What's the full capability set for this tenant?" | `daxter_capabilities` — same `tenant_id` + `label` stamping; Semantics fleet UI uses this to build a per-tenant catalogue grid |
+
+The `GET /api/health` endpoint on the Web host returns the same identity + uptime + store
+stats in one JSON envelope, designed for Semantics dashboards to poll without exec'ing
+into the container:
+
+```bash
+curl -s http://daxter-tenant-inspire:8080/api/health | jq
+# → {
+#     "tenant_id":  "inspire",
+#     "label":      "Inspire Brands — Prod",
+#     "version":    "v1.36.0",
+#     "image":      "ghcr.io/danlugo/daxter:v1.36.0",
+#     "uptime_seconds": 12345,
+#     "artifacts":  { "used_bytes": 3145728, "quota_bytes": 5368709120, "count": 14 },
+#     "context":    { "entry_count": 9, "namespace_count": 3 }
+#   }
+```
+
+No auth required (the endpoint never returns secrets — no signed-in identity, no Power BI
+data, no tokens). Put a reverse proxy in front of Semantics if per-tenant access control
+matters.

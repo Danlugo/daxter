@@ -68,4 +68,9 @@ Daxter.Web.Endpoints.SqlExportEndpoint.Map(app);
 // big. Phase 1: GET (list + download). Phase 2: POST (upload).
 Daxter.Web.Endpoints.ArtifactsEndpoint.Map(app);
 
+// v1.36.0 — /api/health: Semantics-friendly fleet probe. Unauthenticated GET returning
+// tenant_id, label, version, uptime, and artifact/context store stats. Designed so a fleet
+// orchestration dashboard can populate a per-tenant grid with one curl per container.
+Daxter.Web.Endpoints.HealthEndpoint.Map(app);
+
 app.Run();

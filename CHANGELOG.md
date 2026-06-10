@@ -6,6 +6,63 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-06-10
+
+### Added — Semantics-friendly fleet hooks
+Context: **Semantics** is the L60 Docker platform that spins up isolated DAXter instances
+per client (each tenant = its own DAXter container). This release adds the small surface
+area Semantics' fleet orchestration needs to identify which tenant a response came from
+without `docker exec` scraping.
+
+- **`Daxter.Core.TenantInfo`** — reads two new env vars:
+  - `DAXTER_TENANT_ID` — opaque short id (e.g. `inspire`, `acme`). No semantic meaning to
+    DAXter; the orchestrator picks the convention.
+  - `DAXTER_LABEL` — human-readable label (e.g. `Inspire Brands — Prod`).
+  Both optional. When unset, every surface behaves identically to v1.35.0 — local-laptop
+  users don't see fleet metadata they didn't ask for.
+  **7 new unit tests** pin the env-var → identity contract (omit-when-unset, whitespace
+  trim, MergeInto behaviour, IsConfigured flag).
+- **`daxter_version`** now surfaces `tenant_id` + `label` at the TOP of the JSON envelope
+  when set. Fields are omitted when unset — Semantics' shape contract is "field present
+  iff value non-null".
+- **`daxter_capabilities`** same — tenant fields at the top, then the existing version /
+  tool list / context_namespaces / context_hint.
+- **`GET /api/health`** (new web endpoint) — one unauthenticated curl returns the
+  Semantics fleet snapshot for that tenant:
+  ```json
+  {
+    "tenant_id":      "inspire",
+    "label":          "Inspire Brands — Prod",
+    "version":        "v1.36.0",
+    "image":          "ghcr.io/danlugo/daxter:v1.36.0",
+    "uptime_seconds": 12345,
+    "artifacts":      { "used_bytes": …, "quota_bytes": …, "count": … },
+    "context":        { "entry_count": …, "namespace_count": … }
+  }
+  ```
+  No auth — the response carries NO secrets (no signed-in identity, no Power BI / Fabric
+  data, no tokens). A reverse proxy in front of Semantics handles per-tenant access
+  control. Per-subsystem `_error` fields surface store failures without losing the
+  identity envelope. Cheap (one ListAsync + sum per tenant).
+- **Home page tenant label banner** — when `DAXTER_LABEL` or `DAXTER_TENANT_ID` is set,
+  the Web home page shows a quiet identity banner (accent dot + label + tenant id) so
+  the human user knows which tenant they're looking at. Hidden entirely when neither is
+  set — local-laptop UX unchanged.
+
+### Why
+[[project-semantics]] runs each L60 client in its own DAXter container; without an
+identity stamp, a Semantics fleet dashboard had no choice but to `docker exec` into each
+container to populate its grid. With these env vars + the /api/health endpoint, Semantics
+can build a per-tenant grid via one HTTP call per container — version, label, store usage,
+context activity — all at once.
+
+### Notes
+- The new env vars are PURELY informational at the DAXter layer — no behaviour gating, no
+  data filtering. Tenancy is enforced by Semantics at the container boundary.
+- The /api/health endpoint shape is intended to be stable. If we add fields, they go at
+  the bottom; nothing in the v1.36.0 envelope will move.
+- **Total: 330 tests passing** (was 323 in v1.35.0).
+
 ## [1.35.0] - 2026-06-10
 
 ### Added
