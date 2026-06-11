@@ -6,6 +6,43 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-06-10
+
+### Added — encrypt the token cache at rest
+The MSAL token cache can now be encrypted on disk, so the persisted AAD tokens aren't
+readable from the volume alone. On macOS (keychain) and Windows (DPAPI) the cache was
+already encrypted by the platform; on the Linux container image it fell back to an
+unprotected file. This adds an app-level option that works everywhere.
+
+- **`DAXTER_CACHE_KEY`** — when set, the token cache is written as `msal_cache.enc` using
+  **AES-256-GCM** keyed off the secret (SHA-256-derived key, random nonce per write,
+  authenticated). The key is meant to come from outside the volume (env / secrets manager),
+  so the volume by itself no longer yields usable tokens.
+- **Opt-in, graceful, fail-closed.** When the key is unset, DAXter keeps the platform
+  default (macOS keychain / Windows DPAPI / Linux unprotected file) and prints a one-time
+  warning on the unprotected path. A wrong/rotated key or a corrupt/tampered file degrades
+  to "empty cache" → re-authenticate — it never throws into the sign-in path. AES-GCM
+  authentication means a tampered file fails closed.
+- **`Daxter.Core.Auth.EncryptedTokenCache`** — wires the MSAL cache Before/After-access
+  callbacks; atomic writes (temp + rename) + `chmod 600`. Pure crypto + file I/O, no
+  platform-keyring dependency.
+
+### Tests
+- 10 new `EncryptedTokenCacheTests` — encrypt/decrypt round-trip, on-disk blob is not
+  plaintext, wrong-key → null (not throw), AES-GCM tamper detection → null, missing /
+  truncated file tolerated, empty plaintext round-trips, fresh nonce per write, `FromEnv`
+  gating. **Total: 412 tests passing** (was 402 in v1.40.0).
+
+### Compatibility
+- Default behaviour is unchanged when `DAXTER_CACHE_KEY` is unset — existing deployments
+  keep working. Setting the key starts a fresh encrypted cache (`msal_cache.enc`); the
+  first sign-in re-authenticates once (the old plaintext cache isn't migrated by design).
+- No change to the §4 Semantix contract. Semantix can set `DAXTER_CACHE_KEY` per container
+  from its existing per-client secret store to encrypt each tenant's cache.
+
+### Recommended
+- In containers / on Linux, set `DAXTER_CACHE_KEY` from a secrets manager. See `SECURITY.md`.
+
 ## [1.40.0] - 2026-06-10
 
 ### Web console — safer defaults + optional authentication

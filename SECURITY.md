@@ -42,15 +42,25 @@ DAXTER_WEB_BEARER_TOKEN=$(openssl rand -hex 24) \
 ## The token volume (`~/.daxter`) is a secret store
 
 It holds:
-- The **MSAL token cache** (`msal_cache.bin`) — your AAD refresh tokens. **Unencrypted on
-  Linux** (`.WithLinuxUnprotectedFile()` — the slim container image has no keyring). Anyone
-  with read access to the volume can impersonate the signed-in identity for the token's
-  lifetime (~90 days for refresh tokens).
+- The **MSAL token cache** — your AAD refresh tokens.
+  - **Encrypted at rest (recommended)** when `DAXTER_CACHE_KEY` is set: the cache is written
+    as `msal_cache.enc` using AES-256-GCM keyed off your secret. The persisted blob is
+    unreadable without the key, so the **volume alone is no longer enough** to impersonate
+    the identity. The key must live OUTSIDE the volume (env / secrets manager) — that's the
+    whole point.
+  - **Unencrypted** when `DAXTER_CACHE_KEY` is unset: macOS uses the keychain and Windows
+    uses DPAPI (both encrypted), but on the slim Linux container image MSAL falls back to an
+    unprotected file (`msal_cache.bin`) — anyone with read access to the volume can
+    impersonate the signed-in identity for the token's lifetime (~90 days). DAXter prints a
+    one-time warning on this path.
 - Bearer-token files (`mcp-bearer-token`, `web-bearer-token`) — `chmod 600`.
 - The artifact + context store (may carry exported report definitions, SQL CSVs).
 
 **Guidance:**
-- Restrict access to the volume (it's the keys to the kingdom).
+- **Set `DAXTER_CACHE_KEY`** when running in a container / on Linux, supplying the key from a
+  secrets manager (not from a file on the volume). Example:
+  `DAXTER_CACHE_KEY=$(some-secrets-fetch) daxter web`.
+- Restrict access to the volume regardless (it's still sensitive).
 - Don't snapshot/back it up to shared storage.
 - For unattended / hosted use, prefer a **service principal** (`DAXTER_AUTH_MODE=
   service-principal`) with the secret injected at runtime from a secrets manager (Key

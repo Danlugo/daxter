@@ -36,6 +36,7 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
 
     private readonly DaxterConfig _config;
     private readonly Func<DeviceCodeResult, Task> _deviceCodeCallback;
+    private readonly Action<string> _statusWriter;   // stderr-style status line (warnings, prompts)
     private readonly string _cacheDirectory;
     private readonly bool _allowInteractive;
 
@@ -50,9 +51,10 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
         bool allowInteractive = true)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _statusWriter = deviceCodePrompt ?? Console.WriteLine;
         _deviceCodeCallback = result =>
         {
-            (deviceCodePrompt ?? Console.WriteLine)(result.Message);
+            _statusWriter(result.Message);
             return Task.CompletedTask;
         };
         _cacheDirectory = cacheDirectory ?? DefaultCacheDirectory();
@@ -273,11 +275,40 @@ public sealed class MsalTokenProvider : ITokenProvider, IFabricSqlTokenProvider
         return app;
     }
 
+    /// <summary>Tracks whether we've already emitted the "unprotected cache" warning this process,
+    /// so it appears once at startup rather than on every token acquisition.</summary>
+    private static int _warnedUnprotected;
+
     private async Task TryAttachPersistentCacheAsync(IPublicClientApplication app)
     {
         try
         {
             Directory.CreateDirectory(_cacheDirectory);
+
+            // v1.41.0 — ENCRYPT AT REST when DAXTER_CACHE_KEY is set. The MSAL cache helper falls
+            // back to an UNPROTECTED file on the Linux container (no keyring), leaving AAD refresh
+            // tokens in plaintext on the volume. When a key is supplied (Semantix/hosted set it
+            // per container from their secrets store) we wrap the cache in AES-256-GCM ourselves
+            // via SetBeforeAccess/SetAfterAccess, so the volume alone can't yield the tokens.
+            var encryptedPath = Path.Combine(_cacheDirectory, "msal_cache.enc");
+            var encrypted = EncryptedTokenCache.FromEnv(encryptedPath);
+            if (encrypted is not null)
+            {
+                encrypted.Attach(app.UserTokenCache);
+                return;
+            }
+
+            // No key → keep the platform default: macOS keychain / Windows DPAPI (both already
+            // encrypted), Linux unprotected file. Warn ONCE on the unprotected path so the
+            // operator knows to set DAXTER_CACHE_KEY (or treat the volume as a secret store).
+            if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()
+                && Interlocked.Exchange(ref _warnedUnprotected, 1) == 0)
+            {
+                _statusWriter(
+                    "DAXter: the token cache is stored UNENCRYPTED on this platform. Set " +
+                    "DAXTER_CACHE_KEY to encrypt it at rest, and treat the ~/.daxter volume as a secret store.");
+            }
+
             var properties = new StorageCreationPropertiesBuilder("msal_cache.bin", _cacheDirectory)
                 .WithMacKeyChain("com.daxter.tokencache", "MSALCache")
                 .WithLinuxUnprotectedFile()

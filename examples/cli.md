@@ -593,3 +593,19 @@ DAXTER_WEB_BEARER_TOKEN=$(openssl rand -hex 24) daxter web --bind 0.0.0.0
 
 DAXter prints a loud warning if you bind wide without a token. See `SECURITY.md` for the
 full posture (including the token-volume guidance).
+
+## Encrypting the token cache (v1.41.0)
+
+On Linux / in a container the MSAL token cache is plaintext by default (macOS keychain and
+Windows DPAPI encrypt it; the slim Linux image has no keyring). Set `DAXTER_CACHE_KEY` to
+encrypt it at rest with AES-256-GCM — supply the key from a secrets manager, not from a
+file on the token volume:
+
+```bash
+DAXTER_CACHE_KEY=$(some-secrets-fetch) daxter web        # cache → msal_cache.enc (encrypted)
+# Unset → platform default + a one-time "stored UNENCRYPTED" warning on Linux.
+```
+
+The first sign-in after setting the key re-authenticates once (the old plaintext cache is
+not migrated by design). A wrong/rotated key just triggers a re-auth — it never breaks
+sign-in. See `SECURITY.md`.
