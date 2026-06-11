@@ -26,7 +26,25 @@ public sealed record RefreshSpec(
     PartitionOrder Order,
     RefreshType Type = RefreshType.Full,
     IReadOnlyList<string>? Partitions = null,
-    int Retries = 0);
+    int Retries = 0,
+    /// <summary>v1.39.0 — when true, Power BI walks the targeted table's refresh policy and
+    /// materialises the policy-defined partitions (e.g. rolling-window archive + hot range)
+    /// instead of refreshing the partitions that already exist. The exact operation Tabular
+    /// Editor's "Apply refresh policy" right-click invokes. Required after deploying a model
+    /// to a new environment where the policy is defined but no partitions have been created
+    /// from it yet. Partition-level refreshes (Partition / SomePartitions / AllPartitions) are
+    /// INCOMPATIBLE — BuildBody refuses to emit applyRefreshPolicy=true for those kinds. See
+    /// also <see cref="PolicyTables"/> for the surgical "only touch policy tables" scoping.</summary>
+    bool ApplyPolicy = false,
+    /// <summary>v1.39.0 — explicit list of tables to apply the refresh policy to. When set
+    /// (and <see cref="ApplyPolicy"/> is true), <see cref="EnhancedRefresh.BuildBody"/> emits
+    /// an objects list scoped to ONLY these tables — non-policy tables are untouched.
+    /// Mirrors Tabular Editor's per-table semantics. When null and <see cref="ApplyPolicy"/>
+    /// is true, the API call is unscoped (whole-model refresh; Power BI applies the policy
+    /// only on tables that have one but still does a normal refresh on the rest). The
+    /// CLI/MCP orchestrators populate this via XMLA TOM enumeration upstream, so the worker
+    /// never has to guess.</summary>
+    IReadOnlyList<string>? PolicyTables = null);
 
 /// <summary>One timestamped step in a job's activity log.</summary>
 public sealed record JobEvent(DateTimeOffset Time, string Message);

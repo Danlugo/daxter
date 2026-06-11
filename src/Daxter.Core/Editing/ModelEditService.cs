@@ -373,6 +373,35 @@ public sealed class ModelEditService : IDisposable
             p.IncrementalGranularity.ToString(), (int)p.IncrementalPeriods, (int)p.IncrementalPeriodsOffset);
     }
 
+    /// <summary>v1.39.0 — enumerate every table in the model that has an incremental refresh
+    /// policy defined (a <see cref="Tom.BasicRefreshPolicy"/>). Used by `daxter refresh
+    /// apply-policy` and `daxter_apply_refresh_policy` to scope the operation: only these
+    /// tables get the policy walked + partitions materialised; non-policy tables are
+    /// untouched. Mirrors what Tabular Editor surfaces in its right-click menu.</summary>
+    public IReadOnlyList<string> TablesWithRefreshPolicy()
+    {
+        var names = new List<string>();
+        foreach (Tom.Table t in _model.Tables)
+        {
+            if (t.RefreshPolicy is Tom.BasicRefreshPolicy) names.Add(t.Name);
+        }
+        // Deterministic order so the worker's `objects` list and any human-readable plan
+        // shown by the CLI/MCP match what the operator sees in the modelling tool.
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    /// <summary>v1.39.0 — true when the named table exists AND has a basic refresh policy.
+    /// The CLI/MCP `--table T --apply-policy` paths call this for pre-flight validation, so
+    /// "apply policy on a table that doesn't have one" fails with a clear message before we
+    /// queue a job. Returns false on a missing table OR a table without a policy — the
+    /// caller distinguishes the two cases with <see cref="ReadRefreshPolicy"/>.</summary>
+    public bool HasRefreshPolicy(string name)
+    {
+        var t = _model.Tables.Find(name);
+        return t?.RefreshPolicy is Tom.BasicRefreshPolicy;
+    }
+
     /// <summary>Updates an <b>existing</b> basic incremental refresh policy in place — its M source and
     /// the rolling-window / incremental settings — without touching the table's partitions (so the
     /// policy is preserved). Throws if the table has no basic policy (create those in Desktop/TE).</summary>

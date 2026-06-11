@@ -104,7 +104,48 @@ public static class EnhancedRefresh
             ["retryCount"] = Math.Max(1, spec.Retries),
             ["timeout"] = "05:00:00",
         };
-        if (partitioned) payload["applyRefreshPolicy"] = false;   // required with partialBatch
+
+        // applyRefreshPolicy semantics (Power BI Enhanced Refresh API), v1.39.0:
+        //  - Partition-targeted jobs MUST set it to false (combined with commitMode=
+        //    partialBatch). We're refreshing already-existing partitions and the policy walk
+        //    would conflict. Original v1.x behaviour preserved.
+        //  - Model + table-level jobs CAN set it to true — the "Apply refresh policy"
+        //    operation Tabular Editor invokes after a new-environment deploy. Two variants:
+        //
+        //      A. spec.ApplyPolicy=true, spec.PolicyTables=null  (Option A, bundled flag)
+        //         → emit applyRefreshPolicy=true with NO objects list.
+        //         Power BI runs a normal refresh on every table; ALSO walks the refresh
+        //         policy on tables that have one. Non-policy tables get a regular refresh as
+        //         part of the model job. Used by `daxter refresh model --apply-policy`.
+        //
+        //      B. spec.ApplyPolicy=true, spec.PolicyTables=[T1, T2, ...]  (Option B, surgical)
+        //         → emit objects list with ONLY those tables, applyRefreshPolicy=true.
+        //         Non-policy tables UNTOUCHED. Mirrors Tabular Editor's per-table semantics.
+        //         Used by the dedicated `daxter refresh apply-policy` / `daxter_apply_refresh_policy`.
+        //
+        //  - Omitting the field (the default for model/table jobs in v1.x) is equivalent to
+        //    false on the service side; we keep that legacy shape when ApplyPolicy is off,
+        //    so nothing in the wire-shape changes for any existing v1.x callers.
+        if (partitioned)
+        {
+            payload["applyRefreshPolicy"] = false;
+        }
+        else if (spec.ApplyPolicy)
+        {
+            payload["applyRefreshPolicy"] = true;
+
+            // Option B variant — when PolicyTables is provided, REPLACE any inferred objects
+            // list with the explicit policy-tables list. This is the scoped "only touch
+            // policy tables" path; non-policy tables are not in the objects list, so the
+            // service doesn't refresh them.
+            if (spec.PolicyTables is { Count: > 0 } policyTables)
+            {
+                objects = policyTables.Select(t => (object)new { table = t }).ToList();
+            }
+            // The API documents an `effectiveDate` for testing policies with a fixed "now".
+            // We don't surface that knob today — Power BI defaults to UtcNow which matches
+            // what every Tabular-Editor user expects.
+        }
         if (objects is not null) payload["objects"] = objects;
 
         return JsonSerializer.Serialize(payload);

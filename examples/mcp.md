@@ -473,3 +473,18 @@ Health probe (always unauthenticated): `GET http://<host>:<port>/healthz` → `2
 The §4.1 "healthy chain" definition from Semantix-for-DAXter.md — an MCP `initialize` over
 the route returning `serverInfo.name = "daxter"` — works natively. No supergateway or
 intermediate stdio bridge needed.
+
+## Apply Refresh Policy (v1.39.0)
+
+After deploying a Power BI model to a new environment, tables with an incremental
+refresh policy need the policy-defined partitions materialised. Tabular Editor exposes
+this as right-click "Apply refresh policy". DAXter exposes it as two MCP tools:
+
+| You say | Tool |
+|---|---|
+| "Refresh the model and also apply the refresh policies on policy tables" | `daxter_refresh` with `scope: "model"`, `apply_policy: true` — full model refresh + policy walk on policy tables. |
+| "Just apply the refresh policies (don't touch anything else)" | `daxter_apply_refresh_policy` (no args; defaults to whole-model) — pre-flight discovers policy tables, scopes the API call to only those. Non-policy tables UNTOUCHED. |
+| "Just apply the refresh policy on FACT - Trans Line" | `daxter_apply_refresh_policy` with `table: "FACT - Trans Line"` — validates the table has a policy, refuses if not. |
+
+Both tools are `Destructive = true` and gated: dry-run by default, `execute=true` required,
+PROD block applies. Same Enhanced Refresh queue + worker as every other refresh.

@@ -6,6 +6,77 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-06-10
+
+### Added — Apply Refresh Policy (Tabular Editor parity for post-deploy bootstrap)
+After deploying a Power BI model to a new environment, tables with an incremental refresh
+policy need the policy-defined partitions materialised (the rolling window + archive
+slices). Tabular Editor exposes this as right-click → **"Apply refresh policy"**; DAXter
+now exposes it via two distinct entry points:
+
+- **Option A — bundled with full model refresh:**
+  - CLI: `daxter refresh model --apply-policy --yes`
+  - MCP: `daxter_refresh` with `apply_policy: true`
+  - Wire shape: whole-model refresh + `applyRefreshPolicy: true`, no `objects` list.
+    Power BI naturally applies the policy only on tables that have one; non-policy
+    tables get a regular full refresh as part of the model job.
+  - Use when: "I'm doing a full refresh anyway, also walk the policies while you're there."
+
+- **Option B — standalone, surgical (the canonical post-deploy operation):**
+  - CLI: `daxter refresh apply-policy [--table T] --yes`
+  - MCP: `daxter_apply_refresh_policy` (new tool) with optional `table` arg
+  - Wire shape: `applyRefreshPolicy: true` **with explicit `objects: [{table: T1}, …]`
+    scoped to ONLY tables that have a refresh policy**. Non-policy tables are NEVER
+    touched. Mirrors Tabular Editor's per-table right-click semantics.
+  - Pre-flight discovery via XMLA TOM (`ModelEditService.TablesWithRefreshPolicy`).
+    Refuses with a clear, actionable message when:
+    - No tables in the model have a policy:
+      *"No tables in this model have an incremental refresh policy — nothing to apply.
+      Did you mean to run a regular refresh? (`daxter refresh model`)"*
+    - `--table T` is given and T has no policy:
+      *"Table 'T' has no incremental refresh policy — nothing to apply. Use a normal refresh."*
+
+- **`RefreshSpec` gains two additive fields** (back-compat preserved — every v1.x caller's
+  wire shape is unchanged when `ApplyPolicy=false`):
+  - `ApplyPolicy: bool = false` — whether to set `applyRefreshPolicy: true` in the body.
+  - `PolicyTables: IReadOnlyList<string>? = null` — when set, BuildBody emits the scoped
+    objects list (Option B); when null with `ApplyPolicy=true`, BuildBody emits the
+    unscoped whole-model body (Option A).
+
+- **`ModelEditService.TablesWithRefreshPolicy()`** — enumerate every table with a
+  `BasicRefreshPolicy`. Used by the standalone path for discovery.
+- **`ModelEditService.HasRefreshPolicy(name)`** — boolean check used by the
+  `--table T` validator.
+
+- **Safety: partition-targeted refreshes refuse `apply_policy`.** Both the CLI subcommand
+  and the MCP tool param error out with a pointer to the table form. The Power BI API
+  rejects `applyRefreshPolicy: true` combined with `commitMode: partialBatch` anyway;
+  this guard surfaces a clear "wrong scope" message before the round-trip.
+
+### Tests
+- 8 new `ApplyRefreshPolicyTests` pin the wire-shape contract for both options, the
+  default-off behaviour, and the partition-kind safety guard:
+  - Option A → `applyRefreshPolicy: true`, no `objects` list.
+  - Option B → `applyRefreshPolicy: true`, `objects` list scoped to PolicyTables only.
+  - Partition kind + `ApplyPolicy=true` → still emits `applyRefreshPolicy: false`
+    (defense in depth).
+  - `ApplyPolicy=false` → original v1.x wire shape unchanged (no new keys).
+  - Option A vs Option B distinguishable on the wire.
+- **Total: 374 tests passing** (was 366 in v1.38.0).
+
+### Why two paths
+- Option A is the "while I'm at it" convenience flag — same cost as a regular refresh.
+- Option B is the deliberate, surgical operation — what Tabular Editor's right-click does,
+  what a CI/CD post-deploy step wants. Especially important on large models where you
+  don't want a full refresh side effect on every non-policy table just to materialise
+  the policy slices.
+
+### §4 contract preservation
+Image / user / entrypoint / stdio / every existing env var / CLI verbs / on-disk store /
+stdout-stderr — all unchanged. New CLI subcommand `daxter refresh apply-policy` and new
+MCP tool `daxter_apply_refresh_policy` are pure additions. The `apply_policy` flag on
+`daxter refresh model` and `daxter_refresh` is additive (defaults to false; back-compat).
+
 ## [1.38.0] - 2026-06-10
 
 ### Added — Native Streamable-HTTP MCP transport (Semantix wishlist #1)

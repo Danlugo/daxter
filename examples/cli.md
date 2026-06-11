@@ -531,3 +531,41 @@ the env var, so existing Semantix tokens keep working without reformatting.
 **Logging**: full tokens are NEVER logged. Anywhere a token would appear in a log line it
 goes through `Redact()` first → `sk_abc12***` (8-char prefix). Lets you correlate logs
 with the value pasted into Semantix without leaking the secret to log aggregators.
+
+## Apply Refresh Policy (v1.39.0) — for new-environment deploys
+
+After deploying a model to a new workspace, tables with an incremental refresh policy
+exist but their **policy-defined partitions haven't been materialised** yet. The
+single default partition (the one with the GUID suffix in Tabular Editor's TOM Explorer)
+needs to be replaced by the policy-walked rolling window. Tabular Editor does this with
+the right-click "Apply refresh policy" menu item — DAXter does it with two flavours:
+
+### Option A — bundled with a full model refresh
+
+```bash
+./bin/daxter refresh model --apply-policy --yes
+```
+
+Refreshes the WHOLE model (every table) + walks the refresh policy on tables that have
+one (materialises the policy partitions). Non-policy tables get a normal full refresh.
+Use this when you're refreshing anyway and want to bootstrap the policy partitions in
+the same job.
+
+### Option B — surgical, only touches policy tables (recommended for post-deploy)
+
+```bash
+# Discover all tables with a policy + apply on each (most common):
+./bin/daxter refresh apply-policy --yes
+
+# Just one specific table:
+./bin/daxter refresh apply-policy --table "FACT - Trans Line" --yes
+```
+
+DAXter pre-flight scans the model via XMLA, identifies tables with a
+`BasicRefreshPolicy`, and submits ONE refresh job scoped to ONLY those tables. **Non-policy
+tables are not touched.** Mirrors Tabular Editor's per-table semantics.
+
+Error cases:
+- No tables in the model have a policy → `"No tables in this model have an incremental refresh policy — nothing to apply. Did you mean to run a regular refresh? (\`daxter refresh model\`)"`.
+- `--table T` named a table without a policy → `"Table 'T' has no incremental refresh policy — nothing to apply. Use a normal refresh."`.
+- Used with `--apply-policy` on a partition-targeted refresh → refused (apply-policy is a table-level operation).

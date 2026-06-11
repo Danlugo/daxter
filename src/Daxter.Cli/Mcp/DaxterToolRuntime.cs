@@ -302,7 +302,13 @@ internal static class DaxterToolRuntime
         string? workspace, string? dataset,
         RefreshKind kind, string? table, string? partition,
         PartitionOrder order, RefreshType type, IReadOnlyList<string>? partitions,
-        bool execute, int retries, CancellationToken ct)
+        bool execute, int retries, CancellationToken ct,
+        // v1.39.0 — Apply Refresh Policy plumbing. applyPolicy=true tells Power BI to walk the
+        // refresh policy on tables that have one. policyTables (when set) scopes the API call
+        // to ONLY those tables — the surgical Option B path; the standalone
+        // ApplyRefreshPolicyAsync populates it via XMLA pre-flight discovery.
+        bool applyPolicy = false,
+        IReadOnlyList<string>? policyTables = null)
         => Guard(async () =>
         {
             var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
@@ -311,7 +317,7 @@ internal static class DaxterToolRuntime
                 throw new DaxterException("A dataset is required for refresh operations.");
             }
 
-            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries);
+            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries, applyPolicy, policyTables);
             var plan = RefreshTitle.Describe(spec);
 
             if (!execute)
@@ -333,6 +339,67 @@ internal static class DaxterToolRuntime
             var store = new RefreshQueueStore();
             var job = store.Enqueue(spec, RefreshTitle.For(spec), JobOrigin.Mcp);
             return $"QUEUED as job #{job.Id} — {plan}. The DAXter worker (web container) runs it, serialized one refresh per model.{WorkerWarning(store)} Track with daxter_refresh_jobs.";
+        });
+
+    /// <summary>v1.39.0 — the standalone "apply refresh policy" MCP entry point (Option B).
+    /// Surgical: only tables with a refresh policy are touched. Pre-flight XMLA TOM
+    /// discovery enumerates policy tables (or validates a specifically-named one); fails
+    /// loudly when zero policy tables exist or the named table has no policy. Mirrors
+    /// Tabular Editor's right-click "Apply refresh policy" semantics — non-policy tables
+    /// are never refreshed by this tool, even as a side effect.</summary>
+    public static Task<string> ApplyRefreshPolicyAsync(
+        string? workspace, string? dataset, string? specificTable,
+        bool execute, int retries, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
+            if (string.IsNullOrWhiteSpace(config.Dataset))
+                throw new DaxterException("A dataset is required for apply-refresh-policy.");
+
+            // Pre-flight: open the model, discover policy tables (or validate the named one).
+            // The XMLA round-trip is synchronous and cheap (a single Tom.Server connect +
+            // metadata enumeration), so we do it before the prod-check + writes-gate. A
+            // misnamed workspace/dataset therefore surfaces as an XMLA connect error here,
+            // not as a confusing "queue refused" later.
+            var token = await Provider(config).GetTokenAsync(ct);
+            IReadOnlyList<string> policyTables;
+            using (var svc = new ModelEditService(config, token))
+            {
+                if (!string.IsNullOrWhiteSpace(specificTable))
+                {
+                    if (!svc.HasRefreshPolicy(specificTable))
+                        return $"REFUSED — Table '{specificTable}' has no incremental refresh policy — nothing to apply. " +
+                               "Use a normal daxter_refresh (scope=table) for a regular refresh.";
+                    policyTables = new[] { specificTable };
+                }
+                else
+                {
+                    policyTables = svc.TablesWithRefreshPolicy();
+                    if (policyTables.Count == 0)
+                        return "REFUSED — No tables in this model have an incremental refresh policy — nothing to apply. " +
+                               "Did you mean to run a regular refresh? (daxter_refresh with scope=model)";
+                }
+            }
+
+            var spec = new RefreshSpec(
+                RefreshKind.Model, config.Workspace!, config.Dataset!,
+                Table: null, Partition: null, Order: PartitionOrder.NewestFirst,
+                Type: RefreshType.Full, Partitions: null, Retries: retries,
+                ApplyPolicy: true, PolicyTables: policyTables);
+            var plan = $"apply refresh policy on {policyTables.Count} table(s): " +
+                       string.Join(", ", policyTables) +
+                       $" in '{config.Workspace}/{config.Dataset}'";
+
+            if (!execute)
+                return $"DRY RUN — not queued. Would queue: {plan}. Set execute=true (with writes enabled) to queue it.";
+            if (!WritesAllowed())
+                return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
+
+            var store = new RefreshQueueStore();
+            var job = store.Enqueue(spec, "apply-policy: " + string.Join(", ", policyTables), JobOrigin.Mcp);
+            return $"QUEUED as job #{job.Id} — {plan}.{WorkerWarning(store)} Track with daxter_refresh_jobs.";
         });
 
     /// <summary>Re-runs a finished/interrupted job. When <paramref name="remainingOnly"/> and the job is a

@@ -1614,19 +1614,30 @@ internal static class Program
         var topOption = new Option<int>("--top") { Description = "Rows of refresh history.", DefaultValueFactory = _ => 10 };
         var retriesOption = new Option<int>("--retries") { Description = "Retry on transient failure: number of extra attempts (default 0; e.g. 3). Linear backoff." };
 
-        var model = new Command("model", "Queue a whole-model refresh (runs in the shared worker).") { typeOption, dryRun, yes, force, retriesOption };
+        // v1.39.0 — Option A: --apply-policy as a flag on the existing model refresh.
+        // Tells Power BI to walk refresh policies on tables that have one as part of the
+        // whole-model refresh. Non-policy tables get a normal refresh. Used for the "while
+        // I'm refreshing anyway, also bootstrap policy partitions" workflow.
+        var applyPolicyOption = new Option<bool>("--apply-policy")
+        {
+            Description = "Also walk the refresh policy on tables that have one (creates the policy-defined partitions). " +
+                          "Required after first deploy to a new environment. Use `daxter refresh apply-policy` for the surgical " +
+                          "variant that ONLY touches policy tables without refreshing the rest of the model.",
+        };
+        var model = new Command("model", "Queue a whole-model refresh (runs in the shared worker).") { typeOption, applyPolicyOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(model);
         model.SetAction((pr, ct) => EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
             RefreshKind.Model, null, null, PartitionOrder.NewestFirst,
             MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption),
+            applyPolicy: pr.GetValue(applyPolicyOption), policyTables: null, ct));
 
         var table = new Command("table", "Queue a single-table refresh.") { tableOption, typeOption, dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(table);
         table.SetAction((pr, ct) => EnqueueRefreshAsync(() => connectionOptions.Resolve(pr),
             RefreshKind.Table, RequireOption(pr, tableOption, "--table"), null, PartitionOrder.NewestFirst,
             MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct: ct));
 
         var partition = new Command("partition", "Queue a single named-partition refresh.")
         {
@@ -1637,7 +1648,7 @@ internal static class Program
             RefreshKind.Partition, RequireOption(pr, tableOption, "--table"),
             RequireOption(pr, partitionOption, "--partition"), PartitionOrder.NewestFirst,
             MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), null,
-            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct));
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct: ct));
 
         var partitions = new Command("partitions", "Queue a partition refresh — all of a table in order (newest-first), or a --partitions subset.")
         {
@@ -1654,8 +1665,27 @@ internal static class Program
                 parts is null ? RefreshKind.AllPartitions : RefreshKind.SomePartitions,
                 RequireOption(pr, tableOption, "--table"), null, ParseOrder(pr.GetValue(orderOption)),
                 MaintenanceService.ParseRefreshType(pr.GetValue(typeOption)), parts,
-                pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct);
+                pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), pr.GetValue(retriesOption), ct: ct);
         });
+
+        // v1.39.0 — Option B: standalone "apply refresh policy" subcommand. Surgical.
+        // Discovers policy-bearing tables via XMLA TOM (or validates a specific --table T),
+        // then submits ONE refresh with applyRefreshPolicy=true scoped to only those tables.
+        // Non-policy tables are not touched. Mirrors Tabular Editor's per-table right-click
+        // "Apply refresh policy" behaviour.
+        var applyPolicyCmd = new Command("apply-policy",
+            "Apply incremental refresh policy on tables that have one — surgical. Mirrors " +
+            "Tabular Editor's right-click 'Apply refresh policy'. Use this after deploying a " +
+            "model to a new environment to materialise the policy-defined partitions; " +
+            "non-policy tables are NOT touched. With --table T: that one table; without: " +
+            "every table in the model that has a policy.")
+        { tableOption, dryRun, yes, force, retriesOption };
+        connectionOptions.AddTo(applyPolicyCmd);
+        applyPolicyCmd.SetAction((pr, ct) => RunApplyPolicyAsync(
+            () => connectionOptions.Resolve(pr),
+            pr.GetValue(tableOption),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force),
+            pr.GetValue(retriesOption), ct));
 
         var trigger = new Command("trigger", "Trigger a model refresh via REST (async, server-managed — not queued through the worker).") { dryRun, yes, force, retriesOption };
         connectionOptions.AddTo(trigger);
@@ -1679,9 +1709,9 @@ internal static class Program
             pr.GetValue(jobIdArg), pr.GetValue(fullOption),
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
 
-        return new Command("refresh", "Queue model / table / partition(s) refreshes; resume; view status & history.")
+        return new Command("refresh", "Queue model / table / partition(s) refreshes; apply-policy; resume; view status & history.")
         {
-            model, table, partition, partitions, resume, trigger, history, status,
+            model, table, partition, partitions, applyPolicyCmd, resume, trigger, history, status,
         };
     }
 
@@ -1774,10 +1804,14 @@ internal static class Program
     /// Dry-run prints the plan; without --yes it refuses; PROD-looking targets need --force. Prints the
     /// job id to stdout. Connection-free: enqueueing only writes to the shared <c>~/.daxter</c> volume.
     /// </summary>
-    private static Task<int> EnqueueRefreshAsync(
+    /// <summary>v1.39.0 — the standalone "apply refresh policy" CLI entry point. Surgical:
+    /// only tables with a refresh policy are touched. Pre-flight discovery happens
+    /// synchronously over XMLA TOM (<see cref="ModelEditService.TablesWithRefreshPolicy"/>);
+    /// then a single refresh job is queued with `applyRefreshPolicy=true` and an `objects`
+    /// list scoped to those tables only. Mirrors Tabular Editor's right-click semantics.</summary>
+    private static async Task<int> RunApplyPolicyAsync(
         Func<DaxterConfig> configFactory,
-        RefreshKind kind, string? table, string? partition,
-        PartitionOrder order, RefreshType type, IReadOnlyList<string>? partitions,
+        string? specificTable,
         bool dryRun, bool yes, bool force, int retries, CancellationToken ct)
     {
         try
@@ -1787,7 +1821,101 @@ internal static class Program
             if (string.IsNullOrWhiteSpace(config.Workspace))
                 throw new DaxterException("A workspace is required (set DAXTER_WORKSPACE or --workspace).");
 
-            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries);
+            // Pre-flight: open the model, discover policy tables (or validate the named one).
+            // We open the XMLA session before doing the prod check + queueing so a misnamed
+            // workspace surfaces as an XMLA connect error, not a confusing prod-block.
+            var tokenProvider = BuildTokenProvider(config);
+            var token = await tokenProvider.GetTokenAsync(ct).ConfigureAwait(false);
+            IReadOnlyList<string> policyTables;
+            using (var svc = new ModelEditService(config, token))
+            {
+                if (!string.IsNullOrWhiteSpace(specificTable))
+                {
+                    // Option B variant — a specific named table. Fail clearly if it has no policy
+                    // rather than silently queueing a no-op refresh. Matches Tabular Editor:
+                    // right-clicking a table without a policy doesn't show the menu item.
+                    if (!svc.HasRefreshPolicy(specificTable))
+                        throw new DaxterException(
+                            $"Table '{specificTable}' has no incremental refresh policy — nothing to apply. " +
+                            "Use a normal `daxter refresh table -t \"" + specificTable + "\"` for a regular refresh.");
+                    policyTables = new[] { specificTable };
+                }
+                else
+                {
+                    // Option B variant — discover all tables with a policy. If zero, refuse
+                    // with a clear hint at the post-deploy use case (it's the only time anyone
+                    // runs apply-policy and a zero result means the model genuinely has none).
+                    policyTables = svc.TablesWithRefreshPolicy();
+                    if (policyTables.Count == 0)
+                        throw new DaxterException(
+                            "No tables in this model have an incremental refresh policy — nothing to apply. " +
+                            "Did you mean to run a regular refresh? (`daxter refresh model`)");
+                }
+            }
+
+            // Build the spec. Kind=Model is correct here even though we're scoping via the
+            // PolicyTables list — BuildBody emits the objects list when PolicyTables is set,
+            // and Kind=Model carries the right intent for the queue display + history.
+            var spec = new RefreshSpec(
+                RefreshKind.Model, config.Workspace!, config.Dataset!,
+                Table: null, Partition: null, Order: PartitionOrder.NewestFirst,
+                Type: RefreshType.Full, Partitions: null, Retries: retries,
+                ApplyPolicy: true, PolicyTables: policyTables);
+            var plan = $"apply refresh policy on {policyTables.Count} table(s): " +
+                       string.Join(", ", policyTables) +
+                       $" in '{config.Workspace}/{config.Dataset}'";
+
+            if (dryRun)
+            {
+                Console.Error.WriteLine("-- dry run; not queued --");
+                Console.Out.WriteLine(plan);
+                return 0;
+            }
+            if (!yes)
+            {
+                Console.Out.WriteLine(plan);
+                Console.Error.WriteLine("Refusing to queue without --yes. Re-run with --yes (or --dry-run to preview).");
+                return 0;
+            }
+            if (LooksLikeProd(config) && !force)
+            {
+                Console.Error.WriteLine($"daxter: target looks like PRODUCTION ('{config.Workspace}'). Re-run with --force to proceed.");
+                return 1;
+            }
+
+            var store = new RefreshQueueStore();
+            var job = store.Enqueue(spec, "apply-policy: " + string.Join(", ", policyTables), JobOrigin.Cli);
+            Console.Out.WriteLine(job.Id);
+            Console.Error.WriteLine($"Queued as job #{job.Id} — {plan}.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static Task<int> EnqueueRefreshAsync(
+        Func<DaxterConfig> configFactory,
+        RefreshKind kind, string? table, string? partition,
+        PartitionOrder order, RefreshType type, IReadOnlyList<string>? partitions,
+        bool dryRun, bool yes, bool force, int retries,
+        // v1.39.0 — Apply Refresh Policy plumbing. applyPolicy=true tells Power BI to walk
+        // any RefreshPolicy on targeted tables (creates policy-defined partitions). When
+        // policyTables is set, the wire-shape switches from "whole-model unscoped" to
+        // "objects-list scoped to ONLY these tables" — that's Option B (surgical).
+        bool applyPolicy = false,
+        IReadOnlyList<string>? policyTables = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            if (string.IsNullOrWhiteSpace(config.Workspace))
+                throw new DaxterException("A workspace is required (set DAXTER_WORKSPACE or --workspace).");
+
+            var spec = new RefreshSpec(kind, config.Workspace!, config.Dataset!, table, partition, order, type, partitions, retries, applyPolicy, policyTables);
             var plan = RefreshTitle.Describe(spec);
 
             if (dryRun)

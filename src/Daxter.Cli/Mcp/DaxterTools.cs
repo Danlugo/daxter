@@ -462,6 +462,7 @@ public static class DaxterTools
         [Description("Partition order for scope=partitions: newest-first | oldest-first")] string? order = null,
         [Description("Actually queue it (default false = dry run).")] bool execute = false,
         [Description("Retry the refresh up to N times on transient failure (default 0; e.g. 3). Linear backoff.")] int retries = 0,
+        [Description("v1.39.0 — also walk the refresh policy on tables that have one. Only valid for scope=model or scope=table. Required after deploying a model to a new environment to materialise the policy-defined partitions. For a SURGICAL alternative that only touches policy tables (no whole-model refresh side effect on non-policy tables), use daxter_apply_refresh_policy.")] bool apply_policy = false,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
     {
         var s = scope.Trim().ToLowerInvariant();
@@ -484,11 +485,32 @@ public static class DaxterTools
             throw new DaxterException($"table is required for scope={s}.");
         if (kind == RefreshKind.Partition && string.IsNullOrWhiteSpace(partition))
             throw new DaxterException("partition is required for scope=partition.");
+        if (apply_policy && kind is RefreshKind.Partition or RefreshKind.AllPartitions or RefreshKind.SomePartitions)
+            throw new DaxterException(
+                "apply_policy is incompatible with partition-targeted refreshes. Use scope=model or scope=table " +
+                "(or call daxter_apply_refresh_policy for the surgical, scoped-to-policy-tables variant).");
 
         return DaxterToolRuntime.EnqueueRefreshAsync(
             workspace, dataset, kind, table, partition,
-            DaxterToolRuntime.ParseOrder(order), rtype, parts, execute, retries, ct);
+            DaxterToolRuntime.ParseOrder(order), rtype, parts, execute, retries, ct,
+            applyPolicy: apply_policy, policyTables: null);
     }
+
+    [McpServerTool(Name = "daxter_apply_refresh_policy", Destructive = true, Title = "Apply incremental refresh policy (surgical — Tabular Editor parity)"), Description(
+        "v1.39.0 — Apply the incremental refresh policy on tables that have one, mirroring Tabular Editor's " +
+        "right-click 'Apply refresh policy'. SURGICAL: only tables WITH a policy are touched — non-policy tables " +
+        "are NOT refreshed. Use this after deploying a model to a new environment, where the policy is defined " +
+        "but no partitions have been materialised from it yet. Pre-flight enumerates policy tables via XMLA TOM; " +
+        "refuses with a clear message if no tables have a policy, or if a specifically-named 'table' has none. " +
+        "DRY-RUN by default; set execute=true AND enable writes to queue. PROD-block respects the workspace " +
+        "read-only patterns. For a bundled alternative that ALSO refreshes everything else, use daxter_refresh " +
+        "with scope=model and apply_policy=true.")]
+    public static Task<string> ApplyRefreshPolicy(
+        [Description("Optional — apply the policy on just this one table. Refused if the table has no policy. Omit to discover + apply on every policy table in the model.")] string? table = null,
+        [Description("Actually queue it (default false = dry run).")] bool execute = false,
+        [Description("Retry the refresh up to N times on transient failure (default 0).")] int retries = 0,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.ApplyRefreshPolicyAsync(workspace, dataset, table, execute, retries, ct);
 
     [McpServerTool(Name = "daxter_resume_refresh", Destructive = true, Title = "Resume a refresh job"), Description(
         "Re-run a finished/interrupted/failed refresh job by id (from daxter_refresh_jobs). By DEFAULT resumes " +
