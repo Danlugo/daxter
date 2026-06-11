@@ -6,6 +6,55 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-06-10
+
+### Web console — safer defaults + optional authentication
+Hardening pass on the web console (`daxter web`) and its HTTP `/api/*` endpoints. The
+console holds the signed-in identity and can operate against the tenant, so it now ships
+locked down by default and offers an auth option for exposed deployments.
+
+- **Localhost-by-default bind.** `daxter web` binds to **`127.0.0.1`** by default rather
+  than all interfaces. Widen explicitly with `--bind 0.0.0.0` or `DAXTER_WEB_BIND`;
+  `--urls` / `ASPNETCORE_URLS` still take precedence. Inside the official image the bind is
+  `0.0.0.0` (so Docker port-forwarding works) and host exposure is controlled by the `-p`
+  mapping.
+- **Container deploy maps host→loopback.** The `daxter-deploy` flow now publishes
+  `-p 127.0.0.1:8080:8080`, so a redeployed container is reachable on host-localhost only.
+- **`DAXTER_WEB_BEARER_TOKEN` enables auth on `/api/*`.** When set, `/api/sql/export` and
+  `/api/artifacts/*` require `Authorization: Bearer <token>` (constant-time compare).
+  `/api/health` stays open (liveness probe, no sensitive data). When unset the gate is off,
+  preserving the existing localhost-only behaviour — set the token when binding beyond
+  localhost. A startup warning fires if the console is bound non-loopback without a token.
+- **Generic HTTP error responses.** `/api/artifacts/*` returns a generic message + a
+  correlation id; full detail goes to the server log only.
+- **CI dependency audit.** CI now runs `dotnet list package --vulnerable
+  --include-transitive` on the Cli + Web projects and fails the build on any
+  known-vulnerable dependency, so dependency CVEs surface on the next push.
+
+### Refactor
+- **`Daxter.Core.Auth.BearerTokenStore`** — the bearer-token primitives (sk_-format token
+  generation, constant-time `FixedTimeEquals`, RFC 6750 header parse, log redaction,
+  env&gt;file&gt;generate resolve) now live once in Core and are shared by the MCP transport
+  (v1.38.0) and the new Web `/api/*` gate. `McpBearerToken` is a thin wrapper over it; its
+  public API is unchanged, so the v1.38.0 MCP code and tests are untouched.
+
+### Tests
+- 28 new tests (`BearerTokenStoreTests` + `ApiBearerAuthMiddlewareTests`) — token format,
+  constant-time compare, header parsing, redaction, resolve precedence, and the Web gate's
+  on/off behaviour. The test project now references `Daxter.Web`.
+- **Total: 402 tests passing** (was 374 in v1.39.0).
+
+### Compatibility
+- **No change for Semantix or existing localhost deployments.** Semantix gateways run
+  `daxter mcp` (bearer-gated since v1.38.0), not `daxter web`. Localhost setups keep
+  working: localhost bind is the new default and the `/api/*` gate is opt-in via the token.
+  The §4 contract (image / user / entrypoint / stdio MCP / env vars / CLI verbs / on-disk
+  store / stdout-stderr) is fully preserved.
+
+### Recommended
+- When running `daxter web` exposed beyond localhost, set `DAXTER_WEB_BEARER_TOKEN` and
+  front it with TLS. Treat the `~/.daxter` token volume as a secret store. See `SECURITY.md`.
+
 ## [1.39.0] - 2026-06-10
 
 ### Added — Apply Refresh Policy (Tabular Editor parity for post-deploy bootstrap)

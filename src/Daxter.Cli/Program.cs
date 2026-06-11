@@ -155,8 +155,22 @@ internal static class Program
         versionCommand.SetAction((pr, ct) => RunVersionAsync(pr.GetValue(checkLatestOpt), ct));
 
         var webPort = new Option<int>("--port") { Description = "Port for the web console.", DefaultValueFactory = _ => 8080 };
-        var webCommand = new Command("web", "Run the DAXter web console (status, configure, explore).") { webPort };
-        webCommand.SetAction((pr, ct) => RunWebAsync(pr.GetValue(webPort), ct));
+        // v1.40.0 — bind address. Defaults to LOOPBACK (127.0.0.1): the console holds the
+        // signed-in token and can mutate Power BI, so it should not be exposed to the network by
+        // default. Pass --bind 0.0.0.0 (or set DAXTER_WEB_BIND) to widen — the container deploy
+        // does this, but maps the host side to 127.0.0.1 so the host still only exposes localhost.
+        var webBind = new Option<string>("--bind")
+        {
+            Description = "Address to bind the web console to. Default 127.0.0.1 (localhost only). " +
+                          "Use 0.0.0.0 to expose on all interfaces (set DAXTER_WEB_BEARER_TOKEN too — see security docs).",
+            DefaultValueFactory = _ =>
+            {
+                var env = Environment.GetEnvironmentVariable("DAXTER_WEB_BIND");
+                return string.IsNullOrWhiteSpace(env) ? "127.0.0.1" : env.Trim();
+            },
+        };
+        var webCommand = new Command("web", "Run the DAXter web console (status, configure, explore).") { webPort, webBind };
+        webCommand.SetAction((pr, ct) => RunWebAsync(pr.GetValue(webPort), pr.GetValue(webBind)!, ct));
 
         var root = new RootCommand(
             "DAXter — Power BI Service CLI: query, model metadata, maintenance, and inventory.")
@@ -1177,7 +1191,7 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunWebAsync(int port, CancellationToken ct)
+    private static async Task<int> RunWebAsync(int port, string bind, CancellationToken ct)
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "Daxter.Web.dll");
         if (!File.Exists(dll))
@@ -1186,11 +1200,20 @@ internal static class Program
             return 1;
         }
 
-        Console.Error.WriteLine($"DAXter web console → http://localhost:{port}  (Ctrl+C to stop)");
+        // v1.40.0 — bind to the requested address (default 127.0.0.1). When binding beyond
+        // loopback, nudge the operator to set a Web bearer token so /api/* isn't open.
+        var loopback = bind is "127.0.0.1" or "localhost" or "::1";
+        var reachable = loopback ? "localhost" : bind;
+        Console.Error.WriteLine($"DAXter web console → http://{reachable}:{port}  (bind {bind}; Ctrl+C to stop)");
+        if (!loopback && Environment.GetEnvironmentVariable("DAXTER_WEB_BEARER_TOKEN") is null or "")
+            Console.Error.WriteLine(
+                "⚠ SECURITY: binding beyond localhost without DAXTER_WEB_BEARER_TOKEN — the /api/* endpoints " +
+                "will not require authentication. Set the token or bind 127.0.0.1.");
+
         var psi = new ProcessStartInfo("dotnet") { UseShellExecute = false };
         psi.ArgumentList.Add(dll);
         psi.ArgumentList.Add("--urls");
-        psi.ArgumentList.Add($"http://0.0.0.0:{port}");
+        psi.ArgumentList.Add($"http://{bind}:{port}");
 
         using var proc = Process.Start(psi)!;
         try

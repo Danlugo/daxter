@@ -69,9 +69,23 @@ public static class ArtifactsEndpoint
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "List artifacts failed");
+            await Fail(response, log, ex, "List artifacts failed", ct);
+        }
+    }
+
+    /// <summary>v1.40.0 — generic error response. The detail (which can carry internal filesystem
+    /// paths) goes to the SERVER log only; the client gets a generic message + a correlation id it
+    /// can quote to an operator. Avoids leaking internals over an endpoint that may be reachable by
+    /// untrusted callers.</summary>
+    private static async Task Fail(HttpResponse response, ILogger log, Exception ex, string context, CancellationToken ct)
+    {
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        log.LogError(ex, "{Context} (correlation {CorrelationId})", context, correlationId);
+        if (!response.HasStarted)
+        {
             response.StatusCode = StatusCodes.Status500InternalServerError;
-            await response.WriteAsync($"List failed: {ex.Message}", ct);
+            response.ContentType = "text/plain; charset=utf-8";
+            await response.WriteAsync($"Internal error (correlation {correlationId}). See server logs.", ct);
         }
     }
 
@@ -212,9 +226,7 @@ public static class ArtifactsEndpoint
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "Artifact put failed: {Key}", key);
-            response.StatusCode = StatusCodes.Status500InternalServerError;
-            await response.WriteAsync($"Put failed: {ex.Message}", ct);
+            await Fail(response, log, ex, $"Artifact put failed: {key}", ct);
         }
     }
 
@@ -247,9 +259,7 @@ public static class ArtifactsEndpoint
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "Artifact delete failed: {Key}", key);
-            response.StatusCode = StatusCodes.Status500InternalServerError;
-            await response.WriteAsync($"Delete failed: {ex.Message}", ct);
+            await Fail(response, log, ex, $"Artifact delete failed: {key}", ct);
         }
     }
 

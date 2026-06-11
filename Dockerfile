@@ -57,7 +57,13 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
     HOME=/home/daxter \
-    DAXTER_VERSION=$DAXTER_VERSION
+    DAXTER_VERSION=$DAXTER_VERSION \
+    # v1.40.0 — INSIDE the container the web console binds 0.0.0.0 so Docker's port-forward
+    # reaches it. This is NOT the exposure control: HOST exposure is controlled by the `-p`
+    # mapping — use `-p 127.0.0.1:8080:8080` to keep the console on host-localhost only (the
+    # daxter-deploy skill does this). Bare-metal `daxter web` (no container) still defaults to
+    # 127.0.0.1. Set DAXTER_WEB_BEARER_TOKEN to gate /api/* when exposing beyond localhost.
+    DAXTER_WEB_BIND=0.0.0.0
 
 USER daxter
 EXPOSE 8080

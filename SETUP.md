@@ -181,8 +181,8 @@ whatever you do here is what Claude Desktop uses. *(Service principal? See
 above does **not** start it):
 
 ```bash
-# macOS / Linux:
-docker run -d -p 8080:8080 --name daxter-web --restart unless-stopped \
+# macOS / Linux:  (host-localhost only — the console holds your token; see SECURITY.md)
+docker run -d -p 127.0.0.1:8080:8080 --name daxter-web --restart unless-stopped \
   -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest web
 # Windows (PowerShell): same command works as-is.
 ```
@@ -273,7 +273,7 @@ target environments by naming the workspace per request (the name encodes the en
 
 | Symptom | Fix |
 |---------|-----|
-| Tool says **"Not signed in to Power BI"** | No cached token yet — open the web console (**http://localhost:8080 → Status → Sign in**) and finish the browser sign-in. If the console isn't running, have Claude start it (`docker run -d -p 8080:8080 … web`). |
+| Tool says **"Not signed in to Power BI"** | No cached token yet — open the web console (**http://localhost:8080 → Status → Sign in**) and finish the browser sign-in. If the console isn't running, have Claude start it (`docker run -d -p 127.0.0.1:8080:8080 … web`). |
 | `The authority ... must be in a well-formed URI format` | A tenant id was set to a placeholder/malformed value. Fix it in the web console **⚙ Configure → tenant** (a real GUID, no `<>`/quotes/spaces) and **Save**, then fully restart Claude Desktop. |
 | Claude: **"Could not load app settings… not valid JSON"** | The config file has a **UTF-8 BOM** (older Windows PowerShell's `Set-Content -Encoding UTF8` adds one). Rewrite it BOM-free, then fully restart: `$p="$env:APPDATA\Claude\claude_desktop_config.json"; [System.IO.File]::WriteAllText($p,[System.IO.File]::ReadAllText($p),(New-Object System.Text.UTF8Encoding $false))` — keeps your `daxter` entry. (Step 2's merge writes BOM-free.) |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
@@ -304,7 +304,7 @@ only *reads* from Power BI — removing it changes nothing in your tenant.
 
 - [ ] Docker daemon running — `docker info` succeeds (step 1) **before** any pull/run
 - [ ] `daxter` merged into `claude_desktop_config.json` (absolute docker path, backup made, **no `--env-file`**)
-- [ ] **Web console started by Claude** (`docker run -d -p 8080:8080 … web`); user signed in at
+- [ ] **Web console started by Claude** (`docker run -d -p 127.0.0.1:8080:8080 … web`); user signed in at
       **http://localhost:8080 → Status → Sign in** (and set defaults in ⚙ Configure if wanted)
 - [ ] **Verified by Claude:** `… ws ls` lists workspaces — proves sign-in + connection, so after the
       restart Claude **confirms it's all working** (no user test required)

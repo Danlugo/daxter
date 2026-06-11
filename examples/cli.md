@@ -569,3 +569,27 @@ Error cases:
 - No tables in the model have a policy → `"No tables in this model have an incremental refresh policy — nothing to apply. Did you mean to run a regular refresh? (\`daxter refresh model\`)"`.
 - `--table T` named a table without a policy → `"Table 'T' has no incremental refresh policy — nothing to apply. Use a normal refresh."`.
 - Used with `--apply-policy` on a partition-targeted refresh → refused (apply-policy is a table-level operation).
+
+## Securing the web console (v1.40.0)
+
+The web console holds the signed-in token and can mutate Power BI, so it is **localhost-only
+by default**:
+
+```bash
+daxter web                       # binds 127.0.0.1:8080 — safe on a shared network
+daxter web --bind 0.0.0.0        # expose on all interfaces (see warning below)
+DAXTER_WEB_BIND=0.0.0.0 daxter web   # same, via env (the container deploy uses this)
+```
+
+When you expose it beyond localhost, **gate the dangerous `/api/*` endpoints** with a bearer
+token (otherwise `POST /api/sql/export` runs arbitrary T-SQL with the server's AAD token,
+unauthenticated):
+
+```bash
+DAXTER_WEB_BEARER_TOKEN=$(openssl rand -hex 24) daxter web --bind 0.0.0.0
+# Now /api/sql/export and /api/artifacts/* require:  Authorization: Bearer <that token>
+# /api/health stays open (no secrets — liveness probe).
+```
+
+DAXter prints a loud warning if you bind wide without a token. See `SECURITY.md` for the
+full posture (including the token-volume guidance).

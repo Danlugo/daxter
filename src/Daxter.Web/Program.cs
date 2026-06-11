@@ -44,17 +44,48 @@ var logSink = new LogSink();
 builder.Services.AddSingleton(logSink);
 builder.Logging.AddProvider(new LogSinkLoggerProvider(logSink));
 
-// Default to all interfaces on 8080 inside the container (override with --urls / ASPNETCORE_URLS).
+// v1.40.0 — SAFE-BY-DEFAULT BIND. The Web console holds the signed-in AAD token and can mutate
+// Power BI; an open port = an open session. Default to LOOPBACK (127.0.0.1) so a laptop on a
+// shared network isn't exposing the console to the subnet. Widen explicitly via DAXTER_WEB_BIND
+// (the container deploy sets it to 0.0.0.0 so Docker port-mapping works — but the deploy maps the
+// host side to 127.0.0.1, so the host still only exposes localhost). --urls / ASPNETCORE_URLS
+// still win if set, for advanced hosting.
 if (string.IsNullOrEmpty(builder.Configuration["urls"]) &&
     string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
 {
-    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+    var bind = Environment.GetEnvironmentVariable("DAXTER_WEB_BIND");
+    if (string.IsNullOrWhiteSpace(bind)) bind = "127.0.0.1";
+    builder.WebHost.UseUrls($"http://{bind}:8080");
 }
 
 var app = builder.Build();
 
+// v1.40.0 — startup posture check. If the console is bound beyond loopback AND no Web bearer
+// token is set, the /api/* endpoints are reachable without authentication. Warn so a
+// misconfiguration is obvious in the logs rather than silent.
+{
+    var boundUrls = (Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+        ?? builder.Configuration["urls"]
+        ?? $"http://{(string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DAXTER_WEB_BIND")) ? "127.0.0.1" : Environment.GetEnvironmentVariable("DAXTER_WEB_BIND"))}:8080");
+    var loopbackOnly = boundUrls.Contains("127.0.0.1") || boundUrls.Contains("localhost") || boundUrls.Contains("[::1]");
+    var hasWebToken = Daxter.Core.Auth.BearerTokenStore.FromEnv(Daxter.Web.Services.ApiBearerAuthMiddleware.EnvVarName) is not null;
+    if (!loopbackOnly && !hasWebToken)
+    {
+        app.Logger.LogWarning(
+            "SECURITY: the Web console is bound beyond localhost ({Bind}) without DAXTER_WEB_BEARER_TOKEN. " +
+            "The /api/* endpoints will not require authentication. Set DAXTER_WEB_BEARER_TOKEN to require a " +
+            "bearer, or bind to 127.0.0.1.", boundUrls);
+    }
+}
+
 app.UseStaticFiles();
 app.UseAntiforgery();
+
+// v1.40.0 — gate the sensitive HTTP /api/* endpoints behind a bearer token WHEN
+// DAXTER_WEB_BEARER_TOKEN is set (no-op otherwise; localhost-bind is the protection in that
+// case). Must precede the endpoint maps so an unauth'd /api/sql/export never executes.
+app.UseMiddleware<Daxter.Web.Services.ApiBearerAuthMiddleware>();
+
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 // SQL streaming export — bypasses the Blazor SignalR circuit so multi-million-row downloads don't

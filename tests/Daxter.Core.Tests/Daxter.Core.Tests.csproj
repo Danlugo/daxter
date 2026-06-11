@@ -22,6 +22,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Daxter.Core\Daxter.Core.csproj" />
     <ProjectReference Include="..\..\src\Daxter.Cli\Daxter.Cli.csproj" />
+    <!-- v1.40.0 — reference the Web project so the /api/* bearer-gate middleware can be tested.
+         Pulls Microsoft.AspNetCore.App (already present via the Cli reference). -->
+    <ProjectReference Include="..\..\src\Daxter.Web\Daxter.Web.csproj" />
   </ItemGroup>
 
 </Project>

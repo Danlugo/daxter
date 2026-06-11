@@ -19,9 +19,28 @@ jobs:
       - name: Restore
         run: |
           dotnet restore src/Daxter.Cli/Daxter.Cli.csproj
+          dotnet restore src/Daxter.Web/Daxter.Web.csproj
           dotnet restore tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj
       - name: Test
         run: dotnet test tests/Daxter.Core.Tests/Daxter.Core.Tests.csproj -c Release --no-restore
+      # v1.40.0 — fail CI on any KNOWN-VULNERABLE transitive/direct dependency. `--include-transitive`
+      # catches CVEs in packages we don't reference directly. dotnet prints the exact phrase
+      # "has the following vulnerable packages" ONLY when a CVE is matched, so we key off that — a
+      # freshly-disclosed CVE in MSAL / SqlClient / the MCP SDK then surfaces on the next push
+      # instead of in a pentest. (Clean runs print "has no vulnerable packages".)
+      - name: Audit dependencies (fail on known vulnerabilities)
+        run: |
+          fail=0
+          for proj in src/Daxter.Cli/Daxter.Cli.csproj src/Daxter.Web/Daxter.Web.csproj; do
+            echo "== $proj =="
+            out="$(dotnet list "$proj" package --vulnerable --include-transitive 2>&1)"
+            echo "$out"
+            if echo "$out" | grep -qi 'has the following vulnerable packages'; then
+              echo "::error::Vulnerable dependencies found in $proj"; fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "✓ no known-vulnerable dependencies"
+          exit $fail
 
   image:
     name: Docker build

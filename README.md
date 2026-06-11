@@ -86,9 +86,9 @@ models, run DAX (with autocomplete + formatting), **edit the model** (parameters
 tables, on the gated **Model Edit** page), audit deployment rules, and read logs:
 
 ```bash
-docker run -d -p 8080:8080 --name daxter-web \
+docker run -d -p 127.0.0.1:8080:8080 --name daxter-web \
   -v daxter-tokens:/home/daxter/.daxter \
-  ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080
+  ghcr.io/danlugo/daxter:latest web          # → http://localhost:8080 (host-localhost only)
 ```
 
 Open it → **Status → Sign in** (device-code) → **⚙ Configure** to set defaults / *Allow writes*. The
