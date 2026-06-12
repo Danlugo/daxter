@@ -890,16 +890,19 @@ public static class DaxterTools
                  "Returns the on-disk path and row count; tell the user to docker cp it off the container, or mount " +
                  "the daxter-tokens volume on a host path to get the file directly. Same writes-gate as daxter_sql_query. " +
                  "Pass quoteAll=true and/or crlf=true to match Power BI / Excel \"Export data\" style (quote every " +
-                 "field, CRLF line endings) when the downstream consumer needs that exact format.")]
+                 "field, CRLF line endings) when the downstream consumer needs that exact format. With quoteAll, the " +
+                 "header is NOT quoted by default (byte-equivalent to the Fabric/Spark CSV writer); set quoteHeader=true " +
+                 "to also quote the header (Power BI / Excel shape).")]
     public static Task<string> SqlExport(
         [Description("Workspace name or id.")] string workspace,
         [Description("Warehouse or Lakehouse name (from daxter_sql_endpoints).")] string endpoint,
         [Description("T-SQL statement (typically a SELECT).")] string sql,
-        [Description("Wrap every field in quotes (Power BI / Excel \"Export data\" style). Default false = RFC 4180 quote-when-needed.")] bool quoteAll = false,
+        [Description("Wrap every DATA field in quotes (Power BI / Excel \"Export data\" style). Default false = RFC 4180 quote-when-needed.")] bool quoteAll = false,
         [Description("End lines with CRLF (\\r\\n) instead of LF (\\n). Excel-on-Windows convention. Default false.")] bool crlf = false,
+        [Description("When quoteAll=true, also quote the HEADER row. Default false = bare header (matches the Fabric/Spark CSV writer). No effect when quoteAll=false.")] bool quoteHeader = false,
         [Description("Optional — also mirror the CSV into the artifact store under this key (e.g. 'sql/exports/sales-2026-06-09.csv') so daxter_artifact_get can fetch it without docker cp.")] string? artifactKey = null,
         CancellationToken ct = default)
-        => DaxterToolRuntime.SqlExportAsync(workspace, endpoint, sql, ct, quoteAll, crlf, artifactKey);
+        => DaxterToolRuntime.SqlExportAsync(workspace, endpoint, sql, ct, quoteAll, crlf, quoteHeader, artifactKey);
 
     [McpServerTool(Name = "daxter_sql_query", ReadOnly = true, Title = "Run T-SQL on a Fabric SQL endpoint"),
      Description("Run T-SQL on a Fabric Warehouse or Lakehouse SQL endpoint. Pass the workspace and the endpoint NAME " +

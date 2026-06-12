@@ -195,10 +195,15 @@ isn't pre-authorized for `database.windows.net`).
 ./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
   --out /out/orders_full.csv "SELECT * FROM [dbo].[orders]"
 
-# Power BI / Excel "Export data" byte-compatible CSV (quote every field + CRLF endings)
+# Power BI / Excel "Export data" byte-compatible CSV (quote every field, header included, + CRLF)
 ./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
-  --out /out/orders_excel.csv --quote-all --crlf \
+  --out /out/orders_excel.csv --quote-all --crlf --quote-header \
   "SELECT * FROM [dbo].[orders]"
+
+# Fabric / Spark CSV writer byte-match ("Save Fabric Data to File"): quote data, NOT the header
+./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \
+  --out /out/orders_fabric.csv --quote-all --crlf \
+  "SELECT * FROM [dbo].[orders]"   # --quote-header omitted → bare header
 
 # Writes are gated behind --allow-writes (off by default — only SELECT/EXPLAIN/SHOW go through)
 ./bin/daxter sql query --workspace "Sales Analytics" --endpoint "RetailWH" \

@@ -866,7 +866,7 @@ internal static class DaxterToolRuntime
     /// default; non-SELECT requires the writes gate same as the live-query path.</summary>
     public static Task<string> SqlExportAsync(
         string? workspace, string endpointName, string sql, CancellationToken ct,
-        bool quoteAll = false, bool crlf = false, string? artifactKey = null)
+        bool quoteAll = false, bool crlf = false, bool quoteHeader = false, string? artifactKey = null)
         => Guard(async () =>
         {
             if (string.IsNullOrWhiteSpace(endpointName))
@@ -903,7 +903,7 @@ internal static class DaxterToolRuntime
             var safeEndpoint = string.Join("-", endpointName.Split(Path.GetInvalidFileNameChars()));
             var path = Path.Combine(dir, $"{ts}-{safeEndpoint}.csv");
 
-            var style = new CsvStyle(QuoteAll: quoteAll, Crlf: crlf);
+            var style = new CsvStyle(QuoteAll: quoteAll, Crlf: crlf, QuoteHeader: quoteHeader);
             var client = new FabricSqlClient(msal);
             await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var sw = new StreamWriter(fs);

@@ -1447,11 +1447,13 @@ internal static class Program
             { Description = "Wrap every CSV field in quotes (matches Power BI / Excel \"Export data\" style). Default off = RFC 4180 (quote-when-needed). Only meaningful with --out." };
         var crlfOpt = new Option<bool>("--crlf")
             { Description = "End each CSV line with CRLF (\\r\\n) instead of LF (\\n). Excel-on-Windows convention. Only meaningful with --out." };
+        var quoteHeaderOpt = new Option<bool>("--quote-header")
+            { Description = "With --quote-all, also quote the HEADER row. Default off = bare header (matches the Fabric/Spark CSV writer). No effect without --quote-all." };
         var artifactKeyOpt = new Option<string?>("--artifact-key")
             { Description = "Also mirror the exported CSV into the artifact store under this key (e.g. 'sql/sales-2026.csv'). Fetch via `daxter artifact get` / the /artifacts page / GET /api/artifacts. Only meaningful with --out." };
 
         var query = new Command("query", "Run T-SQL on a Fabric SQL endpoint.")
-            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt, quoteAllOpt, crlfOpt, artifactKeyOpt };
+            { endpointOpt, serverOpt, databaseOpt, queryArg, fileOption, outputOption, allowWritesOpt, outFileOpt, quoteAllOpt, crlfOpt, quoteHeaderOpt, artifactKeyOpt };
         connectionOptions.AddTo(query);
         query.SetAction((pr, ct) => RunSqlQueryAsync(
             () => connectionOptions.Resolve(pr, requireWorkspace: pr.GetValue(serverOpt) is null),
@@ -1464,6 +1466,7 @@ internal static class Program
             pr.GetValue(outFileOpt),
             pr.GetValue(quoteAllOpt),
             pr.GetValue(crlfOpt),
+            pr.GetValue(quoteHeaderOpt),
             pr.GetValue(artifactKeyOpt),
             ct));
 
@@ -1549,7 +1552,7 @@ internal static class Program
         Func<DaxterConfig> configFactory, Func<string> sqlFactory,
         string? endpointName, string? server, string? database,
         Func<string?> outputFactory, bool allowWrites, string? outFile,
-        bool quoteAll, bool crlf, string? artifactKey, CancellationToken ct)
+        bool quoteAll, bool crlf, bool quoteHeader, string? artifactKey, CancellationToken ct)
     {
         try
         {
@@ -1582,7 +1585,7 @@ internal static class Program
             // of row count; the grid in --output table mode would OOM on millions of rows.
             if (!string.IsNullOrWhiteSpace(outFile))
             {
-                var style = new Daxter.Core.Formatting.CsvStyle(QuoteAll: quoteAll, Crlf: crlf);
+                var style = new Daxter.Core.Formatting.CsvStyle(QuoteAll: quoteAll, Crlf: crlf, QuoteHeader: quoteHeader);
                 long rows;
                 await using (var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read))
                 await using (var sw = new StreamWriter(fs))

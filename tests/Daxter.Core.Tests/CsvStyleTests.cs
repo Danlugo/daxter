@@ -13,18 +13,42 @@ public class CsvStyleTests
         var d = CsvStyle.Default;
         Assert.False(d.QuoteAll);
         Assert.False(d.Crlf);
+        Assert.False(d.QuoteHeader);
         Assert.Equal("\n", d.LineEnding);
     }
 
     [Fact]
-    public void ExcelWindows_is_quote_all_plus_CRLF()
+    public void ExcelWindows_is_quote_all_plus_CRLF_including_header()
     {
-        // Matches Power BI's "Export data" output. If a customer compares an Export All download
-        // byte-for-byte against an Excel-Windows export, this is the preset that should match.
+        // Matches Power BI's "Export data" output (header quoted too). If a customer compares an
+        // Export All download byte-for-byte against an Excel-Windows export, this preset should match.
         var x = CsvStyle.ExcelWindows;
         Assert.True(x.QuoteAll);
         Assert.True(x.Crlf);
+        Assert.True(x.QuoteHeader);
         Assert.Equal("\r\n", x.LineEnding);
+    }
+
+    [Fact]
+    public void QuoteHeader_defaults_off_so_QuoteAll_leaves_the_header_bare()
+    {
+        // The Fabric/Spark CSV writer ("Save Fabric Data to File") quotes data rows but NOT the header.
+        // A plain new CsvStyle(QuoteAll: true) must reproduce that — header unquoted by default.
+        var s = new CsvStyle(QuoteAll: true, Crlf: true);
+        Assert.False(s.QuoteHeader);
+    }
+
+    // The streamer's header decision (FabricSqlClient): header is quoted IFF QuoteAll AND QuoteHeader.
+    // Data-row quoting depends on QuoteAll alone; the header is independent.
+    [Theory]
+    [InlineData(false, false, false)]   // RFC default — header not quoted
+    [InlineData(false, true, false)]    // QuoteHeader is meaningless without QuoteAll
+    [InlineData(true, false, false)]    // QuoteAll data rows, bare header (Fabric/Spark match)
+    [InlineData(true, true, true)]      // QuoteAll + QuoteHeader → all-quoted (Excel/Power BI)
+    public void Header_is_quoted_only_when_QuoteAll_and_QuoteHeader(bool quoteAll, bool quoteHeader, bool expectHeaderQuoted)
+    {
+        var s = new CsvStyle(QuoteAll: quoteAll, QuoteHeader: quoteHeader);
+        Assert.Equal(expectHeaderQuoted, s.QuoteAll && s.QuoteHeader);
     }
 
     [Theory]

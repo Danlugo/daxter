@@ -152,13 +152,16 @@ public sealed class FabricSqlClient
 
         var lineEnd = style.LineEnding;
         var quoteAll = style.QuoteAll;
+        // Header quoting is independent of the data rows: only quote the header when QuoteAll AND
+        // QuoteHeader are both on. Default (QuoteHeader=false) leaves the header bare even under
+        // QuoteAll — byte-equivalent to the Fabric/Spark CSV writer, which quotes data but not the
+        // header. QuoteHeader=true restores the Power BI / Excel "Export data" all-quoted shape.
+        var quoteHeader = quoteAll && style.QuoteHeader;
 
-        // Header. Field names rarely contain quote/comma, but apply the same rule for symmetry — if
-        // QuoteAll is on we'd want a quoted header too so the file reads as one consistent shape.
         for (var i = 0; i < reader.FieldCount; i++)
         {
             if (i > 0) await output.WriteAsync(',');
-            await output.WriteAsync(WriteField(reader.GetName(i), quoteAll));
+            await output.WriteAsync(WriteField(reader.GetName(i), quoteHeader));
         }
         await output.WriteAsync(lineEnd);
 

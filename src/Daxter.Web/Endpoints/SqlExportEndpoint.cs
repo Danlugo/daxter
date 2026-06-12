@@ -29,6 +29,7 @@ public static class SqlExportEndpoint
         [FromForm] string sql,
         [FromForm] string? quoteAll,                          // "on" when the checkbox is checked
         [FromForm] string? crlf,                              // "on" when the checkbox is checked
+        [FromForm] string? quoteHeader,                       // "on" → also quote the header under quoteAll
         ConfigState state,
         HttpResponse response,
         HttpContext ctx,
@@ -46,7 +47,8 @@ public static class SqlExportEndpoint
         // truthy-looking value as on so a programmatic caller can also send quoteAll=true / =1.
         var style = new CsvStyle(
             QuoteAll: IsTruthy(quoteAll),
-            Crlf: IsTruthy(crlf));
+            Crlf: IsTruthy(crlf),
+            QuoteHeader: IsTruthy(quoteHeader));
 
         // Same gate as the live-query path — read-only by default, only Allow-writes lets non-SELECT
         // through. Exporting a DELETE/MERGE result set makes no sense anyway, but consistency matters.

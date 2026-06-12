@@ -150,6 +150,9 @@
                 <label class="inline export-opt" title="End lines with CRLF (Windows / Excel) instead of LF.">
                     <input type="checkbox" @bind="exportCrlf" /> CRLF
                 </label>
+                <label class="inline export-opt" title="With Quote-all, also quote the header row. Off = bare header (matches the Fabric/Spark CSV writer).">
+                    <input type="checkbox" @bind="exportQuoteHeader" disabled="@(!exportQuoteAll)" /> Quote header
+                </label>
             </span>
             <button class="btn-sm" @onclick="() => sql = string.Empty" disabled="@(string.IsNullOrEmpty(sql) || busy)">Clear</button>
             <span class="muted dax-hint">
@@ -167,6 +170,7 @@
             @* Endpoint reads "on" as the truthy value (HTML-form convention) — only render when on. *@
             @if (exportQuoteAll) { <input type="hidden" name="quoteAll" value="on" /> }
             @if (exportCrlf) { <input type="hidden" name="crlf" value="on" /> }
+            @if (exportQuoteAll && exportQuoteHeader) { <input type="hidden" name="quoteHeader" value="on" /> }
         </form>
 
         <div class="sql-edit">
@@ -211,6 +215,7 @@
     // Defaults match the Run-SQL grid's CSV: RFC 4180 / LF.
     private bool exportQuoteAll;
     private bool exportCrlf;
+    private bool exportQuoteHeader;
 
     // ---- SQL-scope device-code sign-in (separate from Power BI's) ----
     private DeviceLogin? sqlDevice;

@@ -112,7 +112,8 @@ same MSAL account (one extra one-time `daxter_login` with `target="sql"`). Disco
 | "What tables/views/procs are on the RetailWH endpoint?" | `daxter_sql_objects` (one INFORMATION_SCHEMA round-trip; (schema, kind, name) rows for tables/views/functions/stored procedures) |
 | "Show me the top 10 orders from RetailWH" | `daxter_sql_query` (read-only by default; capped JSON result for sampling) |
 | "Export every row of `dbo.orders` to a file" | `daxter_sql_export` (streams full result-set CSV straight to `~/.daxter/exports/sql/<ts>-<endpoint>.csv` on the persistent volume — no in-memory materialization, safe for `SELECT *` on multi-million-row tables) |
-| "Export with Excel-Windows formatting" | `daxter_sql_export` with `quoteAll=true, crlf=true` (matches Power BI / Excel "Export data" byte-for-byte) |
+| "Export with Excel-Windows formatting" | `daxter_sql_export` with `quoteAll=true, crlf=true, quoteHeader=true` (matches Power BI / Excel "Export data" byte-for-byte — header quoted too) |
+| "Export to match the Fabric/Spark 'Save Fabric Data to File' CSV byte-for-byte" | `daxter_sql_export` with `quoteAll=true, crlf=true` (quoteHeader defaults false → data quoted, header bare — exactly what the Spark CSV writer emits) |
 
 Write statements (INSERT/UPDATE/DELETE/MERGE/DDL/EXEC) are **refused by default** —
 `daxter_sql_query` and `daxter_sql_export` only execute reads unless the Allow-writes gate

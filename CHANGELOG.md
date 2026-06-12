@@ -6,6 +6,31 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.43.0] - 2026-06-12
+
+### Added — `quoteHeader` option on SQL CSV export
+`daxter_sql_export` (and the CLI `sql query --out` / the `/sql` Export-All button) gained a
+**`quoteHeader`** flag that controls whether the **header row** is quoted when `quoteAll` is on.
+This makes the export byte-for-byte reproduce the **Fabric/Spark CSV writer** ("Save Fabric Data
+to File"), which quotes data rows but leaves the header bare.
+
+- MCP: `daxter_sql_export(..., quoteHeader=false)` · CLI: `--quote-header` · Web `/sql`: a
+  **Quote header** checkbox (enabled only when Quote-all is on).
+- New `CsvStyle.QuoteHeader` (default `false`); the streaming writer quotes the header **iff
+  `QuoteAll && QuoteHeader`**. Data-row quoting is unchanged (`QuoteAll` alone).
+
+### Changed
+- **`quoteAll` no longer quotes the header by default.** Previously `quoteAll=true` wrapped every
+  field *including* the header; now the header stays bare unless you also pass `quoteHeader=true`.
+  This is what makes a `quoteAll=true, crlf=true` export match the Fabric/Spark writer exactly
+  (the old behaviour differed by the +N bytes of header quotes). The `CsvStyle.ExcelWindows`
+  preset keeps `QuoteHeader=true`, so the Power BI / Excel "Export data" shape is unchanged for
+  callers using that preset.
+
+### Tests
+5 new `CsvStyleTests` (QuoteHeader default off; ExcelWindows quotes the header; the
+`QuoteAll && QuoteHeader` truth table). 439/439 pass.
+
 ## [1.42.0] - 2026-06-11
 
 ### Added — manage the Power BI scheduled refresh
