@@ -6,6 +6,15 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-06-12
+
+### Changed — schedule editor offers only valid 30-minute slots
+Power BI scheduled refresh runs on **30-minute time slots** (`:00` / `:30` only — confirmed in the
+Microsoft docs). The web Refresh → **Schedule** editor previously had a free-text time box, so an
+invalid time like `06:15` was only rejected on save. It's now a **dropdown of the 48 valid half-hour
+slots** + *Add time*, with the chosen times shown as removable chips — the UI can no longer offer an
+invalid time. (Core/CLI/MCP already validated this since v1.42.0; this closes the UI gap.)
+
 ## [1.44.0] - 2026-06-12
 
 ### Added — `DAXTER_READONLY` master read-only switch
