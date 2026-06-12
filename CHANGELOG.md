@@ -6,6 +6,31 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.42.0] - 2026-06-11
+
+### Added — manage the Power BI scheduled refresh
+DAXter can now read and configure a model's **Scheduled refresh** — the dataset-settings
+schedule (on/off, time zone, weekdays, time slots, failure email), not just on-demand
+refresh or DAXter's own job queue. Import models.
+
+- **Read** — `daxter refresh schedule show` (CLI), `daxter_refresh_schedule` (MCP), and a
+  **Schedule** tab on the web Refresh page. Shows enabled, time zone, days, times, notify.
+- **Configure** — `daxter refresh schedule set` (CLI), `daxter_set_refresh_schedule` (MCP),
+  and the Schedule tab editor. Partial update — **only the fields you pass change** (flip
+  just `--enable`, or just `--timezone`, without clobbering the rest). Flags:
+  `--enable/--disable`, `--timezone`, `--days Monday,Friday`, `--times 06:00,12:00`,
+  `--notify on|off`.
+- **Validated up front** — weekdays canonicalised, time slots must be `HH:mm` on the hour or
+  half-hour, notify accepts `on`/`off` aliases. Bad input fails fast (before any API call).
+- **Write-gated** — the `set` paths sit behind the existing writes gate (CLI `--yes` +
+  PROD-block; MCP `execute=true` + Allow writes; web Allow-writes + read-only-target guard).
+- DirectQuery / Direct Lake / Push models use a separate endpoint and get a clear hint;
+  they aren't managed in this release.
+
+### Tests
+22 new `RefreshScheduleRequestTests` (partial-update body, day/time/notify validation,
+canonicalisation, dedupe/sort). 434/434 pass.
+
 ## [1.41.0] - 2026-06-10
 
 ### Added — encrypt the token cache at rest

@@ -94,6 +94,12 @@ queue.
 ./bin/daxter refresh status                      # show the queue (queued/running/finished) + worker liveness
 ./bin/daxter refresh trigger --yes               # whole-model refresh via REST (async, NOT queued)
 ./bin/daxter cache clear --dry-run               # ClearCache XML preview (NOT queued)
+
+# Scheduled refresh — the Power BI Service "Scheduled refresh" config (import models)
+./bin/daxter refresh schedule show               # enabled? time zone, days, times, notify
+./bin/daxter refresh schedule set --enable --timezone "Pacific Standard Time" \
+    --days Monday,Wednesday,Friday --times 06:00,12:00 --notify on --yes   # only the flags you pass change
+./bin/daxter refresh schedule set --disable --yes                          # turn it off (leaves days/times intact)
 ```
 
 > **The worker runs the refresh, not the CLI process.** `refresh … --yes` enqueues and returns

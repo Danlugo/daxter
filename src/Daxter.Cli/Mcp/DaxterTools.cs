@@ -151,6 +151,18 @@ public static class DaxterTools
             return await rest.RefreshHistoryAsync(groupId, datasetId, top, c);
         }, ct);
 
+    [McpServerTool(Name = "daxter_refresh_schedule", ReadOnly = true, Title = "Show scheduled refresh"), Description(
+        "Show the Power BI Service 'Scheduled refresh' config for an import model — enabled, time zone, days, " +
+        "time slots, failure-email. This is the configured schedule (dataset settings), NOT an on-demand refresh " +
+        "or DAXter's own job queue. DirectQuery / Direct Lake / Push models report a hint (separate endpoint).")]
+    public static Task<string> RefreshSchedule(string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.RestAsync(workspace, dataset, async (rest, cfg, c) =>
+        {
+            var groupId = await rest.ResolveGroupIdAsync(cfg.Workspace, c);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, cfg.Dataset!, c);
+            return PowerBiRestClient.DescribeSchedule(await rest.GetRefreshScheduleAsync(groupId, datasetId, c));
+        }, ct);
+
     [McpServerTool(Name = "daxter_workspaces", ReadOnly = true, Title = "List workspaces"), Description("List Power BI workspaces (with their group ids) the identity can see. No workspace needs to be configured first.")]
     public static Task<string> Workspaces(CancellationToken ct = default)
         => DaxterToolRuntime.RestTenantAsync((rest, c) => rest.GroupsAsync(c), ct);
@@ -544,6 +556,27 @@ public static class DaxterTools
         [Description("Retry up to N times on transient failure (default 0).")] int retries = 0,
         string? workspace = null, string? dataset = null, CancellationToken ct = default)
         => DaxterToolRuntime.MaintenanceAsync(workspace, dataset, svc => svc.BuildClearCache(), execute, ct, retries);
+
+    [McpServerTool(Name = "daxter_set_refresh_schedule", Destructive = true, Title = "Configure scheduled refresh"), Description(
+        "Configure the Power BI Service 'Scheduled refresh' for an IMPORT model: enable/disable, time zone, weekdays, " +
+        "time slots, failure email. Only the parameters you set change (partial update). DRY-RUN by default; requires " +
+        "execute=true AND writes enabled (web console Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true). " +
+        "days = comma weekdays (Monday,Friday); times = comma HH:mm on the hour/half-hour (06:00,12:00); notify = on|off.")]
+    public static Task<string> SetRefreshSchedule(
+        [Description("Enable (true) or disable (false) scheduled refresh; omit to leave unchanged.")] bool? enabled = null,
+        [Description("Comma-separated weekdays, e.g. Monday,Wednesday,Friday (omit to leave unchanged).")] string? days = null,
+        [Description("Comma-separated HH:mm slots on the hour/half-hour, e.g. 06:00,12:00 (omit to leave unchanged).")] string? times = null,
+        [Description("Time zone id, e.g. \"Pacific Standard Time\" (omit to leave unchanged).")] string? timezone = null,
+        [Description("Failure email: on (MailOnFailure) | off (NoNotification) (omit to leave unchanged).")] string? notify = null,
+        [Description("Actually apply (default false = dry run).")] bool execute = false,
+        string? workspace = null, string? dataset = null, CancellationToken ct = default)
+        => DaxterToolRuntime.SetRefreshScheduleAsync(
+            workspace, dataset, enabled, Csv(days), Csv(times), timezone, notify, execute, ct);
+
+    private static IReadOnlyList<string>? Csv(string? s)
+        => string.IsNullOrWhiteSpace(s)
+            ? null
+            : s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     // ---- Gated MODEL-EDIT tools (DRY-RUN by default; require execute=true AND model edits enabled —
     //      web console "Allow model edits" or DAXTER_MCP_ALLOW_MODEL_EDIT=true. IRREVERSIBLE for PBIX

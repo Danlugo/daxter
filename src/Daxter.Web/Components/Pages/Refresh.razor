@@ -45,6 +45,7 @@ else
     <div class="tabs">
         <button class="tab @(refTab == RefTab.New ? "active" : "")" @onclick="() => refTab = RefTab.New">New refresh</button>
         <button class="tab @(refTab == RefTab.History ? "active" : "")" @onclick="() => refTab = RefTab.History">History</button>
+        <button class="tab @(refTab == RefTab.Schedule ? "active" : "")" @onclick="ShowScheduleTab">Schedule</button>
     </div>
 }
 
@@ -55,6 +56,72 @@ else if (refTab == RefTab.History)
 {
     @if (historyBusy) { <p class="muted">Loading refresh history…</p> }
     else { <ResultGrid Result="historyResult" Error="@historyError" Empty="No refresh history for this dataset." /> }
+}
+else if (refTab == RefTab.Schedule)
+{
+    @if (scheduleBusy && scheduleInfo is null) { <p class="muted">Loading scheduled refresh…</p> }
+    else if (scheduleError is not null) { <ErrorBanner Message="@scheduleError" /> }
+    else if (scheduleInfo is not null)
+    {
+        <div class="card">
+            <p>
+                <span class="badge badge-job-@(scheduleInfo.Enabled ? "Completed" : "Cancelled")">@(scheduleInfo.Enabled ? "Enabled" : "Disabled")</span>
+                <span class="muted">scheduled refresh for '@dataset'</span>
+            </p>
+            <div class="grid-wrap">
+                <table class="grid">
+                    <tbody>
+                        <tr><th>Time zone</th><td>@(string.IsNullOrEmpty(scheduleInfo.LocalTimeZoneId) ? "—" : scheduleInfo.LocalTimeZoneId)</td></tr>
+                        <tr><th>Days</th><td>@(scheduleInfo.Days.Count > 0 ? string.Join(", ", scheduleInfo.Days) : "—")</td></tr>
+                        <tr><th>Times</th><td>@(scheduleInfo.Times.Count > 0 ? string.Join(", ", scheduleInfo.Times) : "—")</td></tr>
+                        <tr><th>Notify on failure</th><td>@(string.IsNullOrEmpty(scheduleInfo.NotifyOption) ? "—" : scheduleInfo.NotifyOption)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @if (!Ui.WritesEnabled)
+        {
+            <p class="muted">Turn on <strong>Allow writes</strong> on the <a href="configure">Configure page</a> to edit the schedule.</p>
+        }
+        else if (Ui.IsReadOnlyTarget(workspace, dataset))
+        {
+            <p class="muted">'@workspace' is a read-only target — schedule edits are blocked here.</p>
+        }
+        else
+        {
+            <h3>Edit schedule</h3>
+            <div class="form" style="max-width:480px;">
+                <label class="pick-item"><input type="checkbox" @bind="edEnabled" /> <span>Scheduled refresh enabled</span></label>
+                <label>Time zone
+                    <input @bind="edTimezone" placeholder="e.g. Pacific Standard Time" />
+                </label>
+                <label>Days</label>
+                <div class="pick-list">
+                    @foreach (var d in WeekDays)
+                    {
+                        <label class="pick-item">
+                            <input type="checkbox" checked="@edDays.Contains(d)" @onchange="e => ToggleDay(d, (bool)e.Value!)" /> <span>@d</span>
+                        </label>
+                    }
+                </div>
+                <label>Times <span class="muted">(comma-separated HH:mm, on the hour or half-hour)</span>
+                    <input @bind="edTimes" placeholder="06:00, 12:00" />
+                </label>
+                <label>Notify on failure
+                    <select @bind="edNotify">
+                        <option value="MailOnFailure">Email the owner (MailOnFailure)</option>
+                        <option value="NoNotification">No notification</option>
+                    </select>
+                </label>
+            </div>
+            <div class="actions">
+                <button class="btn" @onclick="SaveSchedule" disabled="@scheduleBusy">Save schedule</button>
+            </div>
+            @if (scheduleMsg is not null) { <p class="@(scheduleMsgOk ? "ok-text" : "bad-text")">@scheduleMsg</p> }
+            <p class="muted">Import models only. DirectQuery / Direct Lake models use a different schedule not managed here.</p>
+        }
+    }
 }
 else if (!Ui.WritesEnabled)
 {
@@ -232,7 +299,7 @@ else
 
     private enum Scope { Full, Table, Partitions }
     private enum PartMode { AllNewest, AllOldest, Pick }
-    private enum RefTab { New, History }
+    private enum RefTab { New, History, Schedule }
 
     [Parameter, SupplyParameterFromQuery(Name = "ws")] public string? Qws { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "ds")] public string? Qds { get; set; }
@@ -253,6 +320,15 @@ else
     private QueryResult? historyResult;
     private string? historyError;
     private bool historyBusy;
+
+    // ---- scheduled-refresh tab ----
+    private static readonly string[] WeekDays = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+    private PowerBiRestClient.RefreshScheduleInfo? scheduleInfo;
+    private bool scheduleBusy, scheduleMsgOk;
+    private string? scheduleError, scheduleMsg;
+    private bool edEnabled;
+    private string edTimezone = "", edTimes = "", edNotify = "MailOnFailure";
+    private HashSet<string> edDays = new();
 
     private IReadOnlyList<RefreshJob> Mine => Jobs.For(workspace, dataset);
 
@@ -348,6 +424,46 @@ else
         finally { historyBusy = false; }
     }
 
+    private async Task ShowScheduleTab()
+    {
+        refTab = RefTab.Schedule;
+        if (scheduleInfo is null && !scheduleBusy) await LoadSchedule();
+    }
+
+    private async Task LoadSchedule()
+    {
+        scheduleBusy = true; scheduleError = null; scheduleInfo = null; scheduleMsg = null;
+        try
+        {
+            scheduleInfo = await Ui.RefreshScheduleAsync(workspace, dataset);
+            edEnabled = scheduleInfo.Enabled;
+            edTimezone = scheduleInfo.LocalTimeZoneId ?? "";
+            edTimes = string.Join(", ", scheduleInfo.Times);
+            edNotify = string.IsNullOrEmpty(scheduleInfo.NotifyOption) ? "MailOnFailure" : scheduleInfo.NotifyOption!;
+            edDays = new(scheduleInfo.Days);
+        }
+        catch (Exception ex) { scheduleError = ex.Message; }
+        finally { scheduleBusy = false; }
+    }
+
+    private void ToggleDay(string d, bool on) { if (on) edDays.Add(d); else edDays.Remove(d); }
+
+    private async Task SaveSchedule()
+    {
+        scheduleBusy = true; scheduleMsg = null;
+        try
+        {
+            var days = WeekDays.Where(edDays.Contains).ToList();
+            var times = (edTimes ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            await Ui.SetRefreshScheduleAsync(workspace, dataset, edEnabled, days, times,
+                string.IsNullOrWhiteSpace(edTimezone) ? null : edTimezone, edNotify);
+            scheduleMsg = "Schedule saved."; scheduleMsgOk = true;
+            await LoadSchedule();
+        }
+        catch (Exception ex) { scheduleMsg = ex.Message; scheduleMsgOk = false; }
+        finally { scheduleBusy = false; }
+    }
+
     private string JobsLink()
         => $"jobs?ws={Uri.EscapeDataString(workspace)}&ds={Uri.EscapeDataString(dataset)}";
 
@@ -394,7 +510,7 @@ else
                 ? src.OrderBy(p => p, StringComparer.Ordinal)
                 : src.OrderByDescending(p => p, StringComparer.Ordinal)).ToList();
     }
-    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selectedPartitions = new(); scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; }
+    private void ResetSelection() { tables = new(); partitions = new(); selTable = ""; selectedPartitions = new(); scope = Scope.Full; partMode = PartMode.AllNewest; pending = null; jobMsg = null; historyResult = null; historyError = null; scheduleInfo = null; scheduleError = null; scheduleMsg = null; }
 
     private void ClearWorkspace() { _ = OnWorkspaceChangedClear(); }
     private async Task OnWorkspaceChangedClear() { workspace = ""; await OnWorkspaceChanged(); }

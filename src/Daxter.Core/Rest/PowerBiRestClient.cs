@@ -842,6 +842,13 @@ public sealed class PowerBiRestClient : IDisposable
             ? v.GetString()
             : null;
 
+    private static IReadOnlyList<string> StrArray(JsonElement element, string property)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(property, out var arr)
+           && arr.ValueKind == JsonValueKind.Array
+            ? arr.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToList()
+            : [];
+
     // ---- refresh ----
 
     public async Task<QueryResult> RefreshHistoryAsync(string groupId, string datasetId, int top = 10, CancellationToken ct = default)
@@ -906,6 +913,60 @@ public sealed class PowerBiRestClient : IDisposable
         _ = response.IsSuccessStatusCode;   // best-effort: ignore cancel failures
     }
 
+    // ---- scheduled refresh (the Power BI Service "Scheduled refresh" config, import models) ----
+
+    /// <summary>The configured scheduled refresh for an import model — the dataset-settings "Scheduled
+    /// refresh" section: on/off, time zone, weekdays, time slots, failure-email option. NOT the same as
+    /// an on-demand <see cref="TriggerRefreshAsync"/> or DAXter's own job queue.</summary>
+    public sealed record RefreshScheduleInfo(
+        bool Enabled,
+        IReadOnlyList<string> Days,
+        IReadOnlyList<string> Times,
+        string? LocalTimeZoneId,
+        string? NotifyOption);
+
+    /// <summary>Reads the scheduled refresh (<c>GET .../refreshSchedule</c>). Import models only;
+    /// DirectQuery / Direct Lake / Push models use a different endpoint and get a clear hint here.</summary>
+    public async Task<RefreshScheduleInfo> GetRefreshScheduleAsync(string groupId, string datasetId, CancellationToken ct = default)
+    {
+        JsonElement root;
+        try
+        {
+            root = await GetAsync($"groups/{groupId}/datasets/{datasetId}/refreshSchedule", ct);
+        }
+        catch (DaxterException ex) when (ex.Message.Contains("400") || ex.Message.Contains("404"))
+        {
+            throw new DaxterException(
+                "No import refresh schedule for this model. DirectQuery / Direct Lake / Push models use a " +
+                "separate schedule (directQueryRefreshSchedule) that DAXter doesn't manage yet.", ex);
+        }
+
+        return new RefreshScheduleInfo(
+            root.ValueKind == JsonValueKind.Object && root.TryGetProperty("enabled", out var en) && en.ValueKind == JsonValueKind.True,
+            StrArray(root, "days"),
+            StrArray(root, "times"),
+            Str(root, "localTimeZoneId"),
+            Str(root, "notifyOption"));
+    }
+
+    /// <summary>Updates the scheduled refresh (<c>PATCH .../refreshSchedule</c>) with a partial body
+    /// built by <see cref="RefreshScheduleRequest.Build"/> — only the fields present change.</summary>
+    public async Task UpdateRefreshScheduleAsync(string groupId, string datasetId, string bodyJson, CancellationToken ct = default)
+        => await PatchAsync($"groups/{groupId}/datasets/{datasetId}/refreshSchedule", bodyJson, ct);
+
+    /// <summary>Renders a <see cref="RefreshScheduleInfo"/> as a two-column property/value table for
+    /// the CLI + MCP read surfaces.</summary>
+    public static QueryResult DescribeSchedule(RefreshScheduleInfo s)
+        => new(
+            ["property", "value"],
+            [
+                ["enabled", s.Enabled],
+                ["timeZone", s.LocalTimeZoneId],
+                ["days", s.Days.Count > 0 ? string.Join(", ", s.Days) : null],
+                ["times", s.Times.Count > 0 ? string.Join(", ", s.Times) : null],
+                ["notifyOnFailure", s.NotifyOption],
+            ]);
+
     // ---- HTTP plumbing ----
 
     private async Task<JsonElement> GetAsync(string relative, CancellationToken ct)
@@ -923,6 +984,17 @@ public sealed class PowerBiRestClient : IDisposable
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
 
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+    }
+
+    private async Task PatchAsync(string relative, string json, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, BaseUrl + relative)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        await Authorize(request, ct);
         using var response = await _http.SendAsync(request, ct);
         await EnsureSuccessAsync(response, ct);
     }

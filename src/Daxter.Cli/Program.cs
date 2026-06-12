@@ -1732,9 +1732,33 @@ internal static class Program
             pr.GetValue(jobIdArg), pr.GetValue(fullOption),
             pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
 
-        return new Command("refresh", "Queue model / table / partition(s) refreshes; apply-policy; resume; view status & history.")
+        // ---- scheduled refresh config (the Power BI Service "Scheduled refresh" — import models) ----
+        var schedShow = new Command("show", "Show the configured scheduled refresh (enabled, time zone, days, times, notify).") { outputOption };
+        connectionOptions.AddTo(schedShow);
+        schedShow.SetAction((pr, ct) => RunRefreshScheduleShowAsync(
+            () => connectionOptions.Resolve(pr), () => pr.GetValue(outputOption), ct));
+
+        var schEnable = new Option<bool>("--enable") { Description = "Turn scheduled refresh ON." };
+        var schDisable = new Option<bool>("--disable") { Description = "Turn scheduled refresh OFF." };
+        var schTz = new Option<string?>("--timezone") { Description = "Time zone id, e.g. \"Pacific Standard Time\" (Windows tz id)." };
+        var schDays = new Option<string?>("--days") { Description = "Comma-separated weekdays, e.g. Monday,Wednesday,Friday." };
+        var schTimes = new Option<string?>("--times") { Description = "Comma-separated HH:mm slots on the hour/half-hour, e.g. 06:00,12:00." };
+        var schNotify = new Option<string?>("--notify") { Description = "Failure email: on (MailOnFailure) | off (NoNotification)." };
+        var schedSet = new Command("set", "Configure scheduled refresh; only the flags you pass change. Import models only.")
+        { schEnable, schDisable, schTz, schDays, schTimes, schNotify, dryRun, yes, force };
+        connectionOptions.AddTo(schedSet);
+        schedSet.SetAction((pr, ct) => RunRefreshScheduleSetAsync(
+            () => connectionOptions.Resolve(pr),
+            pr.GetValue(schEnable), pr.GetValue(schDisable), pr.GetValue(schTz),
+            pr.GetValue(schDays), pr.GetValue(schTimes), pr.GetValue(schNotify),
+            pr.GetValue(dryRun), pr.GetValue(yes), pr.GetValue(force), ct));
+
+        var schedule = new Command("schedule", "View or configure the Power BI scheduled refresh (enable/disable, time zone, days/times, failure email).")
+        { schedShow, schedSet };
+
+        return new Command("refresh", "Queue refreshes; scheduled-refresh config; apply-policy; resume; view status & history.")
         {
-            model, table, partition, partitions, applyPolicyCmd, resume, trigger, history, status,
+            model, table, partition, partitions, applyPolicyCmd, resume, trigger, history, status, schedule,
         };
     }
 
@@ -2063,6 +2087,69 @@ internal static class Program
             return Fail(ex);
         }
     }
+
+    private static async Task<int> RunRefreshScheduleShowAsync(
+        Func<DaxterConfig> configFactory, Func<string?> outputFactory, CancellationToken ct)
+    {
+        try
+        {
+            var config = configFactory();
+            RequireDataset(config);
+            var formatter = ResultFormatterFactory.Create(ResultFormatterFactory.Parse(outputFactory()));
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            var schedule = await rest.GetRefreshScheduleAsync(groupId, datasetId, ct);
+
+            Console.Out.Write(formatter.Format(PowerBiRestClient.DescribeSchedule(schedule)));
+            Console.Error.WriteLine(schedule.Enabled ? "scheduled refresh: ENABLED" : "scheduled refresh: disabled");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static async Task<int> RunRefreshScheduleSetAsync(
+        Func<DaxterConfig> configFactory, bool enable, bool disable, string? timezone,
+        string? days, string? times, string? notify,
+        bool dryRun, bool yes, bool force, CancellationToken ct)
+    {
+        try
+        {
+            if (enable && disable)
+            {
+                throw new DaxterException("Pass either --enable or --disable, not both.");
+            }
+
+            bool? enabled = enable ? true : disable ? false : null;
+            // Build (and validate days/times/notify) BEFORE resolving the target, so bad input fails fast.
+            var body = RefreshScheduleRequest.Build(enabled, SplitCsv(days), SplitCsv(times), timezone, notify);
+
+            var config = configFactory();
+            RequireDataset(config);
+            using var rest = new PowerBiRestClient(BuildTokenProvider(config));
+
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            var description = $"PATCH groups/{groupId}/datasets/{datasetId}/refreshSchedule {body}";
+
+            return ApplySafety(config, description, dryRun, yes, force,
+                () => rest.UpdateRefreshScheduleAsync(groupId, datasetId, body, ct).GetAwaiter().GetResult(),
+                successMessage: "Scheduled refresh updated. Verify with `daxter refresh schedule show`.");
+        }
+        catch (Exception ex)
+        {
+            return Fail(ex);
+        }
+    }
+
+    private static IReadOnlyList<string>? SplitCsv(string? csv)
+        => string.IsNullOrWhiteSpace(csv)
+            ? null
+            : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static int ApplySafety(
         DaxterConfig config, string command, bool dryRun, bool yes, bool force,

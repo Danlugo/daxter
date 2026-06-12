@@ -341,6 +341,49 @@ internal static class DaxterToolRuntime
             return $"QUEUED as job #{job.Id} — {plan}. The DAXter worker (web container) runs it, serialized one refresh per model.{WorkerWarning(store)} Track with daxter_refresh_jobs.";
         });
 
+    /// <summary>v1.42.0 — configure the Power BI Service "Scheduled refresh" for an import model
+    /// (PATCH refreshSchedule). DRY-RUN unless execute=true AND writes enabled; partial update — only
+    /// the supplied fields change. Validation (days/times/notify) happens up front, so bad input fails
+    /// fast even in dry-run.</summary>
+    public static Task<string> SetRefreshScheduleAsync(
+        string? workspace, string? dataset,
+        bool? enabled, IReadOnlyList<string>? days, IReadOnlyList<string>? times,
+        string? timezone, string? notify, bool execute, CancellationToken ct)
+        => Guard(async () =>
+        {
+            var config = await ResolveTargetsAsync(Config(workspace, dataset), ct);
+            if (string.IsNullOrWhiteSpace(config.Dataset))
+            {
+                throw new DaxterException("A dataset is required to configure scheduled refresh.");
+            }
+
+            // Build + validate first (fails fast on bad days/times/notify, even in dry-run).
+            var body = RefreshScheduleRequest.Build(enabled, days, times, timezone, notify);
+
+            if (!execute)
+            {
+                return $"DRY RUN — not applied. Would PATCH refreshSchedule for '{config.Dataset}' in " +
+                       $"'{config.Workspace}' with {body}. Set execute=true (with writes enabled) to apply.";
+            }
+
+            if (!WritesAllowed())
+            {
+                return "REFUSED — writes are disabled. Enable them in the web console " +
+                       "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
+            }
+
+            if (LooksLikeProd(config) && ProdWritesBlocked(config))
+            {
+                return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
+            }
+
+            using var rest = new PowerBiRestClient(Provider(config));
+            var groupId = await rest.ResolveGroupIdAsync(config.Workspace, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, config.Dataset!, ct);
+            await rest.UpdateRefreshScheduleAsync(groupId, datasetId, body, ct);
+            return $"APPLIED — scheduled refresh updated for '{config.Dataset}'. Verify with daxter_refresh_schedule.";
+        });
+
     /// <summary>v1.39.0 — the standalone "apply refresh policy" MCP entry point (Option B).
     /// Surgical: only tables with a refresh policy are touched. Pre-flight XMLA TOM
     /// discovery enumerates policy tables (or validates a specifically-named one); fails

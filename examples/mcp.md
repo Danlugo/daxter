@@ -98,6 +98,7 @@ Deployment rules are inferred by comparing a model's parameter values across pip
 |-----|------|
 | "When was the model last refreshed?" | `daxter_refresh_history` |
 | "List the refresh jobs / what's queued or running?" | `daxter_refresh_jobs` (shared queue, all interfaces; shows worker liveness) |
+| "Is scheduled refresh enabled? what time zone / days / times?" | `daxter_refresh_schedule` (read-only; import models) |
 
 ## Fabric SQL endpoints (Warehouses + Lakehouse SQL endpoints)
 
@@ -483,6 +484,8 @@ this as right-click "Apply refresh policy". DAXter exposes it as two MCP tools:
 | You say | Tool |
 |---|---|
 | "Refresh the model and also apply the refresh policies on policy tables" | `daxter_refresh` with `scope: "model"`, `apply_policy: true` — full model refresh + policy walk on policy tables. |
+| "Turn on scheduled refresh: weekdays 6am & noon, Pacific time, email on failure" | `daxter_set_refresh_schedule` with `enabled: true`, `days: "Monday,Tuesday,Wednesday,Thursday,Friday"`, `times: "06:00,12:00"`, `timezone: "Pacific Standard Time"`, `notify: "on"`, `execute: true` (dry-run without it; only the params you set change). |
+| "Disable scheduled refresh" | `daxter_set_refresh_schedule` with `enabled: false`, `execute: true` (leaves days/times intact). |
 | "Just apply the refresh policies (don't touch anything else)" | `daxter_apply_refresh_policy` (no args; defaults to whole-model) — pre-flight discovers policy tables, scopes the API call to only those. Non-policy tables UNTOUCHED. |
 | "Just apply the refresh policy on FACT - Trans Line" | `daxter_apply_refresh_policy` with `table: "FACT - Trans Line"` — validates the table has a policy, refuses if not. |
 

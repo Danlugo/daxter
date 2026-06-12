@@ -319,6 +319,45 @@ public sealed class DaxterUi
             return await rest.DatasetUsersAsync(groupId, datasetId, ct);
         });
 
+    // ---- scheduled refresh config (Power BI Service "Scheduled refresh", import models) ----
+
+    /// <summary>Reads the configured scheduled refresh (import models). DirectQuery/Direct Lake/Push
+    /// surface a clear hint from Core.</summary>
+    public Task<PowerBiRestClient.RefreshScheduleInfo> RefreshScheduleAsync(string ws, string ds, CancellationToken ct = default)
+        => Track("refresh-schedule", $"{ws}/{ds}", async () =>
+        {
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+            return await rest.GetRefreshScheduleAsync(groupId, datasetId, ct);
+        });
+
+    /// <summary>Updates the scheduled refresh (partial — only set fields change). Gated by the console
+    /// "Allow writes" toggle and the read-only-target guardrail.</summary>
+    public Task<bool> SetRefreshScheduleAsync(
+        string ws, string ds,
+        bool? enabled, IReadOnlyList<string>? days, IReadOnlyList<string>? times,
+        string? timezone, string? notify, CancellationToken ct = default)
+        => Track("set-refresh-schedule", $"{ws}/{ds}", async () =>
+        {
+            if (!WritesEnabled)
+            {
+                throw new DaxterException("Writes are disabled. Turn on 'Allow writes' in Configure to change the schedule.");
+            }
+
+            if (_state.ToConfig(ws, ds).IsReadOnlyTarget())
+            {
+                throw new DaxterException($"'{ws}' is a read-only target; the schedule can't be changed here.");
+            }
+
+            var body = RefreshScheduleRequest.Build(enabled, days, times, timezone, notify);
+            using var rest = new PowerBiRestClient(Provider(Config()));
+            var groupId = await rest.ResolveGroupIdAsync(ws, ct);
+            var datasetId = await rest.ResolveDatasetIdAsync(groupId, ds, ct);
+            await rest.UpdateRefreshScheduleAsync(groupId, datasetId, body, ct);
+            return true;
+        });
+
     // ---- admin: gateways + deployment pipelines (REST) ----
 
     public Task<QueryResult> GatewaysAsync(CancellationToken ct = default)
