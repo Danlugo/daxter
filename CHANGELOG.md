@@ -6,6 +6,51 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.46.0] - 2026-06-12
+
+### Changed — ⚠ BREAKING: one permission *level* replaces the write-gate flags
+DAXter's authorization is now a single ordered scale instead of a scatter of booleans:
+
+**`read` < `execute` < `modify` < `full`** (each includes the ones below).
+
+- **`read`** — query / inspect / export / audit / sign-in. No changes.
+- **`execute`** — + run operations that don't change definitions: refresh, resume, apply-policy,
+  run notebook / copy-job, cancel a job, clear cache.
+- **`modify`** — + alter *existing* objects/config: edit measures/columns/roles/params, set the
+  refresh schedule, SQL UPDATE/INSERT, bind gateway, take over, update item definitions.
+- **`full`** — + create new objects and delete: create/delete model objects, SQL DELETE/DROP.
+
+**New config (all old flags REMOVED — no back-compat):**
+- **`DAXTER_LEVEL`** — instance ceiling (`read|execute|modify|full`). Unset ⇒ `full` (local owner);
+  set it on a hosted/Semantix container to hard-cap what anyone inside can do.
+- **`DAXTER_WORKSPACE_LEVELS`** — per-workspace ceilings, `pattern=level;…` (e.g.
+  `Dev*=full;*Prod*=read+execute` → "build in dev, refresh prod but never edit it"). Most-restrictive
+  pattern wins.
+- **`DAXTER_LOCAL`** — the DAXter-local artifact/context scratch store level (separate from the estate
+  scale). Default `full`.
+- The web **Configure** page now has a **Permission level** dropdown (the active level, capped by the
+  env ceiling) replacing the Allow-writes / Allow-model-edits checkboxes.
+- **Effective level = min(active level, env ceiling for the target workspace).** The console can lower
+  but never exceed the env ceiling.
+
+**Removed:** `DAXTER_READONLY`, `DAXTER_MCP_ALLOW_WRITES`, `DAXTER_MCP_ALLOW_MODEL_EDIT`, and the
+`AllowWrites`/`AllowModelEdit` console toggles. **Semantix migration:** a `DAXTER_READONLY=true` tenant
+becomes `DAXTER_LEVEL=read` (strict — no refresh) or `DAXTER_LEVEL=read+execute` (read + keep data
+fresh, which is what the old read-only carve-out did).
+
+- **Surfaced:** `permission_level` + `local_level` now appear in `GET /api/health` and
+  `daxter_capabilities` (replacing `read_only`).
+
+### Notes / follow-ups
+- MCP enforces the four levels precisely (per-workspace ceilings included). The CLI currently gates
+  coarsely (blocks at `read`, allows above) and SQL writes + model create/delete gate at `modify`;
+  finer CLI/SQL/create-delete granularity and the "dry-run only for `full`" simplification are
+  tracked follow-ups. The existing per-workspace prod-block guardrail still composes on top.
+
+### Tests
+13 new `PermissionPolicyTests`; `MaintenanceGateTests` re-pointed to the level model;
+`ReadOnlyModeTests` removed. 456/456 pass.
+
 ## [1.45.0] - 2026-06-12
 
 ### Changed — schedule editor offers only valid 30-minute slots

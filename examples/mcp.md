@@ -144,15 +144,28 @@ The discover → inspect → run → poll loop:
 `daxter_copy_jobs` → `daxter_copy_job_definition` → `daxter_run_copy_job (execute=true)` →
 poll `daxter_item_job_status` until status is terminal.
 
-## Master read-only switch (`DAXTER_READONLY`)
+## Permission level (`DAXTER_LEVEL`)
 
-Set `DAXTER_READONLY=true` on the container to lock the whole instance: it overrides the
-Allow-writes / Allow-model-edits gates (can't be turned off from inside) and refuses every
-structural mutation — model edits, `daxter_set_refresh_schedule`, `daxter_clear_cache`, SQL writes,
-gateway binds, takeover — with a clear "read-only mode" message. **Refresh is the exception**:
-`daxter_refresh` / `daxter_resume_refresh` / apply-policy still run (so the instance keeps data
-current) and still honour the Production-workspace rules below. `read_only: true` shows up in
-`daxter_capabilities` and `GET /api/health`. Ideal for a per-client Semantix container.
+Authorization is one ordered scale: **`read` < `execute` < `modify` < `full`** (each includes the
+ones below).
+
+| Level | Adds |
+|-------|------|
+| `read` | query / inspect / export / audit / sign-in |
+| `execute` | + `daxter_refresh` / `daxter_resume_refresh` / apply-policy / `daxter_run_notebook` / `daxter_run_copy_job` / `daxter_cancel_item_job` / `daxter_clear_cache` |
+| `modify` | + edit existing measures/columns/roles/params, `daxter_set_refresh_schedule`, SQL UPDATE/INSERT, bind gateway, take-over, `daxter_update_*_definition` |
+| `full` | + create / delete model objects, SQL DELETE/DROP |
+
+- **`DAXTER_LEVEL`** sets the instance ceiling (unset ⇒ `full` for a local owner). On a per-client
+  Semantix container set it explicitly — e.g. `DAXTER_LEVEL=read+execute` for "read + keep data fresh,
+  never edit" — and the inside can't escalate past it.
+- **`DAXTER_WORKSPACE_LEVELS`** caps specific workspaces: `Dev*=full;*Prod*=read+execute` →
+  "build in dev, refresh prod but never edit it" (most-restrictive pattern wins).
+- **`DAXTER_LOCAL`** governs the DAXter-local artifact/context scratch store (default `full`), separate
+  from the estate scale.
+- `permission_level` + `local_level` show up in `daxter_capabilities` and `GET /api/health`.
+  (Replaces the old `DAXTER_READONLY` / `DAXTER_MCP_ALLOW_WRITES` / `DAXTER_MCP_ALLOW_MODEL_EDIT` flags;
+  a former `DAXTER_READONLY=true` tenant ⇒ `DAXTER_LEVEL=read` or `read+execute`.)
 
 ## Workspace writes-gate (read-only / write-allowed patterns)
 

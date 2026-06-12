@@ -16,8 +16,10 @@ public sealed record PersistedSettings(
     string? Workspace = null,
     string? Dataset = null,
     string? ProdWorkspaces = null,
-    bool AllowWrites = false,
-    bool AllowModelEdit = false,
+    // v1.46.0 — the operator's chosen ACTIVE permission level (read | execute | modify | full),
+    // capped by the DAXTER_LEVEL env ceiling at resolution time. Null ⇒ "read" (safe default).
+    // Replaces the old AllowWrites/AllowModelEdit bools — see PermissionPolicy / PermissionLevel.
+    string? Level = null,
     // Comma-separated glob patterns for the new writes-gate. ReadOnlyWorkspaces is a deny-list
     // (anything matching is locked); WriteWorkspaces is an allow-list (when non-empty, anything
     // NOT matching is locked). Both null when the user hasn't configured the new model yet —

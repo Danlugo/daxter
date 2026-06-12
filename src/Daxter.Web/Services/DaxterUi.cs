@@ -46,10 +46,9 @@ public sealed class DaxterUi
     /// Forced off by read-only mode (<c>DAXTER_READONLY</c>) via <see cref="ConfigState"/>.</summary>
     public bool WritesEnabled => _state.AllowWrites;
 
-    /// <summary>True when REFRESHES are permitted. The read-only exception: a read-only instance can
-    /// still refresh (<c>DAXTER_READONLY</c> ⇒ true), otherwise it follows the Allow-writes toggle.
+    /// <summary>True when REFRESHES / operational jobs are permitted (permission level ≥ execute).
     /// The per-workspace Production guardrail (<see cref="IsReadOnlyTarget"/>) is applied on top.</summary>
-    public bool RefreshEnabled => _state.ReadOnly || _state.AllowWrites;
+    public bool RefreshEnabled => _state.CanRefresh;
 
     /// <summary>True when model editing is enabled (Configure → Allow model edits) — a stricter,
     /// separate gate than refresh writes (XMLA edits are irreversible for PBIX download).</summary>

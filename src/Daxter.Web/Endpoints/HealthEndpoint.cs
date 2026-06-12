@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Daxter.Core;
 using Daxter.Core.Artifacts;
+using Daxter.Core.Configuration;
 using Daxter.Core.Context;
 using Daxter.Web.Services;
 
@@ -61,8 +62,10 @@ public static class HealthEndpoint
             var repo = Environment.GetEnvironmentVariable("DAXTER_REPO") ?? "Danlugo/daxter";
             body["image"] = $"ghcr.io/{repo.ToLowerInvariant()}:{body["version"]}";
             body["uptime_seconds"] = (int)(DateTime.UtcNow - ProcessStartUtc).TotalSeconds;
-            // v1.44.0 — let a Semantics dashboard see at a glance which tenant containers are locked.
-            body["read_only"] = Daxter.Core.Configuration.ReadOnlyMode.IsEnabled;
+            // v1.46.0 — the resolved permission level, so a Semantix dashboard sees each tenant's cap.
+            var policy = Daxter.Core.Configuration.PermissionPolicy.Load();
+            body["permission_level"] = policy.Effective(null).Token();
+            body["local_level"] = policy.LocalLevel.Token();
 
             // Artifact store fleet info. List + sum is cheap on the typical store; the
             // operations have their own internal bounds so a multi-GB store doesn't

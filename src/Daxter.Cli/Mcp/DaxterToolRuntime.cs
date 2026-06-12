@@ -113,7 +113,7 @@ internal static class DaxterToolRuntime
                 throw new DaxterException("A dataset is required to take over a model.");
             if (!execute)
                 return $"DRY RUN — not applied. Would take over '{config.Dataset}' in '{config.Workspace}'. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
@@ -145,7 +145,7 @@ internal static class DaxterToolRuntime
                        + (string.IsNullOrWhiteSpace(connectionId) ? "" : $" connection {connectionId}");
             if (!execute)
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
@@ -170,7 +170,7 @@ internal static class DaxterToolRuntime
             var plan = $"bind '{config.Dataset}' to gateway {gatewayObjectId}" + (n > 0 ? $" ({n} data source(s) mapped)" : "");
             if (!execute)
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
@@ -222,7 +222,7 @@ internal static class DaxterToolRuntime
                 return "DRY RUN — not executed:\n" + command;
             }
 
-            if (!WritesAllowed())
+            if (!RefreshAllowed(config.Workspace))   // cache clear is an execute-level operation
             {
                 return "REFUSED — writes are disabled. Enable them in the web console " +
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + command;
@@ -269,13 +269,13 @@ internal static class DaxterToolRuntime
                 return "DRY RUN — not applied:\n" + change + caveat;
             }
 
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
             {
                 return "REFUSED — writes are disabled. Enable them in the web console " +
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.\n" + change;
             }
 
-            if (!ModelEditAllowed())
+            if (!ModelEditAllowed(config.Workspace))
             {
                 return "REFUSED — model editing is disabled (a separate, stricter gate than refresh writes). " +
                        "Enable it in the web console (Configure → Allow model edits) or set " +
@@ -366,7 +366,7 @@ internal static class DaxterToolRuntime
                        $"'{config.Workspace}' with {body}. Set execute=true (with writes enabled) to apply.";
             }
 
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
             {
                 return "REFUSED — writes are disabled. Enable them in the web console " +
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
@@ -670,7 +670,9 @@ internal static class DaxterToolRuntime
         TenantInfo.MergeInto(envelope);
         envelope["version"] = version;
         // v1.44.0 — read-only master switch; agents can see the instance is locked (refresh still allowed).
-        envelope["read_only"] = ReadOnlyMode.IsEnabled;
+        var policy = PermissionPolicy.Load();
+        envelope["permission_level"] = policy.Effective(null).Token();
+        envelope["local_level"] = policy.LocalLevel.Token();
         envelope["tool_count"] = tools.Count;
         envelope["tools"] = tools;
         // Phase 4 additions: discoverable shared knowledge. Agents that read this on session
@@ -693,33 +695,24 @@ internal static class DaxterToolRuntime
         _ => throw new DaxterException($"Unknown order '{value}'. Use newest-first or oldest-first."),
     };
 
-    /// <summary>The base "Allow writes" toggle — server env var OR the web console's saved toggle
-    /// (the shared <c>~/.daxter/console-config.json</c>, read via <see cref="PersistedSettings"/>).
-    /// This is the raw toggle BEFORE the read-only master switch is applied.</summary>
-    private static bool WritesToggleOn()
-        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase)
-           || PersistedSettings.Load().AllowWrites;
+    /// <summary>v1.46.0 — the single permission gate. Resolves <see cref="PermissionPolicy"/> (env
+    /// ceiling + console level + per-workspace ceilings) for the target workspace.</summary>
+    internal static bool LevelAllows(PermissionLevel required, string? workspace)
+        => PermissionPolicy.Load().Allows(required, workspace);
 
-    /// <summary>General (non-refresh) mutations — cache clear, schedule changes, SQL writes,
-    /// gateway/ownership changes. Requires the writes toggle AND is hard-blocked by read-only mode
-    /// (<c>DAXTER_READONLY</c>), which overrides the toggle.</summary>
-    internal static bool WritesAllowed()
-        => !ReadOnlyMode.IsEnabled && WritesToggleOn();
+    /// <summary>Refusal text when a level gate blocks an operation.</summary>
+    internal static string LevelRefusal(PermissionLevel required, string? workspace)
+        => PermissionPolicy.Load().Refusal(required, workspace);
 
-    /// <summary>The refresh EXCEPTION to read-only mode: refreshes (model / table / partition, trigger,
-    /// resume, apply-policy) are permitted when the writes toggle is on OR when read-only mode is active
-    /// — a read-only instance can still keep data current. The Production / read-only-workspace guardrail
-    /// is applied separately at each refresh call site and still blocks prod targets.</summary>
-    internal static bool RefreshAllowed()
-        => ReadOnlyMode.IsEnabled || WritesToggleOn();
+    /// <summary>Operational (execute) gate — refresh / resume / apply-policy / run notebook+copy-job /
+    /// cancel / cache clear.</summary>
+    internal static bool RefreshAllowed(string? workspace = null) => LevelAllows(PermissionLevel.Execute, workspace);
 
-    /// <summary>Model editing is enabled by <c>DAXTER_MCP_ALLOW_MODEL_EDIT=true</c> OR the web console's
-    /// "Allow model edits" toggle — a separate, stricter gate than refresh writes (edits are irreversible
-    /// for PBIX download). Hard-blocked by read-only mode.</summary>
-    internal static bool ModelEditAllowed()
-        => !ReadOnlyMode.IsEnabled
-           && (string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase)
-               || PersistedSettings.Load().AllowModelEdit);
+    /// <summary>Modify gate — schedule changes, SQL UPDATE/INSERT, gateway/ownership, update definitions.</summary>
+    internal static bool WritesAllowed(string? workspace = null) => LevelAllows(PermissionLevel.Modify, workspace);
+
+    /// <summary>Model-edit gate — modify level (create/delete still gate at the call site for full).</summary>
+    internal static bool ModelEditAllowed(string? workspace = null) => LevelAllows(PermissionLevel.Modify, workspace);
 
     /// <summary>True when the read-only/prod-block guardrail is active for the MCP server. The
     /// gate fires automatically when the user has configured EXPLICIT read-only or write-allowed
@@ -893,7 +886,7 @@ internal static class DaxterToolRuntime
 
             var config = Config(workspace, null);
             var isRead = SqlWriteGate.IsReadOnly(sql);
-            if (!isRead && !WritesAllowed())
+            if (!isRead && !WritesAllowed(config.Workspace))
                 return "REFUSED — this statement is not read-only and writes are disabled. " +
                        "Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to export it.";
             if (!isRead && LooksLikeProd(config) && ProdWritesBlocked(config))
@@ -924,7 +917,7 @@ internal static class DaxterToolRuntime
             var client = new FabricSqlClient(msal);
             await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var sw = new StreamWriter(fs);
-            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), sw, ct, style: style);
+            var rows = await client.StreamCsvAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(config.Workspace), sw, ct, style: style);
             await sw.FlushAsync(ct);
             await fs.FlushAsync(ct);
 
@@ -962,7 +955,7 @@ internal static class DaxterToolRuntime
 
             var config = Config(workspace, null);
             var isRead = SqlWriteGate.IsReadOnly(sql);
-            if (!isRead && !WritesAllowed())
+            if (!isRead && !WritesAllowed(config.Workspace))
                 return "REFUSED — this statement is not read-only and writes are disabled. " +
                        "Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             if (!isRead && LooksLikeProd(config) && ProdWritesBlocked(config))
@@ -984,7 +977,7 @@ internal static class DaxterToolRuntime
             var server = match[1]?.ToString() ?? "";
             var database = match[2]?.ToString() ?? "";
             var client = new FabricSqlClient(msal);
-            var result = await client.ExecuteAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(), ct);
+            var result = await client.ExecuteAsync(server, database, sql, allowWrite: !isRead && WritesAllowed(config.Workspace), ct);
             var primary = Format(result);
 
             // Phase 4 — auto-attach: pull any context cards under workspaces/{ws}/ and
@@ -1045,8 +1038,8 @@ internal static class DaxterToolRuntime
             var plan = $"run item {itemId} (jobType={jobType}) in '{config.Workspace}'";
             if (!execute)
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
-                return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to run a job.";
+            if (!RefreshAllowed(config.Workspace))   // running a job is execute-level
+                return LevelRefusal(PermissionLevel.Execute, config.Workspace);
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
 
@@ -1079,8 +1072,8 @@ internal static class DaxterToolRuntime
             var plan = $"cancel job instance {instanceId} on item {itemId} in '{config.Workspace}'";
             if (!execute)
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
-                return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true) to cancel a job.";
+            if (!RefreshAllowed(config.Workspace))   // cancelling a job is execute-level (and safe)
+                return LevelRefusal(PermissionLevel.Execute, config.Workspace);
 
             using var rest = new PowerBiRestClient(Provider(config));
             var groupId = await rest.ResolveGroupIdAsync(config.Workspace!, ct);
@@ -1584,7 +1577,7 @@ internal static class DaxterToolRuntime
             var plan = $"push {parts.Count} part(s) from artifact prefix '{artifactKeyPrefix}' to {kind}/{itemRef} in workspace '{config.Workspace}'";
             if (!execute)
                 return $"DRY RUN — not applied. Would {plan}. Set execute=true (with writes enabled) to do it.";
-            if (!WritesAllowed())
+            if (!WritesAllowed(config.Workspace))
                 return "REFUSED — writes are disabled. Enable them (Configure → Allow writes, or DAXTER_MCP_ALLOW_WRITES=true), then retry.";
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";

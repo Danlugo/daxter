@@ -128,8 +128,7 @@ the [extension](#1-one-click-extension-easiest) or the config block in [`SETUP.m
 tools, so it's always current). Tools
 accept optional `workspace`/`dataset` (name **or** id); results are JSON, capped to 1,000 rows. The
 write tools (`daxter_refresh`, `daxter_clear_cache`) are **dry-run by default** and only act when
-`execute=true` **and** writes are enabled — via the web console (*Allow writes*) or
-`DAXTER_MCP_ALLOW_WRITES=true`. `daxter_refresh` **queues** the job (returns a job id) for the shared
+`execute=true` **and** the permission level permits it (see below). `daxter_refresh` **queues** the job (returns a job id) for the shared
 worker to run — track it with `daxter_refresh_jobs`, **resume** an interrupted/failed one with
 `daxter_resume_refresh` (re-runs only the **not-yet-done partitions** by default). Refreshes execute via
 the **server-managed Enhanced Refresh API** (no long-lived client connection → can't hang/drop;
@@ -138,19 +137,20 @@ legacy client path for non-Premium models). The single worker
 drains the queue **up to 4 models concurrently** (per-model serialized; queue depth is unbounded) —
 raise/lower it with `DAXTER_REFRESH_MAX_CONCURRENT_MODELS` (clamped to 1–16; higher consumes more
 capacity + XMLA sessions).
-Once on, **PROD is allowed by default**; set
-`DAXTER_MCP_BLOCK_PROD_WRITES=true` to re-block it. The **model-edit** tools (`daxter_edit_*`,
-`daxter_delete_*`, `daxter_set_*`, `daxter_create_*`, raw `daxter_edit_tmsl`) sit behind a **separate,
-stricter gate** — `DAXTER_MCP_ALLOW_MODEL_EDIT=true` or the web console *Allow model edits* — and take
-a `.bim` backup before applying (XMLA edits are irreversible for PBIX download). Prompts per tool →
-[`examples/mcp.md`](examples/mcp.md).
+Model-edit tools take a `.bim` backup before applying (XMLA edits are irreversible for PBIX
+download). Prompts per tool → [`examples/mcp.md`](examples/mcp.md).
 
-**Master read-only switch.** Set **`DAXTER_READONLY=true`** to lock an entire instance: it overrides
-the gates above (can't be re-enabled from inside the container) and blocks every structural mutation —
-model edits, schedule changes, cache clear, SQL writes, gateway binds, takeover — across CLI, MCP, and
-Web. **Refresh is the deliberate exception** (so a locked instance keeps data current), and refreshes
-still respect the Production / read-only-workspace rules. `read_only` is reported by `GET /api/health`
-and `daxter_capabilities`.
+**Permission level — one ordered gate.** Every operation is authorized against a single scale,
+**`read` < `execute` < `modify` < `full`** (each includes the ones below): `read` = query/inspect/
+export/audit/sign-in; `execute` = + refresh / run notebook+copy-job / cancel / cache-clear;
+`modify` = + edit existing measures/roles/params, set schedule, SQL UPDATE, bind/take-over;
+`full` = + create/delete objects, SQL DELETE/DROP. Set **`DAXTER_LEVEL`** for the instance ceiling
+(unset ⇒ `full` for a local owner; e.g. `read+execute` for a hosted tenant that may refresh but not
+edit — the inside can't escalate past it), **`DAXTER_WORKSPACE_LEVELS`** for per-workspace ceilings
+(`Dev*=full;*Prod*=read+execute`), and the web console **Configure → Permission level** for the
+active level (capped by the env ceiling). The DAXter-local scratch store is separate
+(**`DAXTER_LOCAL`**, default `full`). `permission_level` is reported by `GET /api/health` and
+`daxter_capabilities`.
 
 ## Authentication
 

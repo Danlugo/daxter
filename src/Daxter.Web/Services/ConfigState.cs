@@ -35,19 +35,25 @@ public sealed class ConfigState
     /// becomes read-only. Empty = no allow-list, fall back to the deny-list / legacy heuristics.</summary>
     public string? WriteWorkspaces { get; set; }
 
-    private bool _allowWrites;
-    private bool _allowModelEdit;
+    /// <summary>v1.46.0 — the operator's chosen ACTIVE permission level (read | execute | modify | full),
+    /// capped by the <c>DAXTER_LEVEL</c> env ceiling when <see cref="Policy"/> resolves. Default read.</summary>
+    public PermissionLevel Level { get; set; } = PermissionLevel.Read;
 
-    /// <summary>Allow general (non-refresh) writes. Forced to <c>false</c> by the master read-only
-    /// switch (<c>DAXTER_READONLY</c>) regardless of the saved toggle — see <see cref="ReadOnlyMode"/>.
-    /// (Refresh has its own carve-out: <see cref="DaxterUi.RefreshEnabled"/>.)</summary>
-    public bool AllowWrites { get => !ReadOnlyMode.IsEnabled && _allowWrites; set => _allowWrites = value; }
+    /// <summary>The resolved permission policy (env ceiling + this active level + per-workspace ceilings).</summary>
+    public PermissionPolicy Policy => PermissionPolicy.Load(Level);
 
-    /// <summary>Allow model edits. Forced to <c>false</c> by the master read-only switch.</summary>
-    public bool AllowModelEdit { get => !ReadOnlyMode.IsEnabled && _allowModelEdit; set => _allowModelEdit = value; }
+    /// <summary>Effective level for the default (no-specific-workspace) context.</summary>
+    public PermissionLevel EffectiveLevel => Policy.Effective(null);
 
-    /// <summary>True when the master read-only switch is active (<c>DAXTER_READONLY</c>).</summary>
-    public bool ReadOnly => ReadOnlyMode.IsEnabled;
+    // ---- coarse compatibility surfaces used by pages/endpoints (global context) ----
+    /// <summary>Can perform modify-class writes (SQL UPDATE, schedule, model edits) somewhere.</summary>
+    public bool AllowWrites => Policy.Allows(PermissionLevel.Modify, null);
+    /// <summary>Can edit the model (modify level).</summary>
+    public bool AllowModelEdit => Policy.Allows(PermissionLevel.Modify, null);
+    /// <summary>Can run refreshes / operational jobs (execute level).</summary>
+    public bool CanRefresh => Policy.Allows(PermissionLevel.Execute, null);
+    /// <summary>True when the instance is effectively read-only (level resolves to read).</summary>
+    public bool ReadOnly => EffectiveLevel == PermissionLevel.Read;
 
     public bool Persisted { get; private set; }
 
@@ -75,8 +81,9 @@ public sealed class ConfigState
         ProdWorkspaces = Env("DAXTER_PROD_WORKSPACES");
         ReadOnlyWorkspaces = Env("DAXTER_READONLY_WORKSPACES");
         WriteWorkspaces = Env("DAXTER_WRITE_WORKSPACES");
-        AllowWrites = string.Equals(Env("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase);
-        AllowModelEdit = string.Equals(Env("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase);
+        // Active level default: when DAXTER_LEVEL is explicitly set (headless intent) start at that
+        // ceiling; otherwise the safe floor (read) for a fresh local install. Persisted value overrides.
+        Level = PermissionLevels.ParseOr(Env("DAXTER_LEVEL"), PermissionLevel.Read);
     }
 
     private bool LoadPersisted()
@@ -89,17 +96,15 @@ public sealed class ConfigState
         ProdWorkspaces = s.ProdWorkspaces;
         ReadOnlyWorkspaces = s.ReadOnlyWorkspaces;
         WriteWorkspaces = s.WriteWorkspaces;
-        AllowWrites = s.AllowWrites; AllowModelEdit = s.AllowModelEdit;
+        if (PermissionLevels.TryParse(s.Level, out var lvl)) Level = lvl;
         return true;
     }
 
     /// <summary>Persists the current values to the mounted volume (the single source the CLI/MCP also read).</summary>
     public string Save()
     {
-        // Persist the RAW saved toggles (backing fields), not the read-only-masked view, so a
-        // read-only instance doesn't silently wipe the operator's saved Allow-writes preference.
         new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset,
-            ProdWorkspaces, _allowWrites, _allowModelEdit,
+            ProdWorkspaces, Level.Token(),
             ReadOnlyWorkspaces, WriteWorkspaces).Save();
         Persisted = true;
         return ConfigPath;
