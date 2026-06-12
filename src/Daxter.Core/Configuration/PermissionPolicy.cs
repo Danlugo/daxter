@@ -59,9 +59,8 @@ public sealed class PermissionPolicy
         var wsCeilings = ParseWorkspaceLevels(Environment.GetEnvironmentVariable(EnvWorkspaceLevels));
 
         // Active level precedence: explicit override (Web ConfigState) ▸ persisted console level ▸
-        // the env ceiling. With no env and no saved level the ceiling is `full`, so a fresh LOCAL
-        // owner install starts at full (convenient); a headless container starts at its DAXTER_LEVEL.
-        // The Claude Desktop per-tool permissions + the prod-block still gate actual calls.
+        // the env ceiling when DAXTER_LEVEL was set (headless intent) ▸ the safe floor (read) for a
+        // fresh install. (Set a console level — e.g. full — to raise it; it persists on the volume.)
         PermissionLevel active;
         if (activeOverride is { } o)
         {
@@ -73,7 +72,7 @@ public sealed class PermissionPolicy
         }
         else
         {
-            active = globalCeiling;
+            active = !string.IsNullOrWhiteSpace(levelEnv) ? globalCeiling : PermissionLevel.Read;
         }
 
         return new PermissionPolicy(globalCeiling, wsCeilings, active, local);

@@ -6,6 +6,14 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.46.2] - 2026-06-12
+
+### Changed
+- Reverted the v1.46.1 default: a fresh install (no `DAXTER_LEVEL` env, no saved console level)
+  again starts at **`read`** (safe by default — appropriate for Semantix tenants and first runs).
+  To run at a higher level, set `DAXTER_LEVEL`, or save a level on the Configure page (it persists
+  on the `daxter-tokens` volume and is read by both the console and the MCP server).
+
 ## [1.46.1] - 2026-06-12
 
 ### Changed

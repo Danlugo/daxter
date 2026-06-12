@@ -81,9 +81,9 @@ public sealed class ConfigState
         ProdWorkspaces = Env("DAXTER_PROD_WORKSPACES");
         ReadOnlyWorkspaces = Env("DAXTER_READONLY_WORKSPACES");
         WriteWorkspaces = Env("DAXTER_WRITE_WORKSPACES");
-        // Active level default: the DAXTER_LEVEL env when set (headless intent); otherwise full, so a
-        // fresh LOCAL owner console starts with full control. Persisted value overrides on load.
-        Level = PermissionLevels.ParseOr(Env("DAXTER_LEVEL"), PermissionLevel.Full);
+        // Active level default: the DAXTER_LEVEL env when set (headless intent); otherwise the safe
+        // floor (read) for a fresh install. Persisted console level overrides on load.
+        Level = PermissionLevels.ParseOr(Env("DAXTER_LEVEL"), PermissionLevel.Read);
     }
 
     private bool LoadPersisted()
