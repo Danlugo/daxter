@@ -49,6 +49,11 @@ public class MaintenanceGateTests
     public void WritesAllowed_false_at_read_level()
         => With("read", null, null, () => Assert.False(DaxterToolRuntime.WritesAllowed()));
 
+    // v1.46.1 — a fresh local install (no env, no saved level) defaults to full.
+    [Fact]
+    public void Defaults_to_full_when_unconfigured()
+        => With(null, null, null, () => Assert.True(DaxterToolRuntime.WritesAllowed()));
+
     // Execute level permits refresh but NOT modify-class writes.
     [Fact]
     public void Execute_level_allows_refresh_not_writes()

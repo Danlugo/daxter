@@ -6,6 +6,15 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.46.1] - 2026-06-12
+
+### Changed
+- A fresh **local** install (no `DAXTER_LEVEL` env and no saved console level) now starts at
+  **`full`** instead of `read`, so the owner has full control out of the box (the Claude Desktop
+  per-tool permissions + the prod-block still gate actual calls). Hosted containers that set
+  `DAXTER_LEVEL` are unaffected — they still start at (and are capped by) that ceiling, and the
+  console can still be saved to a lower level.
+
 ## [1.46.0] - 2026-06-12
 
 ### Changed — ⚠ BREAKING: one permission *level* replaces the write-gate flags
