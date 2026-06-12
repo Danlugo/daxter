@@ -6,6 +6,30 @@ All notable changes to DAXter are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.44.0] - 2026-06-12
+
+### Added — `DAXTER_READONLY` master read-only switch
+A single environment variable that puts a whole DAXter instance into **read-only mode** — ideal
+for a locked-down or per-client (Semantix) container that must never change anything.
+
+- **`DAXTER_READONLY=true`** overrides the Allow-writes / Allow-model-edits gates and **can't be
+  re-enabled from inside the container**. It blocks every structural mutation across **all surfaces**
+  (CLI, MCP, Web): model edits, schedule changes, cache clear, SQL writes, gateway binds, takeover.
+- **Refresh is the deliberate exception.** A read-only instance can still trigger refreshes
+  (model / table / partition, REST trigger, resume, apply-refresh-policy) so it keeps data current —
+  and those refreshes **still respect the Production / read-only-workspace rules**
+  (`DAXTER_READONLY_WORKSPACES` / `DAXTER_WRITE_WORKSPACES` / prod-block), exactly as in normal mode.
+- Reads, queries, exports, and audits are unaffected. The local artifact + context scratch stores are
+  out of scope (they're DAXter's own working space, not Power BI / Fabric mutations).
+- **Visible to orchestration:** `read_only` now appears in `GET /api/health` and the
+  `daxter_capabilities` envelope, so a Semantix dashboard can tell at a glance which tenant
+  containers are locked. The web **Configure** page shows a read-only banner and disables the
+  Allow-writes / Allow-model-edits toggles (the saved preference is preserved, just overridden).
+
+### Tests
+11 new `ReadOnlyModeTests` (env-var truthy parsing; ConfigState masks Allow-writes/Allow-model-edits
+under read-only). 450/450 pass.
+
 ## [1.43.0] - 2026-06-12
 
 ### Added — `quoteHeader` option on SQL CSV export

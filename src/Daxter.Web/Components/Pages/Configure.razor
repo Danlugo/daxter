@@ -68,8 +68,15 @@
             </p>
         }
     </fieldset>
-    <label class="checkbox"><input type="checkbox" @bind="State.AllowWrites" /> Allow writes (refresh/cache) over MCP</label>
-    <label class="checkbox"><input type="checkbox" @bind="State.AllowModelEdit" /> Allow model edits (measures, parameters, roles, columns, sources, tables) — <strong>irreversible for PBIX download</strong></label>
+    @if (State.ReadOnly)
+    {
+        <div class="card bad">
+            <p class="bad-text"><strong>Read-only mode is ON</strong> (<code>DAXTER_READONLY</code>).</p>
+            <p class="muted">Every mutation is disabled and these toggles are overridden — model edits, schedule changes, cache clear, SQL writes, and gateway/ownership changes are all blocked. <strong>Refreshes still run</strong> (subject to the Production-workspace rules). Unset <code>DAXTER_READONLY</code> to lift the lock.</p>
+        </div>
+    }
+    <label class="checkbox"><input type="checkbox" @bind="State.AllowWrites" disabled="@State.ReadOnly" /> Allow writes (refresh/cache) over MCP</label>
+    <label class="checkbox"><input type="checkbox" @bind="State.AllowModelEdit" disabled="@State.ReadOnly" /> Allow model edits (measures, parameters, roles, columns, sources, tables) — <strong>irreversible for PBIX download</strong></label>
 </div>
 
 <div class="actions">

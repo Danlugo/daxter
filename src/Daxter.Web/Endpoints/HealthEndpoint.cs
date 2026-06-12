@@ -61,6 +61,8 @@ public static class HealthEndpoint
             var repo = Environment.GetEnvironmentVariable("DAXTER_REPO") ?? "Danlugo/daxter";
             body["image"] = $"ghcr.io/{repo.ToLowerInvariant()}:{body["version"]}";
             body["uptime_seconds"] = (int)(DateTime.UtcNow - ProcessStartUtc).TotalSeconds;
+            // v1.44.0 — let a Semantics dashboard see at a glance which tenant containers are locked.
+            body["read_only"] = Daxter.Core.Configuration.ReadOnlyMode.IsEnabled;
 
             // Artifact store fleet info. List + sum is cheap on the typical store; the
             // operations have their own internal bounds so a multi-GB store doesn't

@@ -123,7 +123,7 @@ else if (refTab == RefTab.Schedule)
         }
     }
 }
-else if (!Ui.WritesEnabled)
+else if (!Ui.RefreshEnabled)
 {
     <div class="card bad">
         <p class="bad-text"><strong>Refresh is disabled.</strong></p>
@@ -404,8 +404,8 @@ else
         // History is read-only — load it for any dataset (even prod / writes-off).
         await LoadHistory();
 
-        // Tables are only needed for launching a refresh (writes on, non-prod).
-        if (!Ui.WritesEnabled || Ui.IsReadOnlyTarget(workspace, dataset)) return;
+        // Tables are only needed for launching a refresh (refresh-enabled, non-prod).
+        if (!Ui.RefreshEnabled || Ui.IsReadOnlyTarget(workspace, dataset)) return;
         busy = true; BusyState.Begin(); error = null;
         try { tables = ColumnValues(await Ui.TablesAsync(workspace, dataset), "Table"); }
         catch (Exception ex) { error = ex.Message; }

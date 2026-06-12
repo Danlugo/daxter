@@ -35,8 +35,19 @@ public sealed class ConfigState
     /// becomes read-only. Empty = no allow-list, fall back to the deny-list / legacy heuristics.</summary>
     public string? WriteWorkspaces { get; set; }
 
-    public bool AllowWrites { get; set; }
-    public bool AllowModelEdit { get; set; }
+    private bool _allowWrites;
+    private bool _allowModelEdit;
+
+    /// <summary>Allow general (non-refresh) writes. Forced to <c>false</c> by the master read-only
+    /// switch (<c>DAXTER_READONLY</c>) regardless of the saved toggle — see <see cref="ReadOnlyMode"/>.
+    /// (Refresh has its own carve-out: <see cref="DaxterUi.RefreshEnabled"/>.)</summary>
+    public bool AllowWrites { get => !ReadOnlyMode.IsEnabled && _allowWrites; set => _allowWrites = value; }
+
+    /// <summary>Allow model edits. Forced to <c>false</c> by the master read-only switch.</summary>
+    public bool AllowModelEdit { get => !ReadOnlyMode.IsEnabled && _allowModelEdit; set => _allowModelEdit = value; }
+
+    /// <summary>True when the master read-only switch is active (<c>DAXTER_READONLY</c>).</summary>
+    public bool ReadOnly => ReadOnlyMode.IsEnabled;
 
     public bool Persisted { get; private set; }
 
@@ -85,8 +96,10 @@ public sealed class ConfigState
     /// <summary>Persists the current values to the mounted volume (the single source the CLI/MCP also read).</summary>
     public string Save()
     {
+        // Persist the RAW saved toggles (backing fields), not the read-only-masked view, so a
+        // read-only instance doesn't silently wipe the operator's saved Allow-writes preference.
         new PersistedSettings(AuthMode, TenantId, ClientId, ClientSecret, Workspace, Dataset,
-            ProdWorkspaces, AllowWrites, AllowModelEdit,
+            ProdWorkspaces, _allowWrites, _allowModelEdit,
             ReadOnlyWorkspaces, WriteWorkspaces).Save();
         Persisted = true;
         return ConfigPath;

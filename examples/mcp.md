@@ -144,6 +144,16 @@ The discover → inspect → run → poll loop:
 `daxter_copy_jobs` → `daxter_copy_job_definition` → `daxter_run_copy_job (execute=true)` →
 poll `daxter_item_job_status` until status is terminal.
 
+## Master read-only switch (`DAXTER_READONLY`)
+
+Set `DAXTER_READONLY=true` on the container to lock the whole instance: it overrides the
+Allow-writes / Allow-model-edits gates (can't be turned off from inside) and refuses every
+structural mutation — model edits, `daxter_set_refresh_schedule`, `daxter_clear_cache`, SQL writes,
+gateway binds, takeover — with a clear "read-only mode" message. **Refresh is the exception**:
+`daxter_refresh` / `daxter_resume_refresh` / apply-policy still run (so the instance keeps data
+current) and still honour the Production-workspace rules below. `read_only: true` shows up in
+`daxter_capabilities` and `GET /api/health`. Ideal for a per-client Semantix container.
+
 ## Workspace writes-gate (read-only / write-allowed patterns)
 
 DAXter's MCP refuses writes against workspaces in your **read-only list** (deny-list) or

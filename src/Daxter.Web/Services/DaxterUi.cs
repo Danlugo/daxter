@@ -42,8 +42,14 @@ public sealed class DaxterUi
     /// <summary>The console's current effective config (editable via the Configure page).</summary>
     public DaxterConfig Config(bool requireWorkspace = false) => _state.ToConfig();
 
-    /// <summary>True when refreshes/writes are enabled (Configure → Allow writes).</summary>
+    /// <summary>True when general (non-refresh) writes are enabled (Configure → Allow writes).
+    /// Forced off by read-only mode (<c>DAXTER_READONLY</c>) via <see cref="ConfigState"/>.</summary>
     public bool WritesEnabled => _state.AllowWrites;
+
+    /// <summary>True when REFRESHES are permitted. The read-only exception: a read-only instance can
+    /// still refresh (<c>DAXTER_READONLY</c> ⇒ true), otherwise it follows the Allow-writes toggle.
+    /// The per-workspace Production guardrail (<see cref="IsReadOnlyTarget"/>) is applied on top.</summary>
+    public bool RefreshEnabled => _state.ReadOnly || _state.AllowWrites;
 
     /// <summary>True when model editing is enabled (Configure → Allow model edits) — a stricter,
     /// separate gate than refresh writes (XMLA edits are irreversible for PBIX download).</summary>

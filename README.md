@@ -145,6 +145,13 @@ stricter gate** — `DAXTER_MCP_ALLOW_MODEL_EDIT=true` or the web console *Allow
 a `.bim` backup before applying (XMLA edits are irreversible for PBIX download). Prompts per tool →
 [`examples/mcp.md`](examples/mcp.md).
 
+**Master read-only switch.** Set **`DAXTER_READONLY=true`** to lock an entire instance: it overrides
+the gates above (can't be re-enabled from inside the container) and blocks every structural mutation —
+model edits, schedule changes, cache clear, SQL writes, gateway binds, takeover — across CLI, MCP, and
+Web. **Refresh is the deliberate exception** (so a locked instance keeps data current), and refreshes
+still respect the Production / read-only-workspace rules. `read_only` is reported by `GET /api/health`
+and `daxter_capabilities`.
+
 ## Authentication
 
 - **Device code (default, interactive)** — sign in as yourself; the token caches in the

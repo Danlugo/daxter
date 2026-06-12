@@ -325,7 +325,7 @@ internal static class DaxterToolRuntime
                 return $"DRY RUN — not queued. Would queue: {plan}. Set execute=true (with writes enabled) to queue it.";
             }
 
-            if (!WritesAllowed())
+            if (!RefreshAllowed())   // refresh is the read-only exception; prod-block still applies below
             {
                 return "REFUSED — writes are disabled. Enable them in the web console " +
                        "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
@@ -435,7 +435,7 @@ internal static class DaxterToolRuntime
 
             if (!execute)
                 return $"DRY RUN — not queued. Would queue: {plan}. Set execute=true (with writes enabled) to queue it.";
-            if (!WritesAllowed())
+            if (!RefreshAllowed())   // apply-refresh-policy is a refresh; read-only exception, prod-block below
                 return "REFUSED — writes are disabled. Enable them in the web console (Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.";
             if (LooksLikeProd(config) && ProdWritesBlocked(config))
                 return $"REFUSED — '{config.Workspace}' is READ-ONLY ({config.ReadOnlyReason() ?? "prod-block guardrail active"}).";
@@ -462,7 +462,7 @@ internal static class DaxterToolRuntime
 
             if (!execute)
                 return Task.FromResult($"DRY RUN — not queued. Would {what}: {plan}. Set execute=true (with writes enabled) to queue it.");
-            if (!WritesAllowed())
+            if (!RefreshAllowed())   // resume re-runs a refresh; read-only exception
                 return Task.FromResult("REFUSED — writes are disabled. Enable them in the web console " +
                     "(Configure → Allow writes) or set DAXTER_MCP_ALLOW_WRITES=true, then retry.");
 
@@ -669,6 +669,8 @@ internal static class DaxterToolRuntime
         var envelope = new Dictionary<string, object?>();
         TenantInfo.MergeInto(envelope);
         envelope["version"] = version;
+        // v1.44.0 — read-only master switch; agents can see the instance is locked (refresh still allowed).
+        envelope["read_only"] = ReadOnlyMode.IsEnabled;
         envelope["tool_count"] = tools.Count;
         envelope["tools"] = tools;
         // Phase 4 additions: discoverable shared knowledge. Agents that read this on session
@@ -691,18 +693,33 @@ internal static class DaxterToolRuntime
         _ => throw new DaxterException($"Unknown order '{value}'. Use newest-first or oldest-first."),
     };
 
-    /// <summary>Writes are enabled by the server env var OR the web console's saved "Allow writes" toggle
-    /// (the shared <c>~/.daxter/console-config.json</c>, read via <see cref="PersistedSettings"/>).</summary>
-    internal static bool WritesAllowed()
+    /// <summary>The base "Allow writes" toggle — server env var OR the web console's saved toggle
+    /// (the shared <c>~/.daxter/console-config.json</c>, read via <see cref="PersistedSettings"/>).
+    /// This is the raw toggle BEFORE the read-only master switch is applied.</summary>
+    private static bool WritesToggleOn()
         => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_WRITES"), "true", StringComparison.OrdinalIgnoreCase)
            || PersistedSettings.Load().AllowWrites;
 
+    /// <summary>General (non-refresh) mutations — cache clear, schedule changes, SQL writes,
+    /// gateway/ownership changes. Requires the writes toggle AND is hard-blocked by read-only mode
+    /// (<c>DAXTER_READONLY</c>), which overrides the toggle.</summary>
+    internal static bool WritesAllowed()
+        => !ReadOnlyMode.IsEnabled && WritesToggleOn();
+
+    /// <summary>The refresh EXCEPTION to read-only mode: refreshes (model / table / partition, trigger,
+    /// resume, apply-policy) are permitted when the writes toggle is on OR when read-only mode is active
+    /// — a read-only instance can still keep data current. The Production / read-only-workspace guardrail
+    /// is applied separately at each refresh call site and still blocks prod targets.</summary>
+    internal static bool RefreshAllowed()
+        => ReadOnlyMode.IsEnabled || WritesToggleOn();
+
     /// <summary>Model editing is enabled by <c>DAXTER_MCP_ALLOW_MODEL_EDIT=true</c> OR the web console's
     /// "Allow model edits" toggle — a separate, stricter gate than refresh writes (edits are irreversible
-    /// for PBIX download).</summary>
+    /// for PBIX download). Hard-blocked by read-only mode.</summary>
     internal static bool ModelEditAllowed()
-        => string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase)
-           || PersistedSettings.Load().AllowModelEdit;
+        => !ReadOnlyMode.IsEnabled
+           && (string.Equals(Environment.GetEnvironmentVariable("DAXTER_MCP_ALLOW_MODEL_EDIT"), "true", StringComparison.OrdinalIgnoreCase)
+               || PersistedSettings.Load().AllowModelEdit);
 
     /// <summary>True when the read-only/prod-block guardrail is active for the MCP server. The
     /// gate fires automatically when the user has configured EXPLICIT read-only or write-allowed

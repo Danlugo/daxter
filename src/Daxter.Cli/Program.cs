@@ -435,6 +435,7 @@ internal static class Program
     {
         try
         {
+            if (BlockedByReadOnly()) return 1;   // model edits are blocked in read-only mode
             var config = configFactory();
             RequireDataset(config);
             var token = await BuildTokenProvider(config).GetTokenAsync(ct);
@@ -1146,6 +1147,7 @@ internal static class Program
     {
         try
         {
+            if (BlockedByReadOnly()) return 1;   // takeover / gateway+connection binds blocked in read-only mode
             var config = configFactory();
             if (!yes)
             {
@@ -1556,6 +1558,8 @@ internal static class Program
     {
         try
         {
+            // Read-only mode forces SQL to read-only: a non-SELECT then fails the SqlWriteGate below.
+            if (ReadOnlyMode.IsEnabled) allowWrites = false;
             var config = configFactory();
             var sql = sqlFactory();
             var msal = BuildMsalProvider(config);
@@ -1830,6 +1834,7 @@ internal static class Program
     {
         try
         {
+            if (BlockedByReadOnly()) return 1;   // cache clear / raw TMSL are blocked in read-only mode
             var config = configFactory();
             RequireDataset(config);
             var factory = BuildSessionFactory(config);
@@ -2122,6 +2127,7 @@ internal static class Program
     {
         try
         {
+            if (BlockedByReadOnly()) return 1;   // schedule SET is a config change — blocked in read-only mode
             if (enable && disable)
             {
                 throw new DaxterException("Pass either --enable or --disable, not both.");
@@ -2153,6 +2159,16 @@ internal static class Program
         => string.IsNullOrWhiteSpace(csv)
             ? null
             : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>Master read-only guard for CLI mutations (<c>DAXTER_READONLY</c>). Refresh paths are
+    /// the deliberate exception and do NOT call this (they rely on <see cref="ApplySafety"/>'s prod
+    /// check). Prints the refusal and signals the caller to exit non-zero.</summary>
+    private static bool BlockedByReadOnly()
+    {
+        if (!ReadOnlyMode.IsEnabled) return false;
+        Console.Error.WriteLine("daxter: " + ReadOnlyMode.Message);
+        return true;
+    }
 
     private static int ApplySafety(
         DaxterConfig config, string command, bool dryRun, bool yes, bool force,
