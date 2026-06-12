@@ -96,7 +96,10 @@ Once the check passes, the image is **public on GHCR**, so you can pull it direc
 docker pull ghcr.io/danlugo/daxter:latest
 ```
 
-You can even skip this: the MCP server's `docker run` (step 2) auto-pulls the image on first use.
+You can skip this on a **fresh** machine: the MCP server's `docker run` (step 2) pulls the image on
+first use. But **to UPDATE later you must re-run `docker pull …:latest`** — `docker run` reuses the
+cached `:latest` and won't fetch a newer one on its own — then fully restart Claude Desktop so the
+MCP server respawns on it (see Troubleshooting → "A newer tool / version is missing").
 Building from source is optional (`git clone … && make image`).
 
 ## 2. Configure Claude Desktop
@@ -277,6 +280,7 @@ target environments by naming the workspace per request (the name encodes the en
 | `The authority ... must be in a well-formed URI format` | A tenant id was set to a placeholder/malformed value. Fix it in the web console **⚙ Configure → tenant** (a real GUID, no `<>`/quotes/spaces) and **Save**, then fully restart Claude Desktop. |
 | Claude: **"Could not load app settings… not valid JSON"** | The config file has a **UTF-8 BOM** (older Windows PowerShell's `Set-Content -Encoding UTF8` adds one). Rewrite it BOM-free, then fully restart: `$p="$env:APPDATA\Claude\claude_desktop_config.json"; [System.IO.File]::WriteAllText($p,[System.IO.File]::ReadAllText($p),(New-Object System.Text.UTF8Encoding $false))` — keeps your `daxter` entry. (Step 2's merge writes BOM-free.) |
 | Tools don't appear | Docker running? Did you fully **quit & reopen** Desktop? Check Settings → Developer / MCP logs (the server's stderr). |
+| **A newer tool / version is missing** (e.g. `daxter_capabilities` reports an old version, or a tool you expect isn't listed) | Your local image is **stale**. The MCP launches `…/daxter:latest` and `docker run` reuses the **cached** `:latest` without re-pulling, and a **running** MCP server keeps its image until you reconnect. Fix: **1)** `docker pull ghcr.io/danlugo/daxter:latest` **2)** fully **quit + reopen Claude Desktop** (⌘Q) so the MCP server respawns on the new image. Lingering ones: `docker rm -f $(docker ps -q --filter name=daxter-mcp)`. Verify with **"What version is DAXter on?"** (`daxter_version`). The **CLI** is current right after the pull: `docker run --rm -v daxter-tokens:/home/daxter/.daxter ghcr.io/danlugo/daxter:latest version`. |
 | **Extension** installed but tools missing | Restart Claude Desktop **once** to refresh the extension registry; confirm Docker Desktop is running (the extension launches the container on demand). |
 | Double-clicking **`daxter.mcpb`** does nothing (often the **Microsoft Store** build of Claude) | The Store/Appx install frequently doesn't register the `.mcpb` file association, so double-click is dead. **Don't rely on it** — install from inside the app: **Settings → Extensions → Advanced settings → Install Extension…** → pick the file (the in-app picker needs no association). *(macOS double-click works; Windows: use the Settings flow.)* |
 | Identifying the **MCP container** in `docker ps` | While Claude Desktop is connected, the MCP server runs as a container named **`daxter-mcp-<epoch>-<pid>`** — one per connected client, started over **stdio** (`docker run -i --rm … --name daxter-mcp-… mcp`) with **no published port**. It appears while connected and **self-removes when you quit/disconnect** the client, so an empty `docker ps` just means nothing is connected right now — not a failure. Confirm it loaded by running **"List my workspaces"** in the Claude Desktop chat. (CLI runs show as `daxter-cli-…`; the web console is `daxter-web`.) |
